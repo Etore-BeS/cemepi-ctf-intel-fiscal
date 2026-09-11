@@ -41,3 +41,6 @@ projects/litigancia/manuscript/*.out
 
 # Generated / heavy research artifacts (never publish)
 **/artifacts/
+
+# Internal CTF work plans (not for public tree)
+docs/planos/

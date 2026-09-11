@@ -1,23 +1,18 @@
-# Garantias e risco protelatório (Plano D)
+# Garantias em execução fiscal
 
-Thin research front for CTF Plano D. Shared mono env / kernel (`ctf-research`).
+Pergunta de pesquisa: o dump Inteligência Fiscal **não** traz tabela de garantia; esta frente documenta a lacuna e explora proxies de cobrança (parcelamento/protesto) sem inventar um “score de tipo de garantia”.
+
+## Escopo
+- Confirmar ausência de dataset `garantia` na API/meta
+- Proxies honestos a partir de parcelamento/protesto quando fizer sentido
+- Não publicar modelo de scoring de garantia sem a feature real
 
 ## Layout
-
-```
-projects/garantias/
-├── notebooks/     ← dump samples (01_gap_garantia, 02_proxy_cobranca)
-├── docs/          ← copy of docs/planos/D_garantias.md
-├── references/
-└── output/
+```text
+notebooks/   # gap + proxy samples
+docs/
+references/
 ```
 
-## Plano
-
-Canonical plan: [`docs/planos/D_garantias.md`](../../docs/planos/D_garantias.md) (copy in `docs/`).
-
-## Open notebooks
-
-1. From mono root: `uv run jupyter lab` (or VS Code / Cursor).
-2. Kernel **`ctf-research`**.
-3. No garantia table in dump — samples use cobrança proxies only.
+## Descrição detalhada
+[docs/D_garantias.md](docs/D_garantias.md)

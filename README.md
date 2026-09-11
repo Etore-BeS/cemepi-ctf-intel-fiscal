@@ -6,7 +6,6 @@ Historical archive (do **not** write): `habitual-tax-debtor-research`.
 ## Mission & map
 - Mission: [`docs/mission.md`](docs/mission.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Spec: [`docs/superpowers/specs/2026-09-10-monorepo-mece-design.md`](docs/superpowers/specs/2026-09-10-monorepo-mece-design.md)
 - Agent rules: [`AGENTS.md`](AGENTS.md) · Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) · Glossary: [`CONTEXT.md`](CONTEXT.md)
 - Grounded refs (SoT): [`docs/references/referencias_grounded.md`](docs/references/referencias_grounded.md)
 
@@ -27,7 +26,7 @@ projects/
   garantias/                # front D
 docs/                       # portfolio only
   mission.md, architecture.md
-  api-dump/, planos/, references/
+  api-dump/, references/
 ```
 
 | Path | Role |
@@ -38,7 +37,6 @@ docs/                       # portfolio only
 | `projects/macro` | Front C |
 | `projects/garantias` | Front D |
 | `docs/api-dump` | Dump premise |
-| `docs/planos` | CTF Drive plans A–D |
 | `docs/references` | Cross-front grounded refs (SoT) |
 
 ## Data
@@ -57,3 +55,10 @@ Static PNGs (Plotly + Kaleido) are under `projects/*/output/figures/` and listed
 - [Litigância gallery](projects/litigancia/docs/figures_gallery.md)
 
 Open the notebooks for interactive Plotly; GitHub renders the PNG galleries above.
+
+## Research fronts
+
+- [Litigância](projects/litigancia/README.md)
+- [Monitoramento](projects/monitoramento/README.md)
+- [Macro](projects/macro/README.md)
+- [Garantias](projects/garantias/README.md)
