@@ -35,15 +35,9 @@ pipelines/litigancia/scripts/data/recollect_round2_icms.log
 *.local.ipynb
 .superpowers/
 
-# Large article artifacts (exceed GitHub 100MB / not needed for public browse)
-projects/litigancia/notebooks/articles/**/artifacts/**/*.csv
-projects/litigancia/notebooks/articles/**/artifacts/**/*.xlsx
-projects/litigancia/notebooks/articles/**/artifacts/**/*.zip
-projects/litigancia/notebooks/articles/**/artifacts/**/cache/
-projects/litigancia/notebooks/articles/**/artifacts/**/archive_pre_v2/
 projects/litigancia/manuscript/*.aux
 projects/litigancia/manuscript/*.log
 projects/litigancia/manuscript/*.out
-# keep small summaries tracked
-!projects/litigancia/notebooks/articles/**/artifacts/**/*summary*.csv
-!projects/litigancia/notebooks/articles/**/artifacts/**/*summary*.json
+
+# Generated / heavy research artifacts (never publish)
+**/artifacts/
