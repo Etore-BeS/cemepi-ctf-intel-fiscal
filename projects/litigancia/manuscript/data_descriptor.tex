@@ -1,0 +1,205 @@
+% Data Descriptor — Scientific Data (Nature)
+% Submission requirement: this file must compile standalone (no .bib/.sty dependencies).
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{TJSP fiscal execution dataset: large-scale court decisions and financial metadata for fiscal execution research in São Paulo, Brazil}
+
+\author{%
+  Etore Braga\\
+  \textit{Affiliation TBD}\\
+  \texttt{email@example.com}
+}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a curated dataset of fiscal execution proceedings (\emph{execu\c{c}\~oes fiscais}) from the S\~ao Paulo State Court of Justice (TJSP). The dataset comprises approximately 6.1~million court decisions across 5.8~million unique processes, covering municipalities across the state of S\~ao Paulo from 2017 to 2025, with FACE enrichment for approximately 1.5~million processes including corrected debt values, sentence types, and case duration. Data were collected via automated scraping of the TJSP public portal and the FACE system, transformed through a bronze/silver Delta Lake pipeline, and validated for completeness, deduplication, and cross-table consistency. The dataset supports jurimetrics and empirical legal studies on tax debt enforcement, judicial efficiency, and fiscal litigation patterns in Brazil.
+\end{abstract}
+
+\section*{Background \& Summary}
+
+Structured court data at scale remain scarce in Brazil, limiting reproducible jurimetrics research on tax debt enforcement and judicial performance. Existing TJSP resources are often fragmented, difficult to reproduce, or lack financial and party-level enrichment from operational court systems.
+
+We release a longitudinal dataset of fiscal execution decisions from TJSP, enriched with financial and sentence metadata from the FACE/TJSP system. The core table contains one row per court decision (\emph{decis\~ao}); a companion table adds corrected debt values, sentence types, case duration, and party information where available. Together, these tables enable research on enforcement patterns, judicial delay, geographic variation across \emph{comarcas}, and habitual tax debtors.
+
+At the time of writing, the dataset includes approximately 6.1~million decisions, 5.8~million unique processes, and 1.5~million FACE-enriched records. All rows correspond to the process class \emph{Execu\c{c}\~ao Fiscal}. Geographic coverage spans all \emph{comarcas} in the state of S\~ao Paulo. Publication dates of decisions range from 2017 to 2025; FACE distribution dates extend from 2000 onward for enriched records.
+
+Figure~\ref{fig:pipeline} summarises the collection and transformation workflow. Descriptive statistics and temporal coverage figures are generated reproducibly from \texttt{notebooks/data\_paper/01\_dataset\_overview.ipynb}.
+
+\begin{figure}[htbp]
+  \centering
+  \IfFileExists{../../notebooks/data_paper/figures/fig_pipeline_flow.png}{%
+    \includegraphics[width=0.95\textwidth]{../../notebooks/data_paper/figures/fig_pipeline_flow.png}%
+  }{%
+    \fbox{\parbox{0.9\textwidth}{\centering\small
+      Figure not yet generated. Run \texttt{notebooks/data\_paper/03\_pipeline\_figures.ipynb}.}}%
+  }
+  \caption{Data collection and transformation pipeline. The processos track ingests juscraper recoleta outputs into bronze and silver Delta tables; the FACE track enriches processes with financial and sentence metadata. Tables are linked by \texttt{cd\_processo}.}
+  \label{fig:pipeline}
+\end{figure}
+
+\section*{Methods}
+
+\subsection*{Data sources}
+
+Decision metadata and full decision text were collected from the TJSP public consultation portal using \emph{juscraper}, a Playwright-based scraper configured for fiscal execution proceedings. Raw collector outputs are stored as monthly JSON files (\texttt{process\_grouped\_all\_assuntos.json}) with sibling SQLite exports (\texttt{process\_grouped\_all\_assuntos.db}) under \texttt{COLLECT\_ROOT}.
+
+Financial values, sentence classifications, parties, and movement events were collected from the FACE/TJSP system using a dedicated scraper (\texttt{face\_tjsp.py}). Optional alternate collectors for Comunica JSON formats are included in the repository but are not part of the primary deposited tables.
+
+\subsection*{Transformation pipeline}
+
+Raw files are registered in a bronze Delta table (\texttt{coletas\_delta}) storing file path, content hash, and ingestion timestamp. Silver tables are built incrementally:
+
+\begin{itemize}
+  \item \textbf{processos\_delta}: staged from sibling SQLite when available (else streaming JSON via \emph{ijson}), deduplicated on \((\texttt{id\_processo}, \texttt{decisao})\) using DuckDB, and published with delete-and-append semantics keyed by \texttt{source\_bronze\_path}.
+  \item \textbf{face\_processos\_clean\_delta}: bronze FACE records cleaned, deduplicated, and enriched with derived fields (e.g.\ corrected debt values, case duration in months).
+  \item \textbf{movimentacoes\_delta}: movement events parsed from FACE raw JSON into a structured event table.
+\end{itemize}
+
+All analytical tables use Delta Lake on Parquet. The pipeline is orchestrated by scripts in \texttt{scripts/} and documented operationally in \texttt{docs/PROJECT\_SOURCE\_OF\_TRUTH.md}.
+
+\subsection*{Software}
+
+Collection and transformation code requires Python~$\geq$3.13. Core dependencies include Delta Lake, DuckDB, Polars, PyArrow, and Playwright (for juscraper). The repository uses \emph{uv} for dependency management.
+
+\section*{Data Records}
+
+Three silver-layer tables constitute the primary analytical deposit. A field-level codebook is provided in \texttt{docs/data\_dictionary.md}; per-table schemas are in \texttt{docs/schema/}.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Primary deposited tables.}
+  \label{tab:tables}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Table & Rows (approx.) & Description \\
+    \midrule
+    \texttt{processos\_delta} & 6.1M & One row per court decision \\
+    \texttt{face\_processos\_clean\_delta} & 1.5M & FACE enrichment (values, sentences, parties) \\
+    \texttt{movimentacoes\_delta} & TBD & Case movement events \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection*{processos\_delta}
+
+One row per decision event. Key fields: \texttt{cd\_processo} (official court identifier), \texttt{id\_processo} (internal deduplication key), \texttt{classe}, \texttt{assunto}, \texttt{comarca}, \texttt{foro}, \texttt{vara}, \texttt{magistrado}, \texttt{data\_disponibilizacao} (stored as \texttt{DD/MM/YYYY} text), \texttt{decisao} (full text), and \texttt{source\_bronze\_path}.
+
+Top subjects by decision count include IPTU (2.1M), D\'ivida Ativa (1.7M), ISS (352k), and ICMS (203k). All rows have class \emph{Execu\c{c}\~ao Fiscal}.
+
+\subsection*{face\_processos\_clean\_delta}
+
+One row per process with FACE enrichment. Key fields: \texttt{cd\_processo}, \texttt{distribuicao\_data}, \texttt{valor\_original}, \texttt{valor\_corrigido\_atual}, \texttt{tempo\_tramitacao\_meses}, \texttt{tipo\_senten\c{c}a}, \texttt{partes}, and \texttt{movimentacoes\_raw}. Heavy JSON columns (\texttt{partes}, \texttt{movimentacoes\_raw}) should be selected explicitly when needed.
+
+\subsection*{movimentacoes\_delta}
+
+One row per movement event per process: \texttt{cd\_processo}, \texttt{data\_movimentacao}, \texttt{descricao}.
+
+\subsection*{Join key}
+
+Cross-table joins must use \texttt{cd\_processo}. The internal field \texttt{id\_processo} is valid only within \texttt{processos\_delta}.
+
+\subsection*{Deposit locations}
+
+\begin{itemize}
+  \item HuggingFace (primary host): \url{TBD}
+  \item Zenodo DOI (persistent identifier): \url{TBD}
+  \item Source code: \url{https://github.com/Etore-BeS/habitual-tax-debtor-research}
+\end{itemize}
+
+\section*{Technical Validation}
+
+Validation checks are implemented in \texttt{notebooks/data\_paper/02\_quality\_validation.ipynb} and exported as CSV tables under \texttt{notebooks/data\_paper/figures/}.
+
+\begin{enumerate}
+  \item \textbf{Completeness}: null rates for all key columns in \texttt{processos\_delta}. Critical identifiers (\texttt{id\_processo}, \texttt{cd\_processo}, \texttt{decisao}) have 0\% nulls; \texttt{magistrado} is null in ${\sim}$0.05\% of rows.
+  \item \textbf{Date parsing}: \texttt{data\_disponibilizacao} parsed as \texttt{DD/MM/YYYY}; unparseable dates are counted and reported.
+  \item \textbf{Deduplication}: duplicate keys on \((\texttt{id\_processo}, \texttt{decisao})\) are counted after per-source deduplication.
+  \item \textbf{Cross-table coverage}: unique \texttt{cd\_processo} counts and overlap between \texttt{processos\_delta} and \texttt{face\_processos\_clean\_delta}.
+  \item \textbf{FACE sanity}: counts of negative \texttt{valor\_corrigido\_atual}, negative \texttt{tempo\_tramitacao\_meses}, and values above R\$~1~billion.
+  \item \textbf{Layer consistency}: row counts for bronze and silver tables.
+\end{enumerate}
+
+Known limitations: \texttt{data\_disponibilizacao} is stored as text; \texttt{tipo\_ato} contains formatting noise from the source system; FACE coverage is a subset of all processos; scraping is ongoing and each release is a point-in-time snapshot.
+
+\section*{Usage Notes}
+
+Load tables with Polars and Delta Lake:
+
+\begin{verbatim}
+import polars as pl
+from config.paths import SILVER_PROCESSOS, SILVER_FACE_CLEAN
+
+processos = pl.scan_delta(str(SILVER_PROCESSOS))
+face = pl.scan_delta(str(SILVER_FACE_CLEAN))
+
+joined = processos.join(
+    face.select(["cd_processo", "valor_corrigido_atual", "tipo_sentença"]),
+    on="cd_processo",
+    how="left",
+)
+\end{verbatim}
+
+Recommended preprocessing:
+\begin{itemize}
+  \item Parse dates: \texttt{.str.to\_date("\%d/\%m/\%Y")} on \texttt{data\_disponibilizacao}.
+  \item Financial analysis: filter \texttt{valor\_corrigido\_atual > 0} and \texttt{<= 1\_000\_000\_000}.
+  \item FACE temporal filter: \texttt{distribuicao\_data.dt.year() >= 2000}.
+\end{itemize}
+
+Manuscript figures and validation tables are reproduced by executing the notebooks in \texttt{notebooks/data\_paper/}.
+
+\section*{Data Availability}
+
+The dataset generated and analysed during this study is available in the HuggingFace repository [TBD] and archived with DOI [TBD] on Zenodo. Source code for collection and transformation is available at \url{https://github.com/Etore-BeS/habitual-tax-debtor-research} under the MIT license. Data are licensed under CC BY 4.0.
+
+\section*{Code Availability}
+
+All code used to collect, transform, and validate the dataset is available at \url{https://github.com/Etore-BeS/habitual-tax-debtor-research} (release v0.1.0).
+
+\section*{Author Contributions}
+
+E.B.\ conceived the study, designed the pipeline, collected the data, and wrote the manuscript.
+
+\section*{Competing Interests}
+
+The authors declare no competing interests.
+
+\section*{Acknowledgements}
+
+TBD.
+
+\section*{Funding}
+
+TBD.
+
+% References must be embedded in the .tex file for Scientific Data submission (no external .bib).
+\begin{thebibliography}{99}
+
+\bibitem{matthews2025}
+Matthews, A.~A.\ \& Rantanen, J.~R.
+Legal research as a collective enterprise: an examination of data availability in empirical legal scholarship.
+\emph{Journal of Law, Economics, and Organization} \textbf{41}, 570--603 (2025).
+\url{https://doi.org/10.1093/jleo/ewae045}
+
+\bibitem{repo}
+Braga, E.
+Habitual tax debtor research: TJSP fiscal execution data lake.
+GitHub repository (2026).
+\url{https://github.com/Etore-BeS/habitual-tax-debtor-research}
+
+\end{thebibliography}
+
+\end{document}

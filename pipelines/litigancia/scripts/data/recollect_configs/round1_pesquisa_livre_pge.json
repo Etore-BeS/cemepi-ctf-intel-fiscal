@@ -1,0 +1,18 @@
+{
+    "id": "round1_pesquisa_livre_pge",
+    "execution": 1,
+    "mode": "pesquisa_livre",
+    "description": "Recoleta por parte/agente (Fazenda Pública SP) via pesquisa livre",
+    "folder_prefix": "coleta_fazenda",
+    "tribunal": "tjsp",
+    "classes": ["Execução Fiscal"],
+    "pesquisa_terms": ["\"Fazenda Publica do Estado de Sao Paulo\""],
+    "campaign_subdir": "pge",
+    "date_span": null,
+    "ranges_file": "recollect_dates.json",
+    "threshold": 25000,
+    "max_workers": 12,
+    "max_retries": 5,
+    "state_file": "recollect_state.json",
+    "log_file": "recollect_process.log"
+}

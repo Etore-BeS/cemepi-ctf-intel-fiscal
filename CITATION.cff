@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: "cemepi-ctf-intel-fiscal"
+message: "If you use this research software or documentation, please cite it as below. Lake/dump datasets are separate artifacts — cite them only when you actually use those data."
+type: software
+authors:
+- family-names: Braga
+  given-names: Étore
+repository-code: "https://github.com/Etore-BeS/cemepi-ctf-intel-fiscal"
+# URL is a placeholder until the remote is created; update if the GitHub path differs.
+abstract: >
+  Research monorepo for CeMEPI Contencioso Tributário Fiscal (CTF) fronts:
+  litigância (PEF↔FACE join diagnostics), monitoramento (arrecadação/estoque forecast),
+  macro (BCB × painel), and garantias (API gap / cobrança proxies). Includes shared
+  dump client, pipelines for the TJSP lake ops tree, notebooks, and grounded references.
+  Large lake/dump files live outside git (LAKE_ROOT / DUMP_ROOT).
+keywords:
+- jurimetrics
+- fiscal execution
+- tax compliance
+- forecasting
+- TJSP
+- empirical legal studies
+- Brazil
+- CeMEPI
+license: MIT
+version: "0.1.0"
+date-released: "2026-09-11"

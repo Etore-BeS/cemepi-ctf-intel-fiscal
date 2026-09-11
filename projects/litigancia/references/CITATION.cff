@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+title: "TJSP Fiscal Execution Dataset (CEMEPI / Gilson)"
+message: "If you use this dataset, please cite it as below."
+type: dataset
+authors:
+- family-names: Braga
+  given-names: Etore
+repository-code: "https://github.com/Etore-BeS/habitual-tax-debtor-research"
+abstract: >
+  Large-scale dataset of fiscal execution proceedings from the São Paulo State Court of Justice (TJSP), covering ~6.1 million decisions across ~5.8 million unique processes. Includes decision text, case metadata, financial records, and party information scraped from the FACE/TJSP system.
+keywords:
+- jurimetrics
+- fiscal execution
+- court data
+- TJSP
+- empirical legal studies
+- Brazil
+license: CC-BY-4.0
+version: "0.1.0"
+date-released: "2026-06-25"

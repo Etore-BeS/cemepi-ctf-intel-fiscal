@@ -1,0 +1,13 @@
+{
+  "busca": "A",
+  "reviewer": "ia2",
+  "model": "claude-sonnet-5",
+  "done": 990,
+  "total": 990,
+  "cache_hits": 941,
+  "pending": 0,
+  "max_concurrent": 10,
+  "status": "completed",
+  "percent": 100.0,
+  "updated_at": "2026-07-08T10:31:25"
+}

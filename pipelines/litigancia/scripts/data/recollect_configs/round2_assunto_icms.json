@@ -1,0 +1,34 @@
+{
+    "id": "round2_assunto_icms",
+    "execution": 2,
+    "mode": "assunto_tree",
+    "description": "Enriquecimento por assunto jurídico ICMS (árvore SAJ)",
+    "folder_prefix": "coleta_assunto_icms",
+    "tribunal": "tjsp",
+    "classes": ["Execução Fiscal"],
+    "assuntos_juridicos": [
+        "ICMS/ Imposto sobre Circulação de Mercadorias",
+        "Nao Cumulatividade",
+        "ICMS/Importação",
+        "ICMS / Incidência Sobre o Ativo Fixo"
+    ],
+    "assunto_tree_ids_ref": [5946, 7061, 5947, 10531],
+    "pesquisa_terms": [],
+    "date_span": {
+        "start": "01/01/2016",
+        "end": "30/06/2026",
+        "granularity": "month"
+    },
+    "threshold": 500,
+    "max_workers": 30,
+    "max_retries": 5,
+    "state_file": "recollect_state_round2_icms.json",
+    "log_file": "recollect_round2_icms.log",
+    "face": {
+        "enabled": true,
+        "workers": 20,
+        "delay_sec": 0.8,
+        "fetch_batch": 500,
+        "delta_batch": 200
+    }
+}

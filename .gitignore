@@ -1,0 +1,49 @@
+.venv
+.env
+__pycache__/
+*.py[oc]
+.DS_Store
+.ruff_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+wheels/
+*.egg-info
+
+# data: ignore symlink itself (HD target must never enter git) and contents
+/data
+data/*
+!data/.gitkeep
+
+**/output/*
+!**/output/.gitkeep
+# Publish static Plotly/Kaleido figures so GitHub can display them
+!**/output/figures/
+!**/output/figures/**
+logs/
+.tmp/
+.temp/
+pipelines/litigancia/config/oxylabs.json
+pipelines/litigancia/scripts/data/recollect_state.json
+pipelines/litigancia/scripts/data/recollect_state_round2_icms.json
+pipelines/litigancia/scripts/data/recollect_process.log
+pipelines/litigancia/scripts/data/recollect_round2_icms.log
+
+.local/
+*.local.md
+*.local.ipynb
+.superpowers/
+
+# Large article artifacts (exceed GitHub 100MB / not needed for public browse)
+projects/litigancia/notebooks/articles/**/artifacts/**/*.csv
+projects/litigancia/notebooks/articles/**/artifacts/**/*.xlsx
+projects/litigancia/notebooks/articles/**/artifacts/**/*.zip
+projects/litigancia/notebooks/articles/**/artifacts/**/cache/
+projects/litigancia/notebooks/articles/**/artifacts/**/archive_pre_v2/
+projects/litigancia/manuscript/*.aux
+projects/litigancia/manuscript/*.log
+projects/litigancia/manuscript/*.out
+# keep small summaries tracked
+!projects/litigancia/notebooks/articles/**/artifacts/**/*summary*.csv
+!projects/litigancia/notebooks/articles/**/artifacts/**/*summary*.json
