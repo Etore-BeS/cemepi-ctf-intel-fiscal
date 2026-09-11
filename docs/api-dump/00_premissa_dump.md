@@ -20,4 +20,4 @@
 - No BacenJud / corporate network / judgment text
 - Fragile typing (values/dates as strings in places)
 
-Longer Portuguese notes: `docs/planos/00_premissa_dump.md`.
+See also project front docs under `projects/*/docs/`.
