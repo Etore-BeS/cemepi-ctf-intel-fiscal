@@ -44,3 +44,7 @@ projects/litigancia/manuscript/*.out
 
 # Internal CTF work plans (not for public tree)
 docs/planos/
+
+# Internal agent/planning residue (not for public tree)
+docs/superpowers/
+.superpowers/
