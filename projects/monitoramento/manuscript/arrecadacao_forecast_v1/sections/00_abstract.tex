@@ -1,12 +1,21 @@
-Forecasting how much enrolled tax debt will be collected is a monitoring problem with a sticky stock and a seasonal, often sparse, cash series.
-We compare fourteen forecasters under one protocol on four grains from a static administrative extract: a monthly panel of debt stock and collection, a calendar-daily aggregate of payment slips that keeps structural zeros, a Monday--Friday ablation of that daily series, and a weekly sum.
-Stage~1 covers seasonal naive forecasts, linear and kernel regression, SARIMAX, histogram gradient boosting, Prophet, a multilayer perceptron, an adaptive random forest, a Gaussian process, and zero-shot TimesFM~3.0.
-Stage~2 covers selective forecasting with the Time-Energy Model (TEM), a disagreement-proxy ablation that is not TEM, and reduced diffusion and score-based samplers.
-Hyperparameters minimize validation symmetric MAPE (sMAPE).
-The official rank is raw test sMAPE.
-A complementary skill score uses Murphy's form against the seasonal naive of the same grain.
-On the March~2026 extract the leader depends on the grain.
-The disagreement proxy leads the monthly panel (sMAPE $\approx 10.9$).
-TimesFM~3.0 leads the calendar-daily, business-daily, and weekly series.
-Selective TEM remains a candidate monitoring rule when abstention is reported with the point forecast.
-It is not the monthly sMAPE leader in this freeze, and the proxy ablation does not inherit the TEM label.
+We forecast how much cash will be collected on enrolled tax debt (Portuguese: dívida inscrita), meaning tax debt formally registered for collection.
+The data are one static extract from March 2026.
+A grain is the time step of a series.
+We use four grains: a monthly panel of debt stock and collection, calendar-daily totals of GARE payment slips (grain A), the same daily slips restricted to Monday--Friday (grain B), and a weekly sum.
+GARE denotes the payment-slip aggregate in this extract.
+Grain A keeps weekend and empty-slip zeros.
+Grain B drops weekends and keeps Brazilian national holidays.
+We fit fourteen model families.
+Hyperparameters minimize validation sMAPE, the symmetric mean absolute percentage error.
+The official rank is test sMAPE.
+Lower is better.
+A skill score compares each model with the seasonal naive forecast of the same grain.
+It equals one minus the ratio of the two sMAPE values.
+The best model depends on the grain.
+On the monthly panel, the disagreement proxy E2 has the lowest test sMAPE, about 10.9.
+E2 switches between gradient boosting and the seasonal naive.
+It is not the Time-Energy Model (TEM).
+On grains A and B, and on the weekly series, TimesFM 3.0 has the lowest test sMAPE.
+Selective TEM (E1) can abstain.
+Abstention means returning the seasonal naive when the energy of every candidate is above a validation threshold.
+E1 does not have the lowest monthly test sMAPE in this extract.

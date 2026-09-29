@@ -2,29 +2,31 @@
 \label{sec:limitations}
 
 \begin{itemize}
-  \item The extract is a static snapshot (\texttt{extracao=2026-03}).
-        The study does not evaluate a streaming update or a later vintage.
-  \item The monthly panel has $n = 119$ rows, and the monthly test block has 12 points.
-        Grids and high-capacity models can overfit that sample.
-        Daily and weekly fits use shorter epoch budgets and subsample caps for the same reason.
-        Those caps are part of the protocol in Section~\ref{sec:method}, and they limit how close E1, E3, and E4 are to an unrestricted training run.
-  \item Ranking~A includes structural zeros.
-        MAPE drops near-zero outcomes, and sMAPE$_{y \gt 0}$ scores only positive days.
-        Neither replaces official sMAPE.
-  \item Ranking~B drops weekends only.
-        Brazilian national holidays stay in the series, and no model receives a holiday feature.
-        Ranking~B is a separate target with its own split.
-        It is not a re-scoring of the calendar-daily holdout.
-  \item $\mathrm{SS}_{\mathrm{sMAPE}}$ applies Murphy's algebraic form to sMAPE rather than to mean squared error~\citep{murphy1988skill}.
-        The score ranks models only relative to the seasonal naive of the same grain.
-        On business days that naive is weak, so positive skill is a weak claim.
-  \item E1 is selective TEM, including the MLP energy fallback when the TimesNet fit does not complete.
-        E2 is a disagreement proxy.
-        A table that omitted the label would conflate two different decision rules.
-        Coverage of the TEM accept branch is not an official column in the ranked sMAPE tables.
-  \item TimesFM, Prophet, and SARIMAX depend on external code and, for TimesFM, on a downloaded checkpoint.
-        A grain whose fit does not complete is omitted, not filled in with a substituted forecast.
-        Per-grain fit status is stored with the freeze artifacts named in Section~\ref{sec:repro}.
-  \item Test blocks are a single final window per grain, not a rolling origin.
-        Sampling variability of the reported sMAPE is not estimated.
+  \item The extract is the snapshot \texttt{extracao=2026-03}.
+        We do not score a later snapshot or a live update.
+  \item The monthly panel has 119 rows, and the monthly test block has 12 points.
+        A large model can overfit that sample.
+        Daily and weekly runs use shorter training budgets and row caps, stated in Section~\ref{sec:method}.
+        E1, E3, and E4 are therefore not unrestricted training runs.
+  \item Ranking A includes zeros.
+        MAPE drops near-zero outcomes.
+        sMAPE on $y \gt 0$ scores only positive days.
+        Neither of those scores is the official rank.
+  \item Grain B drops weekends only.
+        Brazilian national holidays remain, and no model receives a holiday feature.
+        Grain B has its own split.
+        It is not grain A rescored after dropping weekends.
+  \item The skill score uses Murphy's ratio on sMAPE, not on squared error~\citep{murphy1988skill}.
+        It compares a model only with the seasonal naive of the same grain.
+        On grain B that naive is weak, so a positive skill score is a weak claim.
+  \item E1 is selective TEM, including the perceptron energy model if the TimesNet run does not finish.
+        E2 is the disagreement proxy.
+        The rank tables do not report TEM coverage.
+  \item TimesFM, Prophet, and SARIMAX depend on outside code.
+        TimesFM also depends on downloaded weights.
+        If a fit does not finish, that model is omitted for the grain.
+        It is not replaced by another forecast.
+        The fit status is stored with the files in Section~\ref{sec:repro}.
+  \item Each grain has one final test window.
+        We do not estimate the sampling variability of the reported sMAPE.
 \end{itemize}

@@ -1,28 +1,36 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-One protocol, applied to monthly, calendar-daily, business-daily, and weekly collection series, does not yield one best forecaster.
-The March~2026 extract ranks families differently by grain, and collapsing those ranks would misstate the evidence.
+The lowest test sMAPE depends on the grain.
+Pooling the four ranks into one winner would contradict Table~\ref{tab:top3}.
 
-On the monthly panel the disagreement proxy E2 leads on test sMAPE ($\approx 10.9$).
-Histogram gradient boosting and the lag-12 seasonal naive remain close behind it.
-Selective TEM does not lead that grain.
-E2 is not TEM: the proxy switches on absolute disagreement, and TEM switches on an energy threshold.
+On the monthly panel, E2 has the lowest test sMAPE, about 10.9.
+Boosting (about 13.3) and the lag-12 naive (about 13.5) are close behind.
+E1 does not lead that grain.
+E2 switches on absolute disagreement.
+E1 switches on an energy threshold.
+The two rules are not the same model.
 
-On calendar-daily slips, TimesFM leads (sMAPE $\approx 59.8$).
-Most other families have negative skill against the lag-7 seasonal naive, and weekend and empty-slip zeros dominate the official score.
-The positive-day sMAPE is a description of active days.
-It is not Ranking~A.
+On calendar-daily A, TimesFM has the lowest test sMAPE, about 59.8.
+Most other models have negative skill against the lag-7 naive.
+Zeros from weekends and empty slips are inside that score.
+sMAPE on days with positive collection is a side description.
+It is not Ranking A.
 
-On business days, TimesFM, histogram gradient boosting, and ordinary least squares form the leading cluster.
-Many positive skill scores on this grain reflect a weak lag-5 reference.
-National holidays were not removed and were not supplied as regressors.
+On business-daily B, TimesFM again has the lowest test sMAPE, about 52.4.
+Boosting and least squares follow.
+Many positive skill scores on B are skill against lag 5.
+Lag 5 is a weak reference on this series.
+National holidays were kept, and no model received a holiday indicator.
 
-On the weekly aggregate, TimesFM shows the largest skill against the lag-52 seasonal naive (sMAPE $\approx 17.2$, skill $\approx 0.41$), with ridge and ordinary least squares next.
+On the weekly series, TimesFM has the lowest test sMAPE, about 17.2, and skill about 0.41 against the lag-52 naive.
+Ridge and least squares are next.
 
-For monitoring, the seasonal naive remains the reference forecast on every grain.
-Selective TEM is the specified instrument when a forecast may be withheld, and that use requires coverage beside sMAPE.
-The proxy stays an ablation.
-TimesFM is the zero-shot lead on the fine grains in this freeze, and it is not the monthly lead.
+The seasonal naive remains the reference forecast on each grain.
+E1 is the rule that can abstain by energy.
+Reading E1 requires coverage next to sMAPE, and this extract does not put coverage in the rank tables.
+E2 is the disagreement switch.
+TimesFM has the lowest test sMAPE on A, on B, and on the weekly series.
+It does not have the lowest test sMAPE on the monthly panel.
 
-Subsequent work on the same extract should publish E1 coverage with the point scores, give Ranking~B an explicit holiday calendar, and keep the seasonal naive of each grain as the skill reference so that later freezes remain comparable.
+Later work on the same extract should publish E1 coverage with the sMAPE tables, add a holiday indicator on grain B, and keep each grain's own seasonal naive as the skill reference.

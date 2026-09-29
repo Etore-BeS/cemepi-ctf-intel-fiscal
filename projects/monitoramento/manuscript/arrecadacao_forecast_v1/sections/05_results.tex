@@ -1,23 +1,23 @@
 \section{Results}
 \label{sec:results}
 
-Every number in this section is taken from the frozen ranked tables for \texttt{extracao=2026-03} under
-\texttt{output/articles/arrecadacao\_forecast\_paper\_v1/}.
-The primary score is test sMAPE (lower is better).
-The complementary score is $\mathrm{SS}_{\mathrm{sMAPE}}$ (higher is better).
+Every number below is taken from the saved tables for \texttt{extracao=2026-03}.
+The rank is test sMAPE.
+Lower is better.
+The skill score is higher when the model beats the seasonal naive of that grain.
 
-\subsection{Leaders by grain}
+\subsection{The lowest sMAPE is not the same model on every grain}
 \label{sec:top3}
 
 Table~\ref{tab:top3} lists the three lowest test-sMAPE models on each grain.
-The leader is not shared.
-The disagreement proxy E2 leads the monthly panel.
-TimesFM~3.0 leads calendar-daily, business-daily, and weekly grains.
+E2 has the lowest test sMAPE on the monthly panel.
+TimesFM 3.0 has the lowest test sMAPE on grain A, on grain B, and on the weekly series.
+A single winner across grains is not supported by this table.
 
 \begin{table}[t]
-  \caption{Top three models by test sMAPE on each grain.
-  E2 is the disagreement-proxy ablation.
-  It is not TEM.}
+  \caption{Three lowest test sMAPE values on each grain.
+  E2 is the disagreement proxy.
+  E2 is not TEM.}
   \label{tab:top3}
   \centering
   \small
@@ -27,46 +27,66 @@ TimesFM~3.0 leads calendar-daily, business-daily, and weekly grains.
 \subsection{Monthly panel}
 \label{sec:monthly}
 
-On the monthly panel the proxy E2 reaches sMAPE $\approx 10.9$ and skill $\approx 0.19$.
-Tuned histogram gradient boosting follows at sMAPE $\approx 13.3$ (skill $\approx 0.015$), and the lag-12 seasonal naive follows at sMAPE $\approx 13.5$ (skill zero by~\eqref{eq:ss}).
-Selective TEM (E1) is near sMAPE $\approx 15.5$ with negative skill.
-It is not the best monthly forecaster in this freeze.
-Table~\ref{tab:monthly} extends the list through the eighth monthly rank, including zero-shot TimesFM and the score sampler, both of which sit behind the seasonal naive on sMAPE.
+E2 has the lowest test sMAPE on the monthly panel.
+The value is about 10.9, and the skill score is about 0.19.
+That is lower error than boosting alone and lower error than the lag-12 seasonal naive.
+
+Boosting is second.
+Its test sMAPE is about 13.3, and its skill score is about 0.015.
+The lag-12 seasonal naive is third, at about 13.5.
+Its skill score is zero by~\eqref{eq:ss}.
+
+Selective TEM does not have the lowest monthly test sMAPE.
+E1 is about 15.5, and its skill score is negative.
+On this 12-month test, the energy rule has higher sMAPE than the seasonal naive.
+
+Table~\ref{tab:monthly} continues the list to eight models.
+TimesFM and the score sampler are both worse than the seasonal naive on this grain.
 
 \begin{table}[t]
-  \caption{Monthly grain: eight lowest test sMAPE values in the freeze.}
+  \caption{Monthly grain: eight lowest test sMAPE values.}
   \label{tab:monthly}
   \centering
   \small
   \input{tables/tab_monthly_top8}
 \end{table}
 
-\subsection{Calendar days and business days}
+\subsection{Grain A and grain B}
 \label{sec:ablation}
 
-Ranking~A scores every civil day, including zeros.
-Ranking~B scores Monday--Friday only (Table~\ref{tab:ablation}).
-Absolute sMAPE is lower on B, where weekend zeros are absent, and the order changes.
-The seasonal naive is second on A and is outside the top three on B, where histogram gradient boosting and ordinary least squares rise behind TimesFM.
-TimesFM leads both grains: sMAPE $\approx 59.8$ and skill $\approx 0.20$ on A, and sMAPE $\approx 52.4$ and skill $\approx 0.28$ on B.
+TimesFM has the lowest test sMAPE on calendar-daily A.
+The value is about 59.8, and the skill score is about 0.20.
+The lag-7 seasonal naive is second.
+Most other models have higher sMAPE than that naive, so their skill scores are negative.
+Weekend and empty-slip zeros are in this score.
 
-The complementary score on days with $y \gt 0$ in Ranking~A is not official.
-On those days TimesFM has sMAPE $\approx 29.9$ (skill $\approx 0.58$) and histogram gradient boosting has sMAPE $\approx 34.6$ (skill $\approx 0.51$).
-The gap relative to the all-day scores shows how much of Ranking~A is carried by structural zeros.
-It is not a reason to drop those zeros from the official target.
+TimesFM has the lowest test sMAPE on business-daily B.
+The value is about 52.4, and the skill score is about 0.28.
+Boosting and ordinary least squares are next (Table~\ref{tab:ablation}).
+Dropping weekends lowers the sMAPE level and changes the order.
+The seasonal naive is inside the top three on A and outside the top three on B.
+
+The positive-day score on A is not the official rank.
+On days with $y \gt 0$, TimesFM has sMAPE about 29.9 and skill about 0.58.
+Boosting has sMAPE about 34.6 and skill about 0.51.
+The gap versus the all-day scores shows how much Ranking A is raised by zeros.
+It is not a reason to remove those zeros from the target.
 
 \begin{table}[t]
-  \caption{Ablation of the daily target: top three models on calendar days (A) and on business days (B).}
+  \caption{Three lowest test sMAPE values on grain A and on grain B.}
   \label{tab:ablation}
   \centering
   \small
   \input{tables/tab_ablation_A_vs_B}
 \end{table}
 
-\subsection{Weekly aggregate}
+\subsection{Weekly series}
 \label{sec:weekly}
 
-On the Sunday-close weekly series, TimesFM has sMAPE $\approx 17.2$ and skill $\approx 0.41$ against the lag-52 seasonal naive.
+TimesFM has the lowest test sMAPE on the weekly series.
+The value is about 17.2, and the skill score against the lag-52 naive is about 0.41.
 Ridge and ordinary least squares are next.
-Most other families have negative skill against that seasonal naive in this freeze.
-The weekly test block contains 13 points, so the level of skill is descriptive of this holdout, not a precise estimate of a long-run advantage.
+Most other models have negative skill against that naive.
+The test block has 13 weeks.
+The gap describes this window.
+It is not a standard error for a long-run difference.

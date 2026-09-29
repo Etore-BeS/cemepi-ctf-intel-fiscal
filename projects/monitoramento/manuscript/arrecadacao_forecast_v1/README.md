@@ -38,6 +38,11 @@ E1 is selective TEM.
 E2 is the disagreement-proxy ablation.
 The official rank is raw test sMAPE.
 `SS_sMAPE` is complementary.
+
+Define a term at first use.
+Use GARE, enrolled debt, grain A, grain B, sMAPE, the skill score, TEM, and abstention only after that definition.
+Prefer a short sentence.
+Put the claim first, then the number, then one sentence of interpretation.
 In math, write `\lt` and `\gt` instead of bare inequality signs.
 
 ## Author

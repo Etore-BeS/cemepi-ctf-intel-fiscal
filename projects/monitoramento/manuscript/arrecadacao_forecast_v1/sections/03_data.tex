@@ -1,51 +1,49 @@
 \section{Data}
 \label{sec:data}
 
-The series come from one static administrative extract, labeled \texttt{extracao=2026-03}.
-The extract is a research snapshot of enrolled-debt stock and of collections recorded on state tax payment slips (GARE).
-It is not a live stream.
-If a source file is absent, that grain is skipped.
-We do not impute a series that was not in the extract.
+All series come from one saved extract, \texttt{extracao=2026-03}.
+The extract is not updated during the study.
+If a source file is missing, we skip that grain.
+We do not fill in a series that was not in the extract.
 
-\paragraph{Enrolled debt and collection.}
-Enrolled debt is the stock of tax debts formally registered for collection after the administrative assessment.
-The monthly panel (\texttt{painel\_mensal\_estoque\_arrecadacao}) pairs that stock with realized collection.
-In this freeze the panel has $n = 119$ months and 14 columns.
-The monthly target is total collection, \texttt{valor\_total}.
-Tabular models on this grain use lags 1, 3, and 12 of that collection series and the same lags of the stock field \texttt{valor\_sem\_honorarios}.
-The short length is material: a 12-month test block leaves limited train mass for any high-capacity fit.
+\paragraph{Monthly panel.}
+The monthly file pairs enrolled-debt stock with collection.
+It has $n = 119$ months and 14 columns.
+The target is total collection, \texttt{valor\_total}.
+The stock field used as a covariate is \texttt{valor\_sem\_honorarios}.
+Tabular models on this grain use lags 1, 3, and 12 of collection and the same lags of stock.
+The test block is 12 months.
+That is a short sample for a large model.
 
-\paragraph{Calendar-daily payment slips (Ranking~A).}
-The daily source is \texttt{gare\_diario\_2026-03}, an aggregate of payment slips.
-Each civil day carries the sum of slip values, \texttt{valor\_sum}, and the slip count, \texttt{n\_guias}.
-We reindex the file to a continuous daily calendar and set missing days to zero on both fields.
-The forecast target is \texttt{valor\_sum}.
-Zeros are part of the target.
-They mark weekends and days with no slip, which are ordinary in this collection system.
-Ranking~A scores every calendar day, zeros included.
-A side score on days with positive collection, sMAPE$_{y \gt 0}$, describes active days only.
-It does not replace Ranking~A.
+\paragraph{Grain A: calendar-daily GARE.}
+The daily file is an aggregate of GARE payment slips.
+Each civil day has the sum of slip values, \texttt{valor\_sum}, and the number of slips, \texttt{n\_guias}.
+We place the file on a continuous daily calendar.
+Missing days become zeros in both fields.
+The target is \texttt{valor\_sum}.
+Zeros stay in the target.
+They are weekends and days with no slip.
+Ranking A is test sMAPE on every calendar day, zeros included.
+A side score, sMAPE on days with $y \gt 0$, describes days that had a slip.
+That side score does not replace Ranking A.
 
-\paragraph{Business-day ablation (Ranking~B).}
-Ranking~B restricts the same slip aggregate to Monday--Friday.
-In this freeze that series has $n = 2672$ days.
-Brazilian national holidays remain in the series.
-The ablation aligns the time index with a business-day frequency and does not apply a holiday regressor.
-Ranking~B is a different target, with its own train, validation, and test blocks.
-It is not a filter applied after the fact to the calendar-daily holdout.
+\paragraph{Grain B: business days.}
+Grain B keeps Monday--Friday rows of the same slip aggregate.
+This extract has $n = 2672$ such days.
+Brazilian national holidays stay in the series.
+No model receives a holiday indicator.
+Grain B has its own train, validation, and test blocks.
+It is not the grain A test block with weekends removed after the fact.
 
-\paragraph{Weekly aggregate.}
-We sum daily \texttt{valor\_sum} (and the slip count) by week ending Sunday.
-The seasonal reference lag is 52, one year of weeks.
-Sunday close keeps the week aligned with the civil calendar used in Ranking~A.
-We do not use an ISO week starting Monday.
+\paragraph{Weekly grain.}
+We sum daily \texttt{valor\_sum} and \texttt{n\_guias} by week ending Sunday.
+The seasonal naive on this grain copies the value 52 weeks earlier.
+We do not use weeks that start on Monday.
 
-\paragraph{Covariates by grain.}
-All four grains use the same extract and the same metric code.
-They differ in sampling frequency, in the seasonal lag of the reference forecast, and in the tabular covariate set.
-Monthly tabular models use the lags named above.
-Calendar-daily tabular models use lags 1, 7, 14, and 28 of \texttt{valor\_sum} and of \texttt{n\_guias}, plus day-of-week and month.
-Business-day tabular models use lags 1, 5, 10, and 20 in business-day steps of the same two series, plus day-of-week and month.
-Weekly tabular models use lags 1, 4, 13, and 52 of the weekly sum and of the weekly slip count, plus week-of-year and month.
-The seasonal naive, SARIMAX, Prophet, the perceptron, TimesFM, and the generative samplers see the target history (Prophet also sees the time index that carries its seasonal terms).
-Gaussian processes and kernel ridge use the tabular covariates of the grain, not the target alone.
+\paragraph{Which models see which columns.}
+Ordinary least squares, ridge, gradient boosting, the random forest, the Gaussian process, and kernel ridge use the tabular columns below.
+The seasonal naive, SARIMAX, Prophet, the perceptron, TimesFM, and the two samplers E3 and E4 see the history of the target.
+Prophet also uses the date index to build its seasonal terms.
+Calendar-daily tabular columns are lags 1, 7, 14, and 28 of \texttt{valor\_sum} and of \texttt{n\_guias}, plus day of week and month.
+Business-day tabular columns are lags 1, 5, 10, and 20, counted in business days, of the same two series, plus day of week and month.
+Weekly tabular columns are lags 1, 4, 13, and 52 of the weekly sum and of the weekly slip count, plus week of year and month.
