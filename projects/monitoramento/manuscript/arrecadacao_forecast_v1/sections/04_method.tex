@@ -19,9 +19,113 @@ The same steps apply to every grain.
         Do not change any setting after seeing the test block.
 \end{enumerate}
 
+Figure~\ref{fig:protocol} draws this path for every grain.
+Stage~1 and Stage~2 are separate families.
+They share the same cut, the same selection step, and the same test rank.
+E1 and E2 add an accept-or-abstain rule at forecast time.
+The threshold $\tau$ in those rules is chosen in step~3.
+
+\begin{figure}[t]
+  \centering
+  \resizebox{\linewidth}{!}{%
+  \begin{tikzpicture}[
+      font=\scriptsize,
+      node distance=3.4mm and 2.4mm,
+      box/.style={draw, rounded corners=1.5pt, align=center,
+                  inner sep=3.2pt, fill=white, line width=0.4pt},
+      lane/.style={box, align=left, text width=58mm, inner sep=4pt},
+      arr/.style={-Stealth, line width=0.5pt},
+      note/.style={font=\scriptsize\itshape, align=center}
+    ]
+    \node[box, minimum width=108mm] (ex) {Extract \texttt{extracao=2026-03}};
+    \node[box, below=of ex, minimum width=108mm] (build)
+      {Build one series per grain};
+
+    \node[box, below=7mm of build, xshift=-42mm, text width=22mm] (gm)
+      {Monthly\\stock and collection};
+    \node[box, right=of gm, text width=22mm] (ga) {A\\calendar day\\zeros kept};
+    \node[box, right=of ga, text width=22mm] (gb) {B\\Mon--Fri\\holidays kept};
+    \node[box, right=of gb, text width=22mm] (gw) {Weekly\\Sunday close};
+
+    \node[box, below=8mm of gm, xshift=14mm, minimum width=28mm] (tr) {Train};
+    \node[box, right=of tr, minimum width=28mm] (va) {Validation};
+    \node[box, right=of va, minimum width=28mm] (te) {Test};
+    \node[note, below=0.6mm of va] {one contiguous cut};
+
+    \node[lane, below=8mm of tr, anchor=north east, xshift=-1.5mm] (s1)
+      {\textbf{Stage 1: M0--M9}\\[1pt]
+       M0 copy a lag\\
+       M1 least squares and ridge\\
+       M2 SARIMAX (order by train AIC)\\
+       M3 gradient boosting\\
+       M4 Prophet\\
+       M5 multilayer perceptron\\
+       M6 adaptive forest\\
+       M7 Gaussian process\\
+       M8 kernel ridge\\
+       M9 TimesFM, weights frozen};
+    \node[lane, right=2.5mm of s1, anchor=north west] (s2)
+      {\textbf{Stage 2: E1--E4}\\[1pt]
+       \textbf{E1 TEM.} If lowest energy $\lt\tau$,\\
+       \quad take that candidate.\\
+       \quad If energy $\geq\tau$, abstain:\\
+       \quad return the seasonal naive.\\[2pt]
+       \textbf{E2 proxy, not TEM.}\\
+       \quad If $|\mathrm{boost}-\mathrm{seas}|\gt\tau$,\\
+       \quad return the seasonal naive.\\
+       \quad Otherwise return boosting.\\[2pt]
+       E3 mean of diffusion samples\\
+       E4 mean of Langevin samples};
+
+    \coordinate (lanes) at ($(s1.south)!0.5!(s2.south)$);
+    \node[box, below=6mm of lanes, minimum width=112mm] (fit)
+      {Fit on train, then select by validation sMAPE};
+    \node[box, below=of fit, minimum width=112mm] (refit)
+      {Refit on train $+$ validation};
+    \node[box, below=of refit, minimum width=112mm] (fc)
+      {Forecast the test block};
+    \node[box, below=of fc, minimum width=112mm] (rank)
+      {\textbf{Official rank:} test sMAPE (lower is better)};
+    \node[box, below=of rank, minimum width=112mm] (skill)
+      {\textbf{Secondary:} skill score vs the seasonal naive};
+
+    \draw[arr] (ex) -- (build);
+    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gm.north);
+    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (ga.north);
+    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gb.north);
+    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gw.north);
+    \draw[arr] (gm.south) -- ++(0,-2.4mm) -| (tr.north);
+    \draw[arr] (ga.south) -- (tr.north);
+    \draw[arr] (gb.south) -- (va.north);
+    \draw[arr] (gw.south) -- ++(0,-2.4mm) -| (te.north);
+    \draw[arr] (tr) -- (va);
+    \draw[arr] (va) -- (te);
+    \draw[arr] (tr.south) -- ++(0,-3mm) -| (s1.north);
+    \draw[arr] (te.south) -- ++(0,-3mm) -| (s2.north);
+    \draw[arr] (s1.south) -- ++(0,-2.5mm) -| (fit.north);
+    \draw[arr] (s2.south) -- ++(0,-2.5mm) -| (fit.north);
+    \draw[arr] (fit) -- (refit);
+    \draw[arr] (refit) -- (fc);
+    \draw[arr] (fc) -- (rank);
+    \draw[arr] (rank) -- (skill);
+  \end{tikzpicture}}
+  \caption{Full forecasting protocol.
+  The March 2026 extract is turned into four series.
+  Each series is cut once into contiguous train, validation, and test blocks.
+  Stage~1 (M0--M9) and Stage~2 (E1--E4) then follow the same outer path: fit on the train block, choose settings by validation sMAPE, refit on train plus validation, and forecast the test block.
+  The SARIMAX order is the exception: it is chosen by AIC on the train block.
+  The official rank is test sMAPE.
+  The skill score against that grain's seasonal naive is a second column.
+  Inside Stage~2, E1 abstains to the seasonal naive when every candidate has energy at least $\tau$.
+  E2 returns the seasonal naive when the boosting forecast and the seasonal naive differ by more than $\tau$, and returns the boosting forecast otherwise.
+  E2 does not estimate an energy and is not TEM.
+  TimesFM (M9) does not update its weights.}
+  \label{fig:protocol}
+\end{figure}
+
 Some models forecast one step at a time.
 At time $t$ they may use only information from before $t$.
-Those models are ordinary least squares, ridge, gradient boosting, the forest, the Gaussian process, kernel ridge, and the perceptron.
+Those models are ordinary least squares, ridge, gradient boosting, the forest, the Gaussian process, kernel ridge, and the multilayer perceptron.
 The other models forecast the whole test horizon after the refit in step 4.
 We do not average ranks across grains.
 A kernel-ridge fit with test sMAPE of at least 180 is dropped from the rank.
@@ -119,7 +223,7 @@ The paragraphs below state what each one predicts, which inputs it uses, and how
     M2 & SARIMAX & Order, by AIC on the train block. \\
     M3 & Histogram gradient boosting & Trees, learning rate, and depth. \\
     M4 & Prophet & Trend and seasonality priors. \\
-    M5 & Perceptron & Lag, width, and learning rate. \\
+    M5 & Multilayer perceptron & Lag, width, and learning rate. \\
     M6 & Adaptive random forest & Number of trees and feature subsample. \\
     M7 & Gaussian process & Kernel and noise level. \\
     M8 & Kernel ridge & Kernel, penalty, and width. \\
@@ -133,77 +237,149 @@ The paragraphs below state what each one predicts, which inputs it uses, and how
 \end{table}
 
 \paragraph{M0: copy a past value.}
-M0 predicts $\hat y_t = y_{t-k}$~\citep{hyndman2021fpp3}.
-We report $k = 1$ and the seasonal lag in Table~\ref{tab:protocol}.
-Grain A also reports $k = 365$.
+M0 predicts by copying one past observation~\citep{hyndman2021fpp3},
+\begin{equation}
+  \hat y_t = y_{t-k}.
+  \label{eq:m0}
+\end{equation}
 No coefficient is estimated.
+We report $k = 1$ and the seasonal lag in Table~\ref{tab:protocol}: $k \in \{1,12\}$ monthly, $\{1,7,365\}$ on grain A, $\{1,5\}$ on grain B, and $\{1,52\}$ weekly.
 The seasonal copy is $A_{\mathrm{ref}}$ in~\eqref{eq:ss}.
 
 \paragraph{M1: least squares and ridge.}
-M1 predicts collection as a linear function of the tabular lags in Section~\ref{sec:data}.
-Ridge adds a penalty $\alpha\|\beta\|_2^2$ to the squared error~\citep{hoerl1970ridge}.
-We try $\alpha \in \{0.1, 1, 10\}$ and keep the value with the lowest validation sMAPE.
-Least squares is the same regression with $\alpha = 0$.
-Both then forecast the test block one step at a time.
+Let $x_t$ be the tabular lags in Section~\ref{sec:data}.
+The point forecast is
+\begin{equation}
+  \hat y_t = x_t^{\top}\beta.
+  \label{eq:m1}
+\end{equation}
+Least squares sets $\alpha = 0$ in the ridge objective~\citep{hoerl1970ridge}
+\begin{equation}
+  \hat\beta_{\alpha}
+  = \arg\min_{\beta}
+    \|y - X\beta\|_2^2 + \alpha\|\beta\|_2^2,
+  \qquad
+  \alpha \in \{0.1, 1, 10\}.
+  \label{eq:ridge}
+\end{equation}
+Validation sMAPE chooses $\alpha$.
+Both models then forecast the test block one step at a time.
 
 \paragraph{M2: SARIMAX.}
-M2 is a seasonal ARIMA model~\citep{box1970tsa,hyndman2021fpp3}.
-The seasonal period is 12 on the monthly panel and 7 on grain A.
-On the weekly series the fitted period is 4, because a period of 52 is not identified in a 13-week test.
-The skill reference on the weekly series is still lag 52, not this period of 4.
-We pick the order by AIC on the train block.
+M2 is a seasonal ARIMA on the target alone.
+No extra regressor is passed in~\citep{box1970tsa,hyndman2021fpp3}.
+With lag operator $L$ and seasonal period $s$,
+\begin{equation}
+  \phi_p(L)\,\Phi_P(L^{s})\,(1-L)^{d}\,(1-L^{s})^{D}\, y_t
+  = \theta_q(L)\,\Theta_Q(L^{s})\,\varepsilon_t.
+  \label{eq:sarimax}
+\end{equation}
+The period is $s = 12$ monthly, $s = 7$ on grain A, $s = 5$ on grain B, and $s = 4$ weekly.
+The weekly skill reference remains lag 52, not this period of 4.
+A short grid of orders $(p,d,q)\times(P,D,Q)_s$ is scored by AIC on the train block.
 AIC is the Akaike information criterion.
-We then refit on train plus validation and forecast the whole test horizon.
+The chosen order is refit on train plus validation and forecasts the whole test horizon.
 
 \paragraph{M3: histogram gradient boosting.}
-M3 predicts the same tabular lags as M1 with an additive sum of trees~\citep{friedman2001greedy}.
-Histogram splits keep the fit practical on the daily samples.
-We search the number of trees, the learning rate, and the tree depth by one-step validation sMAPE.
-Each fit can stop early.
+M3 uses the same $x_t$ as M1.
+The prediction is an additive expansion of trees~\citep{friedman2001greedy},
+\begin{equation}
+  F_M(x) = \sum_{m=1}^{M} \nu\, h_m(x),
+  \label{eq:gbm}
+\end{equation}
+where $h_m$ is a tree fit to the negative gradient of squared error and $\nu$ is the learning rate.
+Splits are made on histogram bins.
+Each fit may stop early, using 15\% of its current training rows as an internal check.
+Validation sMAPE chooses $M$, $\nu$, and the tree depth.
 The chosen booster then walks one step at a time through the test block.
 
 \paragraph{M4: Prophet.}
-Prophet predicts a piecewise linear trend plus Fourier seasonal terms~\citep{taylor2018prophet}.
-We search the trend-change prior and the seasonality prior by validation sMAPE.
-Monthly fits use a yearly cycle.
+Prophet adds a piecewise linear trend $g(t)$ to a Fourier seasonality $s(t)$~\citep{taylor2018prophet},
+\begin{equation}
+  y(t) = g(t) + s(t) + \varepsilon_t.
+  \label{eq:prophet}
+\end{equation}
+The published holiday term is omitted.
+No holiday calendar is passed in, including on grain B.
+Monthly and weekly fits use a yearly cycle.
 Daily fits use a weekly cycle and a yearly cycle.
-No holiday calendar is provided, including on grain B.
+On the monthly panel, validation sMAPE chooses among changepoint prior scales $\{0.05, 0.5\}$ and seasonality prior scales $\{1, 10\}$.
+Daily and weekly fits use the single pair $(0.5, 10)$.
 The chosen model is refit on train plus validation and forecasts the whole test horizon.
 
-\paragraph{M5: perceptron.}
-M5 predicts the next value from a window of past target values, after a scaler fit on the train block only~\citep{goodfellow2016dl}.
-The network has two hidden ReLU layers.
-We search widths $(32,16)$ and $(64,32)$, step sizes $10^{-3}$ and $3\times 10^{-4}$, and lags $\{6,12\}$ monthly, $\{8,12\}$ weekly, or $\{14,28\}$ daily.
-We keep the setting with the lowest validation sMAPE, refit on train plus validation, and forecast one step at a time with observed lags.
-This is a lag-window perceptron, not the N-BEATS basis-expansion model.
+\paragraph{M5: multilayer perceptron.}
+M5 maps a window of past target values to the next value~\citep{goodfellow2016dl}.
+Let $z_t = (y_{t-L},\ldots,y_{t-1})$ and let $\tilde z_t$ be $z_t$ after a scaler fit on the train block only.
+With ReLU $\sigma$ and two hidden layers,
+\begin{equation}
+  \hat y_t
+  = w_3^{\top}\sigma\!\left(W_2\,\sigma(W_1\tilde z_t + b_1) + b_2\right) + b_3.
+  \label{eq:mlp}
+\end{equation}
+Training minimizes squared error and stops if validation squared error stops falling.
+We search widths $(32,16)$ and $(64,32)$, step sizes $10^{-3}$ and $3\times 10^{-4}$, and lags $L \in \{6,12\}$ monthly, $\{8,12\}$ weekly, or $\{14,28\}$ daily.
+Validation sMAPE, after undoing the scaling, chooses the setting.
+We refit on train plus validation and forecast the test block one step at a time with observed lags.
+This is a lag-window MLP.
+It is not the N-BEATS basis-expansion model.
 
 \paragraph{M6: adaptive random forest.}
-M6 predicts with an ensemble of trees that can replace a tree when its error changes~\citep{gomes2017arf}.
+M6 predicts the tabular row $x_t$ by an average of regression trees,
+\begin{equation}
+  \hat y_t = \frac{1}{M}\sum_{m=1}^{M} h_m(x_t).
+  \label{eq:arf}
+\end{equation}
+Trees can be replaced when their error changes~\citep{gomes2017arf}.
 The cited paper is about classification.
-We use the regression version of that ensemble.
-The forest is first run through the history before the forecast origin.
+We use the regression form of that ensemble.
+The forest first learns the history before the forecast origin.
 It then predicts the next row and updates on the revealed outcome.
-The number of trees and the feature subsample are chosen by validation sMAPE.
+Validation sMAPE chooses the number of trees and the feature subsample.
 
 \paragraph{M7: Gaussian process.}
-M7 predicts the tabular covariates with a Gaussian process~\citep{rasmussen2006gp}.
-The forecast we rank is the predictive mean.
-On the monthly panel we try a radial-basis kernel, a Matérn kernel, and a rational-quadratic kernel, each with noise level $10^{-2}$ or $10^{-1}$.
-Validation sMAPE makes the choice.
-Daily fits use a radial-basis kernel and at most 200 training rows, because exact inference grows with the cube of the sample size.
+M7 places a Gaussian process prior on a latent function of the tabular covariates~\citep{rasmussen2006gp},
+\begin{equation}
+  f \sim \mathcal{GP}(0, k),
+  \qquad
+  y_i = f(x_i) + \varepsilon_i,
+  \qquad
+  \varepsilon_i \sim \mathcal{N}(0, \alpha).
+  \label{eq:gp}
+\end{equation}
+The forecast we rank is the posterior mean at a new row $x_{\star}$,
+\begin{equation}
+  \hat y_{\star}
+  = k(x_{\star}, X)\,
+    \bigl(K(X,X) + \alpha I\bigr)^{-1} y.
+  \label{eq:gp-mean}
+\end{equation}
+On the monthly panel, validation sMAPE chooses among a radial-basis kernel, a Mat\'ern kernel, and a rational-quadratic kernel, each with $\alpha \in \{10^{-2}, 10^{-1}\}$.
+Daily fits use a radial-basis kernel and at most 200 training rows, because this inverse grows with the cube of the sample size.
 A fit with no finite forecast is omitted.
 
 \paragraph{M8: kernel ridge.}
-M8 is ridge regression in the feature space of a radial-basis or Laplacian kernel, on the same tabular columns as M1~\citep{murphy2012ml}.
-Columns are scaled on the train block.
-Validation sMAPE chooses the kernel, the penalty, and the kernel width.
+M8 solves the ridge problem in the feature space of a kernel $k$, on the same columns as M1, after scaling on the train block~\citep{murphy2012ml}.
+The dual forecast is
+\begin{equation}
+  \hat y(x) = \sum_{i=1}^{n} a_i\, k(x, x_i),
+  \qquad
+  (K + \lambda I)\, a = y.
+  \label{eq:krr}
+\end{equation}
+The kernel is radial basis or Laplacian.
+Validation sMAPE chooses that kernel, the penalty $\lambda$, and the kernel width.
 A test sMAPE of at least 180 removes that fit from the rank.
 
 \paragraph{M9: TimesFM 3.0.}
 TimesFM is a pretrained forecasting model~\citep{das2024timesfm}.
 We load TimesFM 3.0 and do not update its weights~\citep{jain2026timesfm3}.
-The input is the train block followed by the validation block.
-The horizon is the length of the test block.
+If $T$ is the last time in the validation block and $H$ is the test length,
+\begin{equation}
+  (\hat y_{T+1},\ldots,\hat y_{T+H})
+  = f_{\theta}(y_1,\ldots,y_T),
+  \label{eq:timesfm}
+\end{equation}
+with $\theta$ held fixed.
 We rank the model's mean forecast.
 If the weights cannot be loaded, that grain has no M9 row.
 We do not substitute another model.
@@ -228,7 +404,7 @@ The backbone is TimesNet~\citep{wu2023timesnet}, trained with the published TEM 
 It sees 12 past months, with a 6-month decoder overlap, or 28 past days, with a 14-day overlap, and it predicts one step.
 The monthly run uses about 15 forecast epochs and 10 energy epochs.
 Daily runs are capped at about 3 epochs of each.
-If TimesNet does not finish, we use the published perceptron energy model.
+If TimesNet does not finish, we use the published MLP energy model.
 That fallback is still TEM.
 Candidates are the seasonal naive, the boosting forecast, and the TimesNet forecast when it exists.
 $\tau$ is the validation threshold with the lowest validation sMAPE.
@@ -272,21 +448,43 @@ Disagreement at or below $\tau$ returns the boosting forecast.
 The name TEM is reserved for E1.
 
 \paragraph{E3: a small diffusion sampler.}
-E3 predicts the next value by averaging a few reverse-diffusion samples.
-A three-layer network reads a scaled lag window, a noisy target, and a time index, and it is trained to recover the noise that was added~\citep{rasul2021timegrad}.
-Monthly fits use lag 12, 20 diffusion steps, and 8 samples.
-Daily fits use lag 28, 15 steps, 4 samples, and a subset of the training windows.
-Weekly fits use lag 12, 15 steps, and 4 samples.
-This uses the denoising step of TimeGrad.
+E3 predicts the next scaled value by averaging reverse-diffusion samples~\citep{rasul2021timegrad}.
+A three-layer network $\epsilon_{\theta}$ reads a lag window, a noisy target, and a diffusion-time index.
+The training corruption at step $k$, and the loss, are
+\begin{equation}
+  y^{(k)} = \sqrt{\bar\alpha_k}\, y + \sqrt{1 - \bar\alpha_k}\,\epsilon,
+  \qquad
+  \mathcal{L}
+  = \bigl\|\epsilon_{\theta}(x, y^{(k)}, k) - \epsilon\bigr\|_2^2,
+  \label{eq:ddpm}
+\end{equation}
+with $\epsilon \sim \mathcal{N}(0,1)$.
+The point forecast is the mean of $S$ reverse trajectories, mapped back to the original scale.
+Monthly fits use lag 12, 20 steps, and $S = 8$.
+Daily fits use lag 28, 15 steps, $S = 4$, and a subset of the training windows.
+Weekly fits use lag 12, 15 steps, and $S = 4$.
+This is the denoising step of TimeGrad on one series.
 It is not the published multivariate TimeGrad model.
 
 \paragraph{E4: a small score sampler.}
-E4 predicts the next value by averaging a few Langevin chains~\citep{song2019score}.
-The network estimates how the log-density of the next scaled observation changes, given the lag window, at noise scale $0.5$.
+E4 predicts the next scaled value by averaging Langevin chains~\citep{song2019score}.
+At noise scale $\sigma = 0.5$, the network $s_{\theta}$ is trained so that, at a point corrupted by $\sigma\epsilon$,
+\begin{equation}
+  s_{\theta}(x, y + \sigma\epsilon) \approx -\epsilon / \sigma^{2}.
+  \label{eq:score-target}
+\end{equation}
+Sampling repeats
+\begin{equation}
+  y \leftarrow y + \eta\, s_{\theta}(x, y) + \sqrt{2\eta}\,\xi,
+  \qquad
+  \xi \sim \mathcal{N}(0,1),
+  \label{eq:langevin}
+\end{equation}
+with step $\eta = 0.05$.
+The point forecast is the mean of the chains, after undoing the scaling.
 Monthly fits use lag 12, 30 steps, and 6 chains.
 Daily and weekly fits use 20 steps and 4 chains, with the same lags as E3.
-The step size is $0.05$.
-As with E3, the network is small and is trained only on this series.
+The network is small and is trained only on this series.
 
 \subsection{Where the numbers come from}
 \label{sec:repro}

@@ -21,30 +21,22 @@ The energy rule does not improve on that 12-month window.
 The tables rank point sMAPE.
 They do not report coverage, so they do not say how often E1 abstained.
 
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_smape_by_grain.png}
-  \caption{Test sMAPE by model and grain.
-  The vertical axis is percent.
-  Lower is better.
-  Each grain is scored on its own.}
-  \label{fig:smape_grain}
-\end{figure}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_skill_by_grain.png}
-  \caption{Skill score~\eqref{eq:ss} by model and grain.
-  Zero is the seasonal naive of that grain.
-  Positive means lower test sMAPE than that naive.}
-  \label{fig:ss_grain}
-\end{figure}
-
 Monthly and weekly sMAPE in Figure~\ref{fig:smape_grain} lie well below calendar-daily sMAPE.
 A month or a week adds up many zero days, so the percentage error falls.
 Figure~\ref{fig:ss_grain} is a different comparison.
 A model can have a moderate sMAPE and still lose to the seasonal naive.
 That is the common pattern on the monthly panel, on grain A, and on the weekly series outside TimesFM, ridge, and least squares.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_skill_by_grain.png}
+  \caption{Skill score~\eqref{eq:ss} by model family and grain.
+  Zero is the seasonal naive of that grain.
+  A positive value means lower test sMAPE than that naive.
+  A negative value means higher test sMAPE than that naive.
+  The score is not averaged across grains.}
+  \label{fig:ss_grain}
+\end{figure}
 
 \subsection{Zeros and the lag used in the skill score}
 \label{sec:zeros}
@@ -54,24 +46,6 @@ A copy of last week matches weekend zeros.
 A model that smooths through those zeros pays for it in all-day sMAPE.
 Scoring only days with $y \gt 0$ answers a different question: error on days that had a slip.
 Ranking A is the error on the calendar, zeros included.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_smape.png}
-  \caption{Test sMAPE on grain A and on grain B.
-  B drops weekends and keeps national holidays.
-  Lower is better.
-  A and B are different targets.}
-  \label{fig:abl_smape}
-\end{figure}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_skill.png}
-  \caption{Skill score on grain A (reference lag 7) and grain B (reference lag 5).
-  A positive score on B means lower sMAPE than lag 5, not lower sMAPE than lag 1.}
-  \label{fig:abl_ss}
-\end{figure}
 
 Grain B drops weekends and keeps national holidays (Figure~\ref{fig:abl_smape}).
 Test sMAPE falls, and boosting and least squares enter the top three behind TimesFM.
@@ -107,7 +81,7 @@ On the daily and weekly panels the set includes TimesFM.
 If the TimesFM weights are unavailable, the seasonal naive is still defined.
 On the monthly grain that naive remains competitive.
 
-\begin{figure}[t]
+\begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_top.png}
   \caption{Realized collection and the forecasts with the lowest test sMAPE, by grain.

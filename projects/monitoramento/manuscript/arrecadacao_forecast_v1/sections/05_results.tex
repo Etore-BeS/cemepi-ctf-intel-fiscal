@@ -13,8 +13,9 @@ Table~\ref{tab:top3} lists the three lowest test-sMAPE models on each grain.
 E2 has the lowest test sMAPE on the monthly panel.
 TimesFM 3.0 has the lowest test sMAPE on grain A, on grain B, and on the weekly series.
 A single winner across grains is not supported by this table.
+Figure~\ref{fig:smape_grain} plots test sMAPE for the families on each grain.
 
-\begin{table}[t]
+\begin{table}[ht]
   \caption{Three lowest test sMAPE values on each grain.
   E2 is the disagreement proxy.
   E2 is not TEM.}
@@ -23,6 +24,18 @@ A single winner across grains is not supported by this table.
   \small
   \input{tables/tab_top3_by_grain}
 \end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_smape_by_grain.png}
+  \caption{Test sMAPE by model family and grain, for the March 2026 extract.
+  The vertical axis is percent.
+  Lower is better.
+  Each grain is ranked on its own.
+  The monthly leader is the disagreement proxy E2.
+  The leader on grain A, grain B, and the weekly series is TimesFM 3.0.}
+  \label{fig:smape_grain}
+\end{figure}
 
 \subsection{Monthly panel}
 \label{sec:monthly}
@@ -65,20 +78,43 @@ The value is about 52.4, and the skill score is about 0.28.
 Boosting and ordinary least squares are next (Table~\ref{tab:ablation}).
 Dropping weekends lowers the sMAPE level and changes the order.
 The seasonal naive is inside the top three on A and outside the top three on B.
+Figure~\ref{fig:abl_smape} shows the sMAPE levels.
+Figure~\ref{fig:abl_ss} shows the skill scores against lag 7 on A and lag 5 on B.
 
-The positive-day score on A is not the official rank.
-On days with $y \gt 0$, TimesFM has sMAPE about 29.9 and skill about 0.58.
-Boosting has sMAPE about 34.6 and skill about 0.51.
-The gap versus the all-day scores shows how much Ranking A is raised by zeros.
-It is not a reason to remove those zeros from the target.
-
-\begin{table}[t]
+\begin{table}[ht]
   \caption{Three lowest test sMAPE values on grain A and on grain B.}
   \label{tab:ablation}
   \centering
   \small
   \input{tables/tab_ablation_A_vs_B}
 \end{table}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_smape.png}
+  \caption{Test sMAPE on grain A and on grain B.
+  Grain A keeps every calendar day, including weekend and empty-slip zeros.
+  Grain B keeps Monday--Friday and keeps Brazilian national holidays.
+  Lower is better.
+  The two panels are different targets, each with its own split.}
+  \label{fig:abl_smape}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_skill.png}
+  \caption{Skill score on grain A and on grain B.
+  The reference is the lag-7 seasonal naive on A and the lag-5 seasonal naive on B.
+  A positive score on B means lower sMAPE than lag 5.
+  It does not mean lower sMAPE than a lag-1 forecast.}
+  \label{fig:abl_ss}
+\end{figure}
+
+The positive-day score on A is not the official rank.
+On days with $y \gt 0$, TimesFM has sMAPE about 29.9 and skill about 0.58.
+Boosting has sMAPE about 34.6 and skill about 0.51.
+The gap versus the all-day scores shows how much Ranking A is raised by zeros.
+It is not a reason to remove those zeros from the target.
 
 \subsection{Weekly series}
 \label{sec:weekly}
