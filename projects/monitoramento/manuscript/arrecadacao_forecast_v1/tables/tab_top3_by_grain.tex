@@ -1,0 +1,23 @@
+% Auto-built from freeze ranked CSVs — do not hand-edit numbers
+\begin{tabular}{llrr}
+\toprule
+Grain & Model & sMAPE $\downarrow$ & SS\_sMAPE $\uparrow$ \\
+\midrule
+Monthly & E2 (proxy ablat.) & 10.94 & 0.192 \\
+ & M3\_HGB\_tuned & 13.34 & 0.015 \\
+ & naive seas lag12 & 13.54 & 0.000 \\
+\addlinespace
+Daily A (calendar) & M9\_TimesFM3 & 59.76 & 0.200 \\
+ & naive seas lag7 & 74.68 & 0.000 \\
+ & M6\_ARF\_regressor & 85.15 & -0.140 \\
+\addlinespace
+Daily B (business) & M9\_TimesFM3 & 52.39 & 0.284 \\
+ & M3\_HGB\_tuned & 53.70 & 0.266 \\
+ & M1\_OLS & 54.05 & 0.261 \\
+\addlinespace
+Weekly & M9\_TimesFM3 & 17.25 & 0.415 \\
+ & M1\_Ridge\_a0.1 & 25.11 & 0.148 \\
+ & M1\_OLS & 26.51 & 0.100 \\
+\addlinespace
+\bottomrule
+\end{tabular}

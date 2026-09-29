@@ -1,0 +1,309 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Evaluation protocol}
+\label{sec:protocol}
+
+Each grain is a single contiguous series.
+We cut it into train, validation, and test blocks (Table~\ref{tab:protocol}).
+The validation block is used only to choose hyperparameters and thresholds.
+When an estimator can be refit, we refit it on train and validation together and then score the untouched test block.
+The official rank is raw test sMAPE.
+Lower is better.
+Root mean squared error is a secondary descriptor of scale.
+We do not average ranks across grains.
+A Kernel Ridge fit with test sMAPE at least 180 is treated as degenerate and is removed from the rank.
+
+\begin{table}[t]
+  \caption{Evaluation protocol by grain. The seasonal reference is the denominator of the skill score.}
+  \label{tab:protocol}
+  \centering
+  \small
+  \begin{tabular}{llll}
+    \toprule
+    Grain & Blocks & Official rank & Seasonal reference \\
+    \midrule
+    Monthly & train $|$ val(12) $|$ test(12) & sMAPE (RMSE secondary) & lag 12 \\
+    Daily A (calendar) & train $|$ val(90) $|$ test(90) & sMAPE (RMSE secondary) & lag 7 \\
+    Daily B (business days) & train $|$ val(90) $|$ test(90) & sMAPE (RMSE secondary) & lag 5 \\
+    Weekly & train $|$ val(13) $|$ test(13) & sMAPE (RMSE secondary) & lag 52 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Let $\epsilon$ be a small positive tolerance.
+MAPE is averaged on $\mathcal{T}_{\mathrm{MAPE}} = \{t : |y_t| \gt \epsilon\}$, because a zero collection day makes the percentage undefined.
+sMAPE is averaged on $\mathcal{T}_{\mathrm{sMAPE}} = \{t : |y_t| + |\hat y_t| \gt \epsilon\}$, which drops only the null-denominator case in which both the outcome and the forecast are zero.
+RMSE uses every test time.
+With $n_{\mathrm{M}} = |\mathcal{T}_{\mathrm{MAPE}}|$ and $n_{\mathrm{S}} = |\mathcal{T}_{\mathrm{sMAPE}}|$,
+\begin{align}
+  \mathrm{MAPE}
+  &= \frac{100}{n_{\mathrm{M}}}
+     \sum_{t \in \mathcal{T}_{\mathrm{MAPE}}}
+     \left|\frac{y_t - \hat y_t}{y_t}\right|,
+  \label{eq:mape}\\
+  \mathrm{sMAPE}
+  &= \frac{100}{n_{\mathrm{S}}}
+     \sum_{t \in \mathcal{T}_{\mathrm{sMAPE}}}
+     \frac{2\,|y_t - \hat y_t|}{|y_t| + |\hat y_t|},
+  \label{eq:smape}\\
+  \mathrm{RMSE}
+  &= \sqrt{\frac{1}{n}\sum_{t=1}^{n}(y_t - \hat y_t)^2}.
+  \label{eq:rmse}
+\end{align}
+Mean absolute error and a weighted absolute percentage error are implemented beside these scores and are not used to rank models in this freeze.
+On the monthly panel, exact zeros are rare.
+On calendar-daily slips they dominate the sample, so sMAPE and RMSE are the scores that remain interpretable if MAPE has dropped most of the week.
+
+\subsection{Skill against the seasonal naive}
+\label{sec:ss}
+
+For a candidate forecast with sMAPE equal to $A$ and a reference forecast with sMAPE equal to $A_{\mathrm{ref}}$,
+\begin{equation}
+  \mathrm{SS}_{\mathrm{sMAPE}}
+  = 1 - \frac{A}{A_{\mathrm{ref}}},
+  \label{eq:ss}
+\end{equation}
+where $A_{\mathrm{ref}}$ is the test sMAPE of the seasonal naive at the grain lag in Table~\ref{tab:protocol}.
+A positive score means lower sMAPE than that seasonal naive.
+The seasonal naive itself scores zero.
+A negative score means higher sMAPE than the seasonal naive.
+The score is left undefined when $A_{\mathrm{ref}}$ is near zero or is not finite.
+The reference is always the seasonal naive of the grain under study.
+On business days that naive is lag~5.
+It is a weak reference on this series, because a lag-1 naive already beats it.
+Positive skill on Ranking~B is therefore expected for many families and is not evidence of an error in~\eqref{eq:ss}.
+
+\subsection{Stage 1: point-forecast families}
+\label{sec:m0m9}
+
+Stage~1 is a ladder from seasonal benchmarks to a zero-shot foundation model (Table~\ref{tab:ladder}).
+The same specification is applied at every grain.
+Only the seasonal lag, the covariate set, and a small number of length-dependent caps change.
+Tabular regressors (ordinary least squares, ridge, histogram gradient boosting, and the adaptive forest) produce one-step walk-forward forecasts: at each test time the features use information available before that time, and the fitted map is applied to that row.
+The perceptron is also scored one step ahead, feeding observed lags rather than its own previous forecast.
+
+\begin{table}[t]
+  \caption{Stage~1 and Stage~2 families. Selection, when a family has hyperparameters, minimizes validation sMAPE.}
+  \label{tab:ladder}
+  \centering
+  \small
+  \begin{tabular}{llp{6.4cm}}
+    \toprule
+    ID & Family & Role in this protocol \\
+    \midrule
+    M0 & Naive and seasonal naive & Copy $y_{t-k}$; skill-score reference \\
+    M1 & OLS and ridge & Lag regression; ridge penalty on a validation grid \\
+    M2 & SARIMAX & Short order grid by AIC; multi-step test forecast \\
+    M3 & Histogram gradient boosting & Lag features; walk-forward \\
+    M4 & Prophet & Trend plus seasonal Fourier terms \\
+    M5 & Multilayer perceptron & Two hidden layers on standardized lags \\
+    M6 & Adaptive random forest & Online forest, regression form \\
+    M7 & Gaussian process & Kernel and noise chosen on validation \\
+    M8 & Kernel ridge & RBF or Laplacian kernel; degenerate fits dropped \\
+    M9 & TimesFM~3.0 & Zero-shot; no local gradient step \\
+    E1 & Selective TEM & Energy threshold; abstain to seasonal naive \\
+    E2 & Disagreement proxy & Switch between boosting and seasonal naive \\
+    E3 & Residual diffusion & Reduced TimeGrad-style sampler \\
+    E4 & Score sampler & Denoising score matching and Langevin \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{M0: naive and seasonal naive.}
+The forecast is the copy $\hat y_t = y_{t-k}$~\citep{hyndman2021fpp3}.
+We report $k = 1$ and the seasonal lag of the grain.
+Calendar-daily fits also report $k = 365$.
+No parameter is estimated.
+The seasonal member is the reference in~\eqref{eq:ss}: lag~12 (monthly), lag~7 (calendar daily), lag~5 (business daily), and lag~52 (weekly).
+
+\paragraph{M1: ordinary least squares and ridge.}
+The tabular forecast is the linear model $y_t = x_t^{\top}\beta + \varepsilon_t$.
+On the monthly panel, $x_t$ stacks the collection and stock lags in Section~\ref{sec:data}.
+On the other grains, $x_t$ stacks the target lags, slip-count lags, and calendar fields of that grain.
+Ridge replaces the residual sum of squares by
+\begin{equation}
+  \hat\beta_{\alpha}
+  = \arg\min_{\beta}
+    \|y - X\beta\|_2^2 + \alpha\|\beta\|_2^2,
+  \label{eq:ridge}
+\end{equation}
+with $\alpha \in \{0.1, 1, 10\}$ chosen by walk-forward validation sMAPE~\citep{hoerl1970ridge}.
+Ordinary least squares is the unpenalized counterpart.
+Both are refit in a one-step walk-forward pass on the test block.
+
+\paragraph{M2: SARIMAX.}
+We fit a seasonal ARIMA specification $(p,d,q)\times(P,D,Q)_s$ in the Box--Jenkins sense~\citep{box1970tsa,hyndman2021fpp3}.
+The seasonal period is $s = 12$ on the monthly panel and $s = 7$ on calendar daily data.
+On the weekly series the fitted seasonal period is $s = 4$, a short within-month cycle.
+A period of 52 is not identified on a series whose test block is only 13 weeks.
+The skill-score reference on that grain remains the lag-52 naive, not the SARIMAX seasonal period.
+A short grid of orders is scored by AIC on the training block.
+The selected specification is refit on train and validation and then forecasts the test horizon.
+Prediction intervals from the Gaussian state-space forecast are available and are not part of the rank.
+
+\paragraph{M3: histogram gradient boosting.}
+Histogram gradient boosting is a histogram-split form of Friedman's gradient boosting machine, fit on the same lag features as M1~\citep{friedman2001greedy}.
+The grid covers the iteration budget, the learning rate, and the tree depth.
+Each candidate is scored by walk-forward validation sMAPE, with early stopping inside the booster.
+The selected booster is walked forward through the test block.
+
+\paragraph{M4: Prophet.}
+Prophet decomposes the series into a piecewise-linear trend, additive Fourier seasonality, and a holiday term if one is supplied~\citep{taylor2018prophet}.
+We grid the changepoint prior scale against the seasonality prior scale and keep the pair with the best validation sMAPE.
+Monthly fits use yearly seasonality.
+Daily fits use weekly and yearly seasonality.
+No holiday calendar is passed in, including on Ranking~B.
+The selected model is refit on train and validation and forecasts the test horizon in one shot.
+
+\paragraph{M5: multilayer perceptron.}
+M5 is a feed-forward network with two hidden layers and ReLU activations, mapping a window of standardized lags of $y$ to the next value~\citep{goodfellow2016dl}.
+It is a lag-window perceptron.
+It is not an N-BEATS basis expansion.
+A standard scaler is fit on the training block only.
+Hidden widths are $\{(32,16),(64,32)\}$ and Adam step sizes are $\{10^{-3}, 3\cdot 10^{-4}\}$.
+The lag is chosen from $\{6,12\}$ (monthly), $\{8,12\}$ (weekly), or $\{14,28\}$ (daily grains).
+Training minimizes squared error with early stopping on a validation slice.
+The configuration with the lowest validation sMAPE, after the inverse scaling, is refit on train and validation.
+Test forecasts are one-step, using observed lags.
+
+\paragraph{M6: adaptive random forest.}
+The adaptive random forest grows an ensemble of trees online and replaces trees whose error drifts~\citep{gomes2017arf}.
+The cited method is a classifier for evolving streams.
+We use the regression form of the same adaptive-forest mechanism, as implemented for data streams, and we do not claim the 2017 experiments as revenue results.
+The forest is warmed up on history and then alternates prediction and learning at each step.
+The number of trees and the feature subsample are chosen by validation sMAPE.
+
+\paragraph{M7: Gaussian process.}
+A Gaussian process prior $f \sim \mathcal{GP}(0, k)$ on the tabular covariates supplies a predictive mean and a predictive variance~\citep{rasmussen2006gp}.
+On the monthly panel the kernel is chosen among radial basis, Mat\'ern, and rational quadratic, together with a noise level $\alpha \in \{10^{-2}, 10^{-1}\}$, by walk-forward validation sMAPE.
+Daily fits use a radial-basis kernel and a training subsample of at most 200 points, because exact inference scales cubically in the sample size.
+A fit that returns no finite forecast is omitted from the rank.
+
+\paragraph{M8: kernel ridge.}
+Kernel ridge solves~\eqref{eq:ridge} in the reproducing kernel Hilbert space of a radial-basis or Laplacian kernel, using the same tabular covariates as M1~\citep{murphy2012ml}.
+Those covariates are standardized on the training block.
+The kernel, the ridge penalty, and the kernel width are chosen by validation sMAPE.
+Fits with test sMAPE of at least 180 are excluded from the ranking as degenerate.
+
+\paragraph{M9: TimesFM 3.0, zero-shot.}
+TimesFM is a pretrained decoder-only forecaster~\citep{das2024timesfm}.
+We use the TimesFM~3.0 checkpoint \texttt{google/timesfm-3.0-pytorch} with no fine-tuning~\citep{jain2026timesfm3}.
+The context window is the concatenation of the train and validation blocks.
+The horizon is the test length.
+The point forecast is the model's predictive mean.
+If the checkpoint cannot be loaded, the family is omitted for that grain rather than replaced by another model.
+
+\subsection{Stage 2: selective energy and generative forecasts}
+\label{sec:energy}
+
+Stage~2 asks whether a selective rule, or a conditional generative sample, improves on the Stage~1 point forecasts.
+Three of the four rows are easy to mislabel.
+Only E1 is TEM.
+
+\paragraph{E1: selective TEM.}
+An energy-based model defines a scalar $E_{\theta}(x, y)$ on a context $x$ and a candidate value $y$, with
+\begin{equation}
+  p_{\theta}(y \mid x) \propto \exp\bigl(-E_{\theta}(x, y)\bigr).
+  \label{eq:ebm}
+\end{equation}
+Low energy is high plausibility under this model~\citep{brusokas2025tem}.
+TEM trains a deterministic encoder--decoder together with such an energy head and, at inference, may reject a forecast.
+Our primary backbone is TimesNet~\citep{wu2023timesnet}, trained with the published TEM routine (\texttt{Exp\_Main\_Energy}): a supervised forecast step followed by an energy step.
+The series is presented as a univariate target with the same train, validation, and test borders as Table~\ref{tab:protocol}.
+The input length is 12 months (label length 6) on the monthly panel and 28 days (label length 14) on the daily grains, with a one-step prediction length.
+The monthly fit uses on the order of 15 supervised epochs and 10 energy epochs.
+Daily fits are capped near 3 epochs of each kind.
+If the TimesNet energy fit does not complete, we fall back to the published MLP predictor--decoder energy model.
+That fallback is still TEM.
+The candidate set at each time is the seasonal naive, the histogram-gradient-boosting forecast, and the TimesNet forecast when that forecast is available.
+Let $\mathcal{C}_t$ be that set and let $\tau$ be a threshold chosen on the validation block to control validation sMAPE.
+The selective forecast is
+\begin{equation}
+  \hat y_t =
+  \begin{cases}
+    \arg\min_{c \in \mathcal{C}_t} E_{\theta}(x_t, \hat y_t^{(c)})
+      & \text{if }\min_{c} E_{\theta}(x_t, \hat y_t^{(c)}) \lt \tau, \\[4pt]
+    y_{t-k}
+      & \text{otherwise,}
+  \end{cases}
+  \label{eq:tem}
+\end{equation}
+where $k$ is the seasonal lag of the grain.
+The second branch is abstention: the instrument returns the seasonal naive instead of a low-confidence energy choice.
+Coverage, the fraction of test times that take the first branch, belongs with any operational reading of E1.
+The sMAPE tables below do not by themselves state that coverage.
+
+\paragraph{E2: disagreement proxy.}
+E2 uses the same accept-or-abstain shape and no energy model.
+Define the disagreement
+\begin{equation}
+  E_t = \bigl|\hat y_t^{\mathrm{HGB}} - \hat y_t^{\mathrm{seas}}\bigr|.
+  \label{eq:proxy}
+\end{equation}
+This quantity is large when boosting and the seasonal naive disagree.
+It is not the energy~\eqref{eq:ebm}.
+On the validation block we set $\tau$ to an empirical quantile of $E_t$ and search the quantile levels $\{0.5, 0.6, 0.7, 0.8, 0.9\}$ by validation sMAPE.
+The test rule is
+\begin{equation}
+  \hat y_t =
+  \begin{cases}
+    \hat y_t^{\mathrm{seas}} & \text{if } E_t \gt \tau, \\
+    \hat y_t^{\mathrm{HGB}} & \text{otherwise.}
+  \end{cases}
+  \label{eq:proxy-rule}
+\end{equation}
+High disagreement abstains to the seasonal naive.
+Low disagreement keeps the boosting forecast.
+The row checks whether the TEM code is importable and then ignores it.
+E2 is an ablation of the selection rule.
+We do not call it TEM, and we do not identify it with E1.
+
+\paragraph{E3: residual diffusion.}
+TimeGrad forecasts a multivariate series by an autoregressive denoising diffusion process conditioned on a recurrent state~\citep{rasul2021timegrad}.
+E3 keeps the denoising-diffusion step and drops the recurrent conditioner.
+A three-layer network $\epsilon_{\theta}$ reads a standardized lag window, a noisy scalar target, and a normalized diffusion time, and it predicts the noise.
+The forward corruption on the standardized target $y$ at diffusion index $k$ is
+\begin{equation}
+  y^{(k)} = \sqrt{\bar\alpha_k}\, y + \sqrt{1 - \bar\alpha_k}\,\epsilon,
+  \qquad \epsilon \sim \mathcal{N}(0, 1),
+  \label{eq:ddpm}
+\end{equation}
+and the training loss is the mean squared error between $\epsilon$ and $\epsilon_{\theta}$.
+The point forecast is the mean of a small number of DDPM reverse samples, mapped back to the original scale.
+Monthly fits use lag~12, 20 diffusion steps, and 8 samples.
+Daily fits use lag~28, 15 diffusion steps, 4 samples, and a subsample of the training windows.
+Weekly fits use lag~12, 15 steps, and 4 samples.
+This is a reduced univariate sampler in the sense of TimeGrad, not the published multivariate implementation.
+
+\paragraph{E4: score matching and Langevin sampling.}
+Score-based generative models estimate $\nabla_y \log p(y)$ by denoising score matching and sample with Langevin dynamics~\citep{song2019score}.
+E4 estimates a conditional score of the next standardized observation given its lag window, at one noise scale $\sigma = 0.5$.
+The regression target at a corrupted point $y + \sigma\epsilon$ is $-\epsilon / \sigma^2$.
+Sampling starts from Gaussian noise and repeats the Langevin update
+\begin{equation}
+  y \leftarrow y + \eta\, s_{\theta}(x, y) + \sqrt{2\eta}\,\xi,
+  \qquad \xi \sim \mathcal{N}(0, 1),
+  \label{eq:langevin}
+\end{equation}
+with step $\eta = 0.05$.
+The point forecast is the mean of a few independent chains, inverse-scaled.
+Monthly fits use 30 steps and 6 chains.
+Daily and weekly fits use 20 steps and 4 chains, with the same lags as E3.
+As with E3, the network is small and the fit is local to this series.
+
+\subsection{Reproducibility}
+\label{sec:repro}
+
+This paper states the scientific protocol: grains, splits, metrics, model classes, and the selection and inference rules above.
+The implementation that produced the freeze, including the full grids, epoch caps, and per-grain fit logs, is the companion notebook
+\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_paper_v1.ipynb}.
+Ranked metrics and stored predictions for \texttt{extracao=2026-03} are under
+\path{projects/monitoramento/output/articles/arrecadacao_forecast_paper_v1/}.
+The figures in Section~\ref{sec:discussion} are written to
+\path{projects/monitoramento/output/figures/articles/arrecadacao_forecast_paper_v1/}
+and copied into \path{figures/} beside this manuscript.
+TEM training calls the published Time-Energy Model code (\url{https://github.com/JonasBrusokas/Time-Energy-Model}).
+TimesFM~3.0 is the public checkpoint \texttt{google/timesfm-3.0-pytorch}.
+Numbers in Section~\ref{sec:results} are read from those frozen tables.
+They are not recomputed in the manuscript source.

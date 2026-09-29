@@ -1,0 +1,15 @@
+% Monthly top-8 from metrics_monthly_test_ranked.csv
+\begin{tabular}{lrrl}
+\toprule
+Model & sMAPE $\downarrow$ & SS\_sMAPE $\uparrow$ & Notes \\
+\midrule
+E2 (proxy ablat.) & 10.94 & 0.192 & proxy ablation $\neq$ TEM \\
+M3\_HGB\_tuned & 13.34 & 0.015 & HistGradientBoosting \\
+naive seas lag12 & 13.54 & 0.000 & seasonal ref ($SS{=}0$) \\
+M8\_KRR\_rbf & 14.67 & -0.083 & Kernel Ridge \\
+E1 TEM selective & 15.45 & -0.141 & real TEM selective \\
+naive lag1 & 16.09 & -0.188 & lag-1 naive \\
+M9\_TimesFM3 & 18.62 & -0.375 & TimesFM 3.0 zero-shot \\
+E4\_ScoreGrad & 20.91 & -0.544 & score + Langevin \\
+\bottomrule
+\end{tabular}

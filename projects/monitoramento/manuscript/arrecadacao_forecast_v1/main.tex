@@ -1,0 +1,51 @@
+\documentclass{article}
+
+% NeurIPS 2025 style. The preprint option shows author names on this draft.
+% Drop the option for an anonymized submission.
+\usepackage[preprint]{neurips_2025}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+% Aliases so inequality signs stay valid if the source is edited as Markdown.
+\newcommand{\lt}{<}\newcommand{\gt}{>}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{xcolor}
+
+\title{Forecasting Tax Collection from Enrolled Debt\\
+across Monthly, Daily, and Weekly Grains}
+
+\author{%
+  \'Etore Braga e Santos \\
+  Faculdade de Tecnologia (FT) / Unicamp \\
+  CEMEPI --- Contencioso Tribut\'ario Fiscal \\
+  \texttt{etore.braga@...} \\
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_data}
+\input{sections/04_method}
+\input{sections/05_results}
+\input{sections/06_discussion}
+\input{sections/07_conclusion}
+\input{sections/08_limitations}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\end{document}

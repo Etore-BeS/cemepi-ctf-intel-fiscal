@@ -1,0 +1,35 @@
+\section{Introduction}
+\label{sec:intro}
+
+Tax administrations that monitor enrolled debt need a forecast of cash that will be collected, not only a description of the stock.
+Enrolled debt is tax debt that has been formally registered for collection.
+The stock is large and persistent.
+Realized collection is seasonal.
+At a daily resolution it is also sparse: weekends, public holidays, and days without a payment slip are structural zeros, not missing measurements that should be dropped before scoring.
+A claim that one model is best is meaningful only for a stated grain and a stated metric.
+
+\paragraph{Research question.}
+Under one evaluation protocol, which family among the Stage~1 forecasters M0--M9 and the Stage~2 energy and generative forecasters E1--E4 best predicts collection on the monthly stock-and-collection panel and on the daily and weekly payment-slip aggregates, and what does that ranking imply for a monitoring instrument that may abstain?
+
+\paragraph{Protocol in brief.}
+We forecast four series drawn from the same extract.
+The monthly series is a panel of enrolled-debt stock and collection.
+The calendar-daily series (Ranking~A) is the sum of payment-slip values on a continuous civil calendar, with explicit zeros.
+The weekly series sums that daily total by week ending Sunday.
+A fourth series, business-day daily (Ranking~B), keeps Monday--Friday observations and is an ablation of the daily target.
+Brazilian national holidays stay in Ranking~B.
+They are not removed.
+All families share contiguous train, validation, and test blocks, validation sMAPE for selection, and test sMAPE for the official rank.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item A multi-grain forecasting protocol for enrolled-debt collection, with official ranking by raw test sMAPE and a complementary skill score against the seasonal naive of the same grain.
+  \item A Stage~2 comparison that keeps selective TEM (an energy model with an abstention threshold) distinct from a disagreement proxy that only switches between a boosting forecast and the seasonal naive.
+  \item Evidence, on the March~2026 extract, that the sMAPE leader is grain-specific, and that retaining calendar zeros versus restricting the series to business days changes both the error level and the ordering.
+\end{itemize}
+
+Section~\ref{sec:related} places the protocol among classical forecasting, deep time-series models, and selective prediction.
+Section~\ref{sec:data} defines the series.
+Section~\ref{sec:method} states metrics, selection, and each model class.
+Section~\ref{sec:results} reports the freeze.
+Sections~\ref{sec:discussion}--\ref{sec:limitations} interpret the ranking and state what the extract does not support.

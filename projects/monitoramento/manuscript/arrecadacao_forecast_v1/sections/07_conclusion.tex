@@ -1,0 +1,28 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+One protocol, applied to monthly, calendar-daily, business-daily, and weekly collection series, does not yield one best forecaster.
+The March~2026 extract ranks families differently by grain, and collapsing those ranks would misstate the evidence.
+
+On the monthly panel the disagreement proxy E2 leads on test sMAPE ($\approx 10.9$).
+Histogram gradient boosting and the lag-12 seasonal naive remain close behind it.
+Selective TEM does not lead that grain.
+E2 is not TEM: the proxy switches on absolute disagreement, and TEM switches on an energy threshold.
+
+On calendar-daily slips, TimesFM leads (sMAPE $\approx 59.8$).
+Most other families have negative skill against the lag-7 seasonal naive, and weekend and empty-slip zeros dominate the official score.
+The positive-day sMAPE is a description of active days.
+It is not Ranking~A.
+
+On business days, TimesFM, histogram gradient boosting, and ordinary least squares form the leading cluster.
+Many positive skill scores on this grain reflect a weak lag-5 reference.
+National holidays were not removed and were not supplied as regressors.
+
+On the weekly aggregate, TimesFM shows the largest skill against the lag-52 seasonal naive (sMAPE $\approx 17.2$, skill $\approx 0.41$), with ridge and ordinary least squares next.
+
+For monitoring, the seasonal naive remains the reference forecast on every grain.
+Selective TEM is the specified instrument when a forecast may be withheld, and that use requires coverage beside sMAPE.
+The proxy stays an ablation.
+TimesFM is the zero-shot lead on the fine grains in this freeze, and it is not the monthly lead.
+
+Subsequent work on the same extract should publish E1 coverage with the point scores, give Ranking~B an explicit holiday calendar, and keep the seasonal naive of each grain as the skill reference so that later freezes remain comparable.

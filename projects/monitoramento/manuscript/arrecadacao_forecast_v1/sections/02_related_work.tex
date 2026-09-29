@@ -1,0 +1,44 @@
+\section{Related work}
+\label{sec:related}
+
+\paragraph{Classical forecasting and forecast competitions.}
+Hyndman and Athanasopoulos survey the practice this protocol follows: simple seasonal baselines, information criteria for low-order SARIMA models, and holdout evaluation that does not tune on the test block~\citep{hyndman2021fpp3,box1970tsa}.
+The M4 competition ranked a large set of series with the symmetric MAPE, among other scores, and showed that no single family wins every frequency~\citep{makridakis2020m4}.
+We adopt raw test sMAPE as the official rank for the same reason: percentage errors must remain defined when some collection days are zero, which plain MAPE is not~\citep{hyndman2006measures}.
+Skill against a reference forecast has a longer history in probabilistic prediction.
+Murphy defined skill scores of the form $1 - A/A_{\mathrm{ref}}$ for squared-error accuracy~\citep{murphy1988skill}.
+We reuse that algebraic form with sMAPE in the numerator and the denominator.
+We do not attribute an sMAPE skill score to Murphy.
+The closest scaled-error tradition in forecasting is MASE, which scales absolute error by an in-sample seasonal naive~\citep{hyndman2006measures}.
+Our skill column is out-of-sample and remains complementary to the sMAPE rank.
+
+\paragraph{Fiscal and administrative time series.}
+Revenue forecasting in public finance has long used seasonal and regression benchmarks.
+A recent neighboring result is RAMuST, a regime-aware multiscale transformer for industry-level corporate income tax, presented at the NeurIPS~2025 Workshop on Generative AI in Finance~\citep{you2025ramust}.
+RAMuST couples mixed-frequency macro covariates with a yearly regime head.
+Our target is different: aggregate collection associated with already enrolled debt, observed as an administrative stock and as payment-slip totals, without a macro or industry panel.
+We therefore keep classical, tabular, and foundation forecasters in one ladder rather than proposing a mixed-frequency architecture.
+
+\paragraph{Deep time-series forecasting.}
+Modern deep forecasters differ mainly in how they represent temporal variation.
+TimesNet reshapes a one-dimensional series into a two-dimensional variation map and applies a visual backbone~\citep{wu2023timesnet}.
+PatchTST tokenizes each channel into patches and shares a transformer across channels~\citep{nie2023patchtst}.
+We cite PatchTST as architectural context.
+It is not one of the fitted families below.
+TimesFM is a decoder-only foundation model pretrained for zero-shot forecasting~\citep{das2024timesfm}.
+The checkpoint in this study is the later TimesFM~3.0 release, which extends that line to a larger multivariate model~\citep{jain2026timesfm3}.
+We apply it zero-shot, with no gradient update on the collection series.
+Probabilistic deep forecasters include TimeGrad, an autoregressive denoising diffusion model~\citep{rasul2021timegrad}, and score-based generative modeling by denoising score matching~\citep{song2019score}.
+Our Stage~2 diffusion and score forecasters are reduced univariate implementations of those ideas, trained on the collection series.
+They are not reproductions of the original multivariate codebases.
+
+\paragraph{Selective prediction.}
+Selective classification attaches a reject option to a predictor so that the user trades coverage for risk on the accepted cases~\citep{geifman2019selectivenet}.
+The Time-Energy Model (TEM) carries that idea to forecasting: an encoder--decoder point forecast is paired with an energy-based model, and high-energy forecasts can be rejected while a target coverage is maintained~\citep{brusokas2025tem}.
+TEM is model-agnostic across deterministic backbones, including TimesNet, and the published training routine combines supervised point prediction with an energy head.
+Selective learning for deep time-series forecasting is a different mechanism~\citep{fu2025selective}.
+It masks uncertain or anomalous timesteps inside the training loss so that a deep model fits the remaining steps.
+It does not abstain at inference.
+Our E1 forecaster is inference-time TEM selection, with TimesNet as the primary backbone.
+Our E2 forecaster is a disagreement proxy between histogram gradient boosting and the seasonal naive.
+E2 estimates no energy and is not TEM.
