@@ -27,99 +27,105 @@ The threshold $\tau$ in those rules is chosen in step~3.
 
 \begin{figure}[t]
   \centering
-  \resizebox{\linewidth}{!}{%
   \begin{tikzpicture}[
-      font=\scriptsize,
-      node distance=3.4mm and 2.4mm,
-      box/.style={draw, rounded corners=1.5pt, align=center,
-                  inner sep=3.2pt, fill=white, line width=0.4pt},
-      lane/.style={box, align=left, text width=58mm, inner sep=4pt},
-      arr/.style={-Stealth, line width=0.5pt},
-      note/.style={font=\scriptsize\itshape, align=center}
+      font=\footnotesize,
+      node distance=5.5mm and 3mm,
+      wide/.style={draw, rounded corners=2pt, align=center,
+                   inner sep=4pt, minimum width=124mm, fill=white,
+                   line width=0.5pt},
+      grain/.style={draw, rounded corners=2pt, align=center,
+                    inner sep=3pt, text width=26mm, minimum height=14mm,
+                    fill=white, line width=0.5pt},
+      stage/.style={draw, rounded corners=2pt, align=center,
+                    inner sep=4pt, fill=black!8, line width=0.5pt},
+      rule/.style={draw, rounded corners=2pt, align=center,
+                   inner sep=3.5pt, text width=56mm, fill=white,
+                   line width=0.4pt, font=\footnotesize},
+      arr/.style={-{Stealth[length=2.2mm]}, line width=0.7pt},
+      bus/.style={line width=0.7pt}
     ]
-    \node[box, minimum width=108mm] (ex) {Extract \texttt{extracao=2026-03}};
-    \node[box, below=of ex, minimum width=108mm] (build)
-      {Build one series per grain};
+    \node[wide] (ex) {Extract \texttt{extracao=2026-03}};
+    \node[wide, below=of ex] (build) {Build one series per grain};
 
-    \node[box, below=7mm of build, xshift=-42mm, text width=22mm] (gm)
+    \node[grain, below=8mm of build, anchor=north, xshift=-46.5mm] (gm)
       {Monthly\\stock and collection};
-    \node[box, right=of gm, text width=22mm] (ga) {A\\calendar day\\zeros kept};
-    \node[box, right=of ga, text width=22mm] (gb) {B\\Mon--Fri\\holidays kept};
-    \node[box, right=of gb, text width=22mm] (gw) {Weekly\\Sunday close};
+    \node[grain, right=of gm] (ga) {A\\calendar day\\zeros kept};
+    \node[grain, right=of ga] (gb) {B\\Mon--Fri\\holidays kept};
+    \node[grain, right=of gb] (gw) {Weekly\\Sunday close};
 
-    \node[box, below=8mm of gm, xshift=14mm, minimum width=28mm] (tr) {Train};
-    \node[box, right=of tr, minimum width=28mm] (va) {Validation};
-    \node[box, right=of va, minimum width=28mm] (te) {Test};
-    \node[note, below=0.6mm of va] {one contiguous cut};
+    \node[wide, below=8mm of ga] (split)
+      {Train $\;\vert\;$ Validation $\;\vert\;$ Test\\[1pt]
+       {\itshape one contiguous cut}};
 
-    \node[lane, below=8mm of tr, anchor=north east, xshift=-1.5mm] (s1)
-      {\textbf{Stage 1: M0--M9}\\[1pt]
-       M0 copy a lag\\
-       M1 least squares and ridge\\
-       M2 SARIMAX (order by train AIC)\\
-       M3 gradient boosting\\
-       M4 Prophet\\
-       M5 multilayer perceptron\\
-       M6 adaptive forest\\
-       M7 Gaussian process\\
-       M8 kernel ridge\\
-       M9 TimesFM, weights frozen};
-    \node[lane, right=2.5mm of s1, anchor=north west] (s2)
-      {\textbf{Stage 2: E1--E4}\\[1pt]
-       \textbf{E1 TEM.} If lowest energy $\lt\tau$,\\
-       \quad take that candidate.\\
-       \quad If energy $\geq\tau$, abstain:\\
-       \quad return the seasonal naive.\\[2pt]
-       \textbf{E2 proxy, not TEM.}\\
-       \quad If $|\mathrm{boost}-\mathrm{seas}|\gt\tau$,\\
-       \quad return the seasonal naive.\\
-       \quad Otherwise return boosting.\\[2pt]
-       E3 mean of diffusion samples\\
-       E4 mean of Langevin samples};
+    \node[stage, below=8mm of split, anchor=north, xshift=-30mm] (s1)
+      {\parbox[t][44mm][t]{54mm}{\raggedright
+        \textbf{Stage 1}\\[2pt]
+        M0 naive\\
+        M1 least squares, ridge\\
+        M2 SARIMAX\\
+        M3 boosting\\
+        M4 Prophet\\
+        M5 MLP\\
+        M6 forest\\
+        M7 Gaussian process\\
+        M8 kernel ridge\\
+        M9 TimesFM (frozen)\par}};
+    \node[stage, anchor=north west, at={($(s1.north east)+(4mm,0)$)}] (s2)
+      {\parbox[t][44mm][t]{54mm}{\raggedright
+        \textbf{Stage 2}\\[2pt]
+        E1 TEM\\
+        E2 proxy (not TEM)\\
+        E3 diffusion\\
+        E4 score\par}};
 
-    \coordinate (lanes) at ($(s1.south)!0.5!(s2.south)$);
-    \node[box, below=6mm of lanes, minimum width=112mm] (fit)
-      {Fit on train, then select by validation sMAPE};
-    \node[box, below=of fit, minimum width=112mm] (refit)
-      {Refit on train $+$ validation};
-    \node[box, below=of refit, minimum width=112mm] (fc)
-      {Forecast the test block};
-    \node[box, below=of fc, minimum width=112mm] (rank)
-      {\textbf{Official rank:} test sMAPE (lower is better)};
-    \node[box, below=of rank, minimum width=112mm] (skill)
-      {\textbf{Secondary:} skill score vs the seasonal naive};
+    \coordinate (midS) at ($(s1.south)!0.5!(s2.south)$);
+    \node[wide, below=8mm of midS] (sel) {Select by validation sMAPE};
+    \node[wide, below=of sel] (refit) {Refit on train $+$ validation};
+    \node[wide, below=of refit] (fc) {Forecast the test block};
+    \node[wide, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
+    \node[wide, below=of rank] (skill)
+      {Secondary: skill score vs seasonal naive};
+
+    \node[font=\footnotesize\itshape, below=7mm of skill] (rtitle)
+      {Forecast-time rules};
+    \node[rule, below=3mm of rtitle, anchor=north, xshift=-31mm] (c1)
+      {\textbf{E1.} Energy $\lt \tau$: that candidate.\\
+       Else: seasonal naive.};
+    \node[rule, anchor=north west, at={($(c1.north east)+(4mm,0)$)}] (c2)
+      {\textbf{E2, not TEM.}\\
+       $|\mathrm{boost}-\mathrm{seas}| \gt \tau$: seasonal; else boost.};
 
     \draw[arr] (ex) -- (build);
-    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gm.north);
-    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (ga.north);
-    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gb.north);
-    \draw[arr] (build.south) -- ++(0,-2.2mm) -| (gw.north);
-    \draw[arr] (gm.south) -- ++(0,-2.4mm) -| (tr.north);
-    \draw[arr] (ga.south) -- (tr.north);
-    \draw[arr] (gb.south) -- (va.north);
-    \draw[arr] (gw.south) -- ++(0,-2.4mm) -| (te.north);
-    \draw[arr] (tr) -- (va);
-    \draw[arr] (va) -- (te);
-    \draw[arr] (tr.south) -- ++(0,-3mm) -| (s1.north);
-    \draw[arr] (te.south) -- ++(0,-3mm) -| (s2.north);
-    \draw[arr] (s1.south) -- ++(0,-2.5mm) -| (fit.north);
-    \draw[arr] (s2.south) -- ++(0,-2.5mm) -| (fit.north);
-    \draw[arr] (fit) -- (refit);
+    \draw[arr] (build.south) -- ++(0,-4mm) coordinate (forkG);
+    \draw[bus] (gm.north |- forkG) -- (gw.north |- forkG);
+    \foreach \n in {gm,ga,gb,gw}
+      \draw[arr] (\n.north |- forkG) -- (\n.north);
+
+    \coordinate (forkS) at ($($(gm.south)!0.5!(gw.south)$)+(0,-4mm)$);
+    \draw[bus] (gm.south |- forkS) -- (gw.south |- forkS);
+    \foreach \n in {gm,ga,gb,gw}
+      \draw[bus] (\n.south) -- (\n.south |- forkS);
+    \draw[arr] (forkS) -- (split.north);
+
+    \draw[arr] (split.south) -- ++(0,-4mm) coordinate (forkM);
+    \draw[bus] (s1.north |- forkM) -- (s2.north |- forkM);
+    \draw[arr] (s1.north |- forkM) -- (s1.north);
+    \draw[arr] (s2.north |- forkM) -- (s2.north);
+
+    \coordinate (forkE) at ($(midS)+(0,-4mm)$);
+    \draw[bus] (s1.south |- forkE) -- (s2.south |- forkE);
+    \draw[bus] (s1.south) -- (s1.south |- forkE);
+    \draw[bus] (s2.south) -- (s2.south |- forkE);
+    \draw[arr] (forkE) -- (sel.north);
+
+    \draw[arr] (sel) -- (refit);
     \draw[arr] (refit) -- (fc);
     \draw[arr] (fc) -- (rank);
     \draw[arr] (rank) -- (skill);
-  \end{tikzpicture}}
-  \caption{Full forecasting protocol.
-  The March 2026 extract is turned into four series.
-  Each series is cut once into contiguous train, validation, and test blocks.
-  Stage~1 (M0--M9) and Stage~2 (E1--E4) then follow the same outer path: fit on the train block, choose settings by validation sMAPE, refit on train plus validation, and forecast the test block.
-  The SARIMAX order is the exception: it is chosen by AIC on the train block.
-  The official rank is test sMAPE.
-  The skill score against that grain's seasonal naive is a second column.
-  Inside Stage~2, E1 abstains to the seasonal naive when every candidate has energy at least $\tau$.
-  E2 returns the seasonal naive when the boosting forecast and the seasonal naive differ by more than $\tau$, and returns the boosting forecast otherwise.
-  E2 does not estimate an energy and is not TEM.
-  TimesFM (M9) does not update its weights.}
+  \end{tikzpicture}
+  \caption{Every grain from the March 2026 extract follows this path: one contiguous train--validation--test cut, then Stage~1 or Stage~2.
+  Settings are chosen by validation sMAPE, the chosen model is refit on train plus validation, and the official rank is test sMAPE (the skill score against that grain's seasonal naive is secondary).
+  The notes are forecast-time rules only: E1 returns the lowest-energy candidate when that energy is below $\tau$ and otherwise the seasonal naive; E2 returns the seasonal naive when boosting and the seasonal naive disagree by more than $\tau$, and returns boosting otherwise (E2 is not TEM).}
   \label{fig:protocol}
 \end{figure}
 
