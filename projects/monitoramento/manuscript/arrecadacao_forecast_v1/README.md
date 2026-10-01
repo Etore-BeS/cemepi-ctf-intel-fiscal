@@ -59,6 +59,9 @@ python projects/monitoramento/scripts/rebuild_arrecadacao_forecast_figures.py
 The script writes PNG and SVG files under `projects/monitoramento/output/figures/articles/arrecadacao_forecast_paper_v1/`.
 It then copies the manuscript figures into `figures/` in this folder.
 The pred-vs-actual charts are four separate figures, one grain each.
+The main text includes monthly, grain B, and weekly.
+The calendar-day figure (grain A) is in the appendix.
+The Overleaf zip packs the whole `figures/` directory, so the grain A PNG stays in the upload.
 
 Layout constants live in `projects/monitoramento/scripts/arrecadacao_figure_theme.py`.
 Import that module from the discussion plot cell so a later notebook run uses the same theme.

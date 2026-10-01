@@ -74,10 +74,11 @@ It does not estimate an energy.
 A gain for E2 is not a gain for E1.
 
 TimesFM has the lowest test sMAPE on grains A and B and on the weekly series.
-Figures~\ref{fig:pred-m}--\ref{fig:pred-w} plot realized collection against the lowest test-sMAPE forecasts on each grain.
+Figures~\ref{fig:pred-m}, \ref{fig:pred-b}, and~\ref{fig:pred-w} plot realized collection against the lowest test-sMAPE forecasts on the monthly grain, on grain B, and on the weekly series.
+The calendar-day holdout for grain A is Figure~\ref{fig:pred-a} in Appendix~\ref{app:calendar}.
 On the monthly figure that set includes E2, the sMAPE leader.
 It does not include E1 as that leader.
-On the daily and weekly figures the set includes TimesFM.
+On the grain B figure, the weekly figure, and the calendar-day appendix figure, that set includes TimesFM.
 If the TimesFM weights are unavailable, the seasonal naive is still defined.
 On the monthly grain that naive remains competitive.
 
@@ -89,16 +90,6 @@ On the monthly grain that naive remains competitive.
   The lowest test sMAPE on this grain is E2, the disagreement proxy.
   The vertical axis is millions of BRL.}
   \label{fig:pred-m}
-\end{figure}
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_daily_a.png}
-  \caption{Grain A, calendar days.
-  Realized collection and the forecasts with the lowest test sMAPE.
-  The lowest test sMAPE is TimesFM 3.0.
-  The vertical axis is millions of BRL.}
-  \label{fig:pred-a}
 \end{figure}
 
 \begin{figure}[ht]
