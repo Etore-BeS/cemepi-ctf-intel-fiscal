@@ -1,7 +1,7 @@
 """Rebuild arrecadação forecast figures from the freeze. Do not refit models.
 
 Reads ranked test CSVs and ``preds_*_test.json``. Writes PNG and SVG with
-Kaleido, then copies the five manuscript PNGs and SVGs into the paper folder.
+Kaleido, then copies the manuscript PNGs and SVGs into the paper folder.
 
     python projects/monitoramento/scripts/rebuild_arrecadacao_forecast_figures.py
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
 import sys
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ from arrecadacao_figure_theme import (
     ABLATION_HEIGHT,
     ABLATION_WIDTH,
     ACTUAL_COLOR,
+    ACTUAL_LINE_WIDTH,
+    AXIS_TITLE_SIZE,
     COMPARE_HEIGHT,
     COMPARE_WIDTH,
     EXPORT_SCALE,
@@ -36,17 +39,21 @@ from arrecadacao_figure_theme import (
     FACET_WIDTH,
     FAM_ORDER,
     FONT,
+    FORECAST_LINE_WIDTH,
     FORECAST_STYLES,
     GRAIN_COLOR,
     GRAIN_ORDER,
     INK,
+    LINE_MARGIN,
     MANUSCRIPT_STEMS,
+    MARKER_SIZE_SHORT,
     PRED_HEIGHT,
     PRED_WIDTH,
+    TICK_SIZE,
     ZERO_LINE,
     apply_grouped_bar_layout,
+    bottom_legend,
     container_title,
-    place_panel_legends,
     title_with_subtitle,
     write_publication_figure,
 )
@@ -280,7 +287,10 @@ def _millions_label(value: float) -> str:
 
 
 def apply_brl_axis(
-    fig: go.Figure, row: int, col: int, values: list[np.ndarray], *, zero_floor: bool
+    fig: go.Figure,
+    values: list[np.ndarray],
+    *,
+    zero_floor: bool,
 ) -> None:
     finite = np.concatenate(
         [np.asarray(series, dtype=float).ravel() for series in values]
@@ -308,12 +318,12 @@ def apply_brl_axis(
         ticktext=[_millions_label(tick) for tick in ticks],
         title={
             "text": "BRL (millions)",
-            "font": {"family": FONT, "size": 18, "color": INK},
-            "standoff": 8,
+            "font": {"family": FONT, "size": AXIS_TITLE_SIZE, "color": INK},
+            "standoff": 28,
         },
-        tickfont={"family": FONT, "size": 15, "color": INK},
+        tickfont={"family": FONT, "size": TICK_SIZE, "color": INK},
         showline=True,
-        linewidth=1,
+        linewidth=1.6,
         linecolor=INK,
         ticks="outside",
         tickcolor=INK,
@@ -321,44 +331,28 @@ def apply_brl_axis(
         gridcolor="#E6E6E6",
         zeroline=False,
         automargin=False,
-        row=row,
-        col=col,
     )
 
 
-def apply_date_axis(fig: go.Figure, row: int, col: int, grain_key: str) -> None:
+def apply_date_axis(fig: go.Figure, grain_key: str) -> None:
     if grain_key == "monthly":
-        fig.update_xaxes(
-            tickformat="%b %Y",
-            dtick="M2",
-            tickangle=0,
-            row=row,
-            col=col,
-        )
+        fig.update_xaxes(tickformat="%b %Y", dtick="M2", tickangle=0)
     else:
-        fig.update_xaxes(
-            tickformat="%d %b",
-            nticks=6,
-            tickangle=-28,
-            row=row,
-            col=col,
-        )
+        fig.update_xaxes(tickformat="%d %b", dtick="M1", tickangle=0)
     fig.update_xaxes(
         title={
             "text": "Date",
-            "font": {"family": FONT, "size": 18, "color": INK},
-            "standoff": 8,
+            "font": {"family": FONT, "size": AXIS_TITLE_SIZE, "color": INK},
+            "standoff": 28,
         },
-        tickfont={"family": FONT, "size": 14, "color": INK},
+        tickfont={"family": FONT, "size": TICK_SIZE, "color": INK},
         showline=True,
-        linewidth=1,
+        linewidth=1.6,
         linecolor=INK,
         ticks="outside",
         tickcolor=INK,
         showgrid=False,
         automargin=False,
-        row=row,
-        col=col,
     )
 
 
@@ -397,7 +391,7 @@ def build_grouped_bars(
         title=title_with_subtitle(title, subtitle),
     )
     if zero_line:
-        fig.add_hline(y=0, line_dash="dash", line_color=ZERO_LINE, line_width=1.6)
+        fig.add_hline(y=0, line_dash="dash", line_color=ZERO_LINE, line_width=3)
         y_min = float(plot[y_col].min())
         y_max = float(plot[y_col].max())
         pad = 0.06 * (y_max - y_min)
@@ -408,82 +402,63 @@ def build_grouped_bars(
     return fig
 
 
-def build_pred_figure(
-    panels: list[SeriesPanel],
+def build_grain_forecast(
+    panel: SeriesPanel,
     *,
     title: str,
     subtitle: str,
-    width: int,
-    height: int,
 ) -> go.Figure:
-    margin_t, margin_b = 156, 108
-    fig = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=tuple(panel.spec.panel_title for panel in panels),
-        shared_xaxes=False,
-        shared_yaxes=False,
-        vertical_spacing=0.20,
-        horizontal_spacing=0.10,
-    )
-    for index, panel in enumerate(panels):
-        row = index // 2 + 1
-        col = index % 2 + 1
-        legend_name = "legend" if index == 0 else f"legend{index + 1}"
-        short = len(panel.actual) <= 16
-        for rank, (label, yhat) in enumerate(panel.forecasts):
-            style = FORECAST_STYLES[rank % len(FORECAST_STYLES)]
-            fig.add_trace(
-                go.Scatter(
-                    x=panel.x,
-                    y=yhat,
-                    name=label,
-                    mode="lines+markers" if short else "lines",
-                    line={"width": 2.4, "color": style["color"], "dash": style["dash"]},
-                    marker={"size": 6, "color": style["color"]},
-                    legend=legend_name,
-                    legendrank=rank + 1,
-                    hovertemplate="%{x|%Y-%m-%d}<br>"
-                    + label
-                    + ": %{y:,.0f} BRL<extra></extra>",
-                ),
-                row=row,
-                col=col,
-            )
+    """One full-width chart. The manuscript does not use a 2×2 pred panel."""
+    fig = go.Figure()
+    short = len(panel.actual) <= 16
+    for rank, (label, yhat) in enumerate(panel.forecasts):
+        style = FORECAST_STYLES[rank % len(FORECAST_STYLES)]
         fig.add_trace(
             go.Scatter(
                 x=panel.x,
-                y=panel.actual,
-                name="Actual",
+                y=yhat,
+                name=label,
                 mode="lines+markers" if short else "lines",
-                line={"width": 3.5, "color": ACTUAL_COLOR},
-                marker={"size": 8, "color": ACTUAL_COLOR, "line": {"width": 0}},
-                legend=legend_name,
-                legendrank=0,
-                hovertemplate="%{x|%Y-%m-%d}<br>Actual: %{y:,.0f} BRL<extra></extra>",
-            ),
-            row=row,
-            col=col,
+                line={
+                    "width": FORECAST_LINE_WIDTH,
+                    "color": style["color"],
+                    "dash": style["dash"],
+                },
+                marker={"size": MARKER_SIZE_SHORT, "color": style["color"]},
+                legendrank=rank + 1,
+                hovertemplate="%{x|%Y-%m-%d}<br>"
+                + label
+                + ": %{y:,.0f} BRL<extra></extra>",
+            )
         )
-        series = [panel.actual, *[yhat for _label, yhat in panel.forecasts]]
-        apply_brl_axis(fig, row, col, series, zero_floor=panel.spec.zero_floor)
-        apply_date_axis(fig, row, col, panel.spec.key)
+    fig.add_trace(
+        go.Scatter(
+            x=panel.x,
+            y=panel.actual,
+            name="Actual",
+            mode="lines+markers" if short else "lines",
+            line={"width": ACTUAL_LINE_WIDTH, "color": ACTUAL_COLOR},
+            marker={
+                "size": MARKER_SIZE_SHORT + 4,
+                "color": ACTUAL_COLOR,
+                "line": {"width": 0},
+            },
+            legendrank=0,
+            hovertemplate="%{x|%Y-%m-%d}<br>Actual: %{y:,.0f} BRL<extra></extra>",
+        )
+    )
+    series = [panel.actual, *[yhat for _label, yhat in panel.forecasts]]
+    apply_brl_axis(fig, series, zero_floor=panel.spec.zero_floor)
+    apply_date_axis(fig, panel.spec.key)
     fig.update_layout(
         template="plotly_white",
-        width=width,
-        height=height,
+        height=PRED_HEIGHT,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        font={"family": FONT, "size": 15, "color": INK},
-        title=container_title(title_with_subtitle(title, subtitle), height=height),
-        margin={"t": margin_t, "b": margin_b, "l": 108, "r": 36},
-    )
-    place_panel_legends(
-        fig,
-        n_panels=len(panels),
-        height=height,
-        margin_t=margin_t,
-        margin_b=margin_b,
+        font={"family": FONT, "size": TICK_SIZE, "color": INK},
+        title=container_title(title_with_subtitle(title, subtitle), height=PRED_HEIGHT),
+        legend=bottom_legend(height=PRED_HEIGHT, margin_bottom=LINE_MARGIN["b"]),
+        margin=LINE_MARGIN,
     )
     return fig
 
@@ -528,7 +503,7 @@ def build_metric_facets(frames: dict[str, pd.DataFrame]) -> go.Figure:
             categoryorder="array",
             categoryarray=labels,
             autorange="reversed",
-            tickfont={"family": FONT, "size": 12, "color": INK},
+            tickfont={"family": FONT, "size": 32, "color": INK},
             automargin=True,
             row=index // 2 + 1,
             col=index % 2 + 1,
@@ -536,9 +511,9 @@ def build_metric_facets(frames: dict[str, pd.DataFrame]) -> go.Figure:
         fig.update_xaxes(
             title={
                 "text": "sMAPE (%)",
-                "font": {"family": FONT, "size": 16, "color": INK},
+                "font": {"family": FONT, "size": 36, "color": INK},
             },
-            tickfont={"family": FONT, "size": 14, "color": INK},
+            tickfont={"family": FONT, "size": 32, "color": INK},
             rangemode="tozero",
             showgrid=True,
             gridcolor="#E6E6E6",
@@ -551,7 +526,7 @@ def build_metric_facets(frames: dict[str, pd.DataFrame]) -> go.Figure:
         height=FACET_HEIGHT,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        font={"family": FONT, "size": 15, "color": INK},
+        font={"family": FONT, "size": 32, "color": INK},
         title=container_title(
             title_with_subtitle(
                 "Test sMAPE by model and grain",
@@ -559,10 +534,10 @@ def build_metric_facets(frames: dict[str, pd.DataFrame]) -> go.Figure:
             ),
             height=FACET_HEIGHT,
         ),
-        margin={"t": 120, "b": 64, "l": 20, "r": 28},
+        margin={"t": 280, "b": 120, "l": 36, "r": 48},
     )
     for ann in fig.layout.annotations:
-        ann.font = {"family": FONT, "size": 18, "color": INK}
+        ann.font = {"family": FONT, "size": 40, "color": INK}
     return fig
 
 
@@ -593,6 +568,68 @@ def assemble_best(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def save_alias(src_stem: Path, alias: str) -> None:
     for suffix in (".png", ".svg"):
         shutil.copy2(src_stem.with_suffix(suffix), src_stem.with_name(alias + suffix))
+
+
+def remove_stale_multiplots(*directories: Path) -> None:
+    """Drop the old 2×2 pred exports so the manuscript cannot include them."""
+    stale = (
+        "paper_v1_discussion_pred_vs_actual_top",
+        "paper_v1_real_vs_pred_best",
+    )
+    for directory in directories:
+        for stem in stale:
+            for suffix in (".png", ".svg"):
+                path = directory / f"{stem}{suffix}"
+                if path.is_file():
+                    path.unlink()
+                    print(f"removed {path}")
+
+
+def assert_svg_readable(svg_path: Path) -> None:
+    """Fail when the title is clipped or the axis title meets the legend."""
+    text = svg_path.read_text()
+    height_match = re.search(r'\bheight="([0-9.]+)"', text)
+    title = re.search(
+        r'<text class="gtitle"[^>]*\sy="([0-9.]+)"[^>]*font-size:\s*([0-9.]+)px',
+        text,
+    )
+    axis = re.search(
+        r'<text class="xtitle"[^>]*\sy="([0-9.]+)"[^>]*font-size:\s*([0-9.]+)px',
+        text,
+    )
+    axis_shift = re.search(
+        r'<g class="g-xtitle" transform="translate\(0,(-?[0-9.]+)\)"',
+        text,
+    )
+    legend = re.search(
+        r'<g class="legend"[^>]*transform="translate\([0-9.]+,([0-9.]+)\)"',
+        text,
+    )
+    trace = re.search(
+        r'<g class="traces" transform="translate\(0,([0-9.]+)\)"[^>]*>\s*'
+        r'<text class="legendtext"[^>]*\sy="([0-9.]+)"[^>]*font-size:\s*([0-9.]+)px',
+        text,
+    )
+    if not all((height_match, title, axis, legend, trace)):
+        raise SystemExit(f"{svg_path.name}: could not read title, axis, or legend")
+    height = float(height_match.group(1))
+    title_cap = float(title.group(1)) - 0.78 * float(title.group(2))
+    if title_cap < 18:
+        raise SystemExit(f"{svg_path.name}: title cap at {title_cap:.1f}px is clipped")
+    shift = float(axis_shift.group(1)) if axis_shift else 0.0
+    axis_bottom = float(axis.group(1)) + shift + 0.28 * float(axis.group(2))
+    legend_shift = float(legend.group(1)) + float(trace.group(1))
+    legend_baseline = legend_shift + float(trace.group(2))
+    legend_size = float(trace.group(3))
+    legend_cap = legend_baseline - 0.78 * legend_size
+    gap = legend_cap - axis_bottom
+    if gap < 24:
+        raise SystemExit(f"{svg_path.name}: axis title and legend gap is {gap:.1f}px")
+    legend_bottom = legend_baseline + 0.30 * legend_size
+    if height - legend_bottom < 16:
+        raise SystemExit(
+            f"{svg_path.name}: legend ends {height - legend_bottom:.1f}px from the edge"
+        )
 
 
 def copy_manuscript(fig_dir: Path, manuscript_dir: Path) -> None:
@@ -647,15 +684,38 @@ def main(argv: list[str] | None = None) -> int:
         )
         for spec in GRAINS
     ]
-    best_only = [
-        series_panel(
-            spec,
-            frames[spec.label],
-            load_preds(freeze_dir / spec.preds_name),
-            top_k=1,
+    grain_titles = {
+        "monthly": (
+            "Monthly holdout",
+            "Black line: realized collection. Other lines: lowest test sMAPE.",
+        ),
+        "daily": (
+            "Grain A (calendar days)",
+            "Black line: realized collection. Other lines: lowest test sMAPE.",
+        ),
+        "business_daily": (
+            "Grain B (business days)",
+            "Black line: realized collection. Other lines: lowest test sMAPE.",
+        ),
+        "weekly": (
+            "Weekly holdout",
+            "Black line: realized collection. Other lines: lowest test sMAPE.",
+        ),
+    }
+    grain_stems = {
+        "monthly": "paper_v1_discussion_pred_vs_actual_monthly",
+        "daily": "paper_v1_discussion_pred_vs_actual_daily_a",
+        "business_daily": "paper_v1_discussion_pred_vs_actual_daily_b",
+        "weekly": "paper_v1_discussion_pred_vs_actual_weekly",
+    }
+    grain_figures = {
+        grain_stems[panel.spec.key]: build_grain_forecast(
+            panel,
+            title=grain_titles[panel.spec.key][0],
+            subtitle=grain_titles[panel.spec.key][1],
         )
-        for spec in GRAINS
-    ]
+        for panel in panels
+    }
 
     smape = build_grouped_bars(
         best,
@@ -673,7 +733,7 @@ def main(argv: list[str] | None = None) -> int:
         y_col="SS_SMAPE",
         y_title="SS_sMAPE",
         title="Skill score by family and grain",
-        subtitle="Best variant in each family. Higher is better. Dashed line: seasonal naive (SS = 0).",
+        subtitle="Higher is better. Dashed line: seasonal naive (SS = 0).",
         height=COMPARE_HEIGHT,
         grains=list(GRAIN_ORDER),
         colors=GRAIN_COLOR,
@@ -701,20 +761,6 @@ def main(argv: list[str] | None = None) -> int:
         colors=ABLATION_COLOR,
         zero_line=True,
     )
-    pred = build_pred_figure(
-        panels,
-        title="Realized collection and the lowest-sMAPE forecasts",
-        subtitle="Independent axes. Black line: realized collection. Rank is test sMAPE.",
-        width=PRED_WIDTH,
-        height=PRED_HEIGHT,
-    )
-    best_pred = build_pred_figure(
-        best_only,
-        title="Realized collection and the best test-sMAPE forecast",
-        subtitle="One model per grain. Independent axes. Black line: realized collection.",
-        width=PRED_WIDTH,
-        height=PRED_HEIGHT,
-    )
     facets = build_metric_facets(frames)
 
     exports = {
@@ -738,10 +784,10 @@ def main(argv: list[str] | None = None) -> int:
             ABLATION_WIDTH,
             ABLATION_HEIGHT,
         ),
-        "paper_v1_discussion_pred_vs_actual_top": (pred, PRED_WIDTH, PRED_HEIGHT),
-        "paper_v1_real_vs_pred_best": (best_pred, PRED_WIDTH, PRED_HEIGHT),
         "paper_v1_test_metrics_all": (facets, FACET_WIDTH, FACET_HEIGHT),
     }
+    for stem, fig in grain_figures.items():
+        exports[stem] = (fig, PRED_WIDTH, PRED_HEIGHT)
     for stem, (fig, width, height) in exports.items():
         png_path, svg_path = write_publication_figure(
             fig,
@@ -769,7 +815,10 @@ def main(argv: list[str] | None = None) -> int:
         fig_dir / "paper_v1_discussion_compare_ablation_skill",
         "paper_v1_discussion_ablation_A_vs_B_skill",
     )
+    for stem in MANUSCRIPT_STEMS:
+        assert_svg_readable(fig_dir / f"{stem}.svg")
     copy_manuscript(fig_dir, manuscript_dir)
+    remove_stale_multiplots(fig_dir, manuscript_dir)
     print(f"copied manuscript figures to {manuscript_dir}")
     return 0
 

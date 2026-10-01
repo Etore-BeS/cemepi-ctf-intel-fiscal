@@ -57,7 +57,8 @@ python projects/monitoramento/scripts/rebuild_arrecadacao_forecast_figures.py
 ```
 
 The script writes PNG and SVG files under `projects/monitoramento/output/figures/articles/arrecadacao_forecast_paper_v1/`.
-It then copies the five manuscript figures into `figures/` in this folder.
+It then copies the manuscript figures into `figures/` in this folder.
+The pred-vs-actual charts are four separate figures, one grain each.
 
 Layout constants live in `projects/monitoramento/scripts/arrecadacao_figure_theme.py`.
 Import that module from the discussion plot cell so a later notebook run uses the same theme.

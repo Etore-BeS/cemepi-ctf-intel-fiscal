@@ -30,12 +30,21 @@ import plotly.graph_objects as go
 # The stack still names Arial for machines that have it.
 FONT = "Liberation Sans, Arial, Helvetica, sans-serif"
 
-TITLE_SIZE = 22
-SUBTITLE_SIZE = 16
-AXIS_TITLE_SIZE = 18
-TICK_SIZE = 15
-LEGEND_SIZE = 16
-PANEL_TITLE_SIZE = 18
+# Layout pixels on a figure about 2100px wide.
+# The preprint text width is 5.5in, so a 32px title would print at about 6pt.
+# These sizes print near 11pt (title) and 8pt (ticks and legend) at \linewidth.
+TITLE_SIZE = 58
+SUBTITLE_SIZE = 42
+AXIS_TITLE_SIZE = 48
+TICK_SIZE = 42
+LEGEND_SIZE = 42
+# Kaleido puts the first title line's baseline at this y, not the cap top.
+# A 58px face needs about 48px above the baseline, plus padding.
+TITLE_BASELINE = 96
+
+ACTUAL_LINE_WIDTH = 9
+FORECAST_LINE_WIDTH = 6
+MARKER_SIZE_SHORT = 18
 
 INK = "#222222"
 MUTED = "#444444"
@@ -80,22 +89,32 @@ FORECAST_STYLES = (
 )
 ACTUAL_COLOR = "#111111"
 
-EXPORT_SCALE = 2
-COMPARE_WIDTH = 1600
-COMPARE_HEIGHT = 940
-ABLATION_WIDTH = 1600
-ABLATION_HEIGHT = 880
-PRED_WIDTH = 1600
-PRED_HEIGHT = 1340
-FACET_WIDTH = 1700
-FACET_HEIGHT = 1560
+EXPORT_SCALE = 3
+COMPARE_WIDTH = 2100
+COMPARE_HEIGHT = 1580
+ABLATION_WIDTH = 2100
+ABLATION_HEIGHT = 1520
+PRED_WIDTH = 2100
+PRED_HEIGHT = 1580
+FACET_WIDTH = 2200
+FACET_HEIGHT = 2860
+
+# Top margin clears the two-line title. Bottom margin holds ticks, the
+# axis title, and the legend as three separate bands.
+BAR_MARGIN = {"t": 270, "b": 330, "l": 270, "r": 72}
+LINE_MARGIN = {"t": 270, "b": 340, "l": 280, "r": 72}
+# Legend top, measured down from the plot edge (pixels).
+LEGEND_TOP_BELOW_PLOT = 210
 
 MANUSCRIPT_STEMS = (
     "paper_v1_discussion_compare_smape_by_grain",
     "paper_v1_discussion_compare_skill_by_grain",
     "paper_v1_discussion_compare_ablation_smape",
     "paper_v1_discussion_compare_ablation_skill",
-    "paper_v1_discussion_pred_vs_actual_top",
+    "paper_v1_discussion_pred_vs_actual_monthly",
+    "paper_v1_discussion_pred_vs_actual_daily_a",
+    "paper_v1_discussion_pred_vs_actual_daily_b",
+    "paper_v1_discussion_pred_vs_actual_weekly",
 )
 
 
@@ -109,15 +128,39 @@ def title_with_subtitle(title: str, subtitle: str) -> str:
 
 
 def container_title(text: str, *, height: int) -> dict:
-    """Pin the title block below the top edge so Kaleido does not clip the caps."""
+    """Place the title baseline low enough that Kaleido does not clip the caps.
+
+    Multi-line titles ignore ``yanchor='top'``: the first ``<tspan>`` baseline
+    is the y coordinate Kaleido writes.
+    """
     return {
         "text": text,
         "font": {"family": FONT, "size": TITLE_SIZE, "color": INK},
         "x": 0.5,
         "xanchor": "center",
-        "y": 1 - (26 / max(height, 1)),
+        "y": 1 - (TITLE_BASELINE / max(height, 1)),
         "yanchor": "top",
         "yref": "container",
+    }
+
+
+def bottom_legend(*, height: int, margin_bottom: int) -> dict:
+    """Horizontal legend below the axis title, inside the bottom margin."""
+    legend_top = height - margin_bottom + LEGEND_TOP_BELOW_PLOT
+    legend_top = min(legend_top, height - 110)
+    return {
+        "orientation": "h",
+        "yref": "container",
+        "xref": "container",
+        "x": 0.5,
+        "xanchor": "center",
+        "y": 1 - (legend_top / max(height, 1)),
+        "yanchor": "top",
+        "font": {"family": FONT, "size": LEGEND_SIZE, "color": INK},
+        "title_text": "",
+        "itemsizing": "constant",
+        "bgcolor": "rgba(255,255,255,0)",
+        "tracegroupgap": 36,
     }
 
 
@@ -125,7 +168,7 @@ def _axis_title(text: str) -> dict:
     return {
         "text": text,
         "font": {"family": FONT, "size": AXIS_TITLE_SIZE, "color": INK},
-        "standoff": 10,
+        "standoff": 28,
     }
 
 
@@ -142,21 +185,8 @@ def apply_grouped_bar_layout(fig: go.Figure, *, y_title: str, height: int) -> No
         plot_bgcolor="white",
         font={"family": FONT, "size": TICK_SIZE, "color": INK},
         title=container_title(fig.layout.title.text or "", height=height),
-        legend={
-            "orientation": "h",
-            "yref": "container",
-            "xref": "container",
-            "x": 0.5,
-            "xanchor": "center",
-            "y": 0.012,
-            "yanchor": "bottom",
-            "font": {"family": FONT, "size": LEGEND_SIZE, "color": INK},
-            "title_text": "",
-            "itemsizing": "constant",
-            "bgcolor": "rgba(255,255,255,0)",
-            "tracegroupgap": 16,
-        },
-        margin={"t": 118, "b": 108, "l": 100, "r": 36},
+        legend=bottom_legend(height=height, margin_bottom=BAR_MARGIN["b"]),
+        margin=BAR_MARGIN,
         bargap=0.28,
         bargroupgap=0.1,
     )
@@ -164,10 +194,10 @@ def apply_grouped_bar_layout(fig: go.Figure, *, y_title: str, height: int) -> No
         title=_axis_title("Family"),
         tickfont={"family": FONT, "size": TICK_SIZE, "color": INK},
         showline=True,
-        linewidth=1,
+        linewidth=1.6,
         linecolor=INK,
         ticks="outside",
-        ticklen=4,
+        ticklen=8,
         tickcolor=INK,
         automargin=False,
         showgrid=False,
@@ -176,10 +206,10 @@ def apply_grouped_bar_layout(fig: go.Figure, *, y_title: str, height: int) -> No
         title=_axis_title(y_title),
         tickfont={"family": FONT, "size": TICK_SIZE, "color": INK},
         showline=True,
-        linewidth=1,
+        linewidth=1.6,
         linecolor=INK,
         ticks="outside",
-        ticklen=4,
+        ticklen=8,
         tickcolor=INK,
         automargin=False,
         showgrid=True,
@@ -188,56 +218,10 @@ def apply_grouped_bar_layout(fig: go.Figure, *, y_title: str, height: int) -> No
         zeroline=False,
     )
     fig.update_traces(
-        marker_line_width=0.6,
+        marker_line_width=1.2,
         marker_line_color="white",
         selector={"type": "bar"},
     )
-
-
-def place_panel_legends(
-    fig: go.Figure,
-    *,
-    n_panels: int,
-    height: int,
-    margin_t: int,
-    margin_b: int,
-) -> None:
-    """Reserve a band above each panel for that panel's legend.
-
-    Subplot titles stay above the band. The legend is not shared across panels.
-    """
-    paper_h = max(height - margin_t - margin_b, 1)
-    # Band holds the one-line legend plus air between that box and the traces.
-    band = 96 / paper_h
-    title_lift = 10 / paper_h
-    for i in range(n_panels):
-        y_name = "yaxis" if i == 0 else f"yaxis{i + 1}"
-        x_name = "xaxis" if i == 0 else f"xaxis{i + 1}"
-        y0, y1 = fig.layout[y_name].domain
-        x0, _x1 = fig.layout[x_name].domain
-        fig.layout[y_name].domain = (y0, y1 - band)
-        if i < len(fig.layout.annotations):
-            fig.layout.annotations[i].update(
-                y=y1 + title_lift,
-                yanchor="bottom",
-                font={"family": FONT, "size": PANEL_TITLE_SIZE, "color": INK},
-            )
-        key = "legend" if i == 0 else f"legend{i + 1}"
-        fig.layout[key] = {
-            "xref": "paper",
-            "yref": "paper",
-            "x": x0,
-            "y": y1 - (4 / paper_h),
-            "xanchor": "left",
-            "yanchor": "top",
-            "orientation": "h",
-            "bgcolor": "rgba(255,255,255,0.96)",
-            "bordercolor": "#D0D0D0",
-            "borderwidth": 1,
-            "font": {"family": FONT, "size": 15, "color": INK},
-            "itemsizing": "constant",
-            "tracegroupgap": 8,
-        }
 
 
 def write_publication_figure(
