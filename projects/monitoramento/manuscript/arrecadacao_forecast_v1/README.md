@@ -39,6 +39,30 @@ E2 is the disagreement-proxy ablation.
 The official rank is raw test sMAPE.
 `SS_sMAPE` is complementary.
 
+## Regenerate the figures
+
+Rebuild the static figures from the freeze.
+Do not refit the models.
+
+The freeze directory is `projects/monitoramento/output/articles/arrecadacao_forecast_paper_v1/`.
+That directory is gitignored.
+It must contain the ranked test CSVs and the `preds_*_test.json` files.
+
+```bash
+python projects/monitoramento/scripts/rebuild_arrecadacao_forecast_figures.py
+```
+
+```fish
+python projects/monitoramento/scripts/rebuild_arrecadacao_forecast_figures.py
+```
+
+The script writes PNG and SVG files under `projects/monitoramento/output/figures/articles/arrecadacao_forecast_paper_v1/`.
+It then copies the five manuscript figures into `figures/` in this folder.
+
+Layout constants live in `projects/monitoramento/scripts/arrecadacao_figure_theme.py`.
+Import that module from the discussion plot cell so a later notebook run uses the same theme.
+The protocol notebook is not stored on this branch.
+
 Define a term at first use.
 Use GARE, enrolled debt, grain A, grain B, sMAPE, the skill score, TEM, and abstention only after that definition.
 Prefer a short sentence.
