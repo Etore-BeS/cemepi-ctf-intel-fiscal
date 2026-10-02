@@ -21,22 +21,11 @@ The energy rule does not improve on that 12-month window.
 The tables rank point sMAPE.
 They do not report coverage, so they do not say how often E1 abstained.
 
-Monthly and weekly sMAPE in Figure~\ref{fig:smape_grain} lie well below calendar-daily sMAPE.
+Monthly and weekly sMAPE in Table~\ref{tab:top3} lie well below calendar-daily sMAPE.
 A month or a week adds up many zero days, so the percentage error falls.
-Figure~\ref{fig:ss_grain} is a different comparison.
-A model can have a moderate sMAPE and still lose to the seasonal naive.
+Skill scores tell a different comparison: a model can have a moderate sMAPE and still lose to the seasonal naive.
 That is the common pattern on the monthly panel, on grain A, and on the weekly series outside TimesFM, ridge, and least squares.
-
-\begin{figure}[ht]
-  \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_skill_by_grain.png}
-  \caption{Skill score~\eqref{eq:ss} by model family and grain.
-  Zero is the seasonal naive of that grain.
-  A positive value means lower test sMAPE than that naive.
-  A negative value means higher test sMAPE than that naive.
-  The score is not averaged across grains.}
-  \label{fig:ss_grain}
-\end{figure}
+Family-level skill bars are in Appendix~\ref{app:bars}.
 
 \subsection{Zeros and the lag used in the skill score}
 \label{sec:zeros}
@@ -47,9 +36,9 @@ A model that smooths through those zeros pays for it in all-day sMAPE.
 Scoring only days with $y \gt 0$ answers a different question: error on days that had a slip.
 Ranking A is the error on the calendar, zeros included.
 
-Grain B drops weekends and keeps national holidays (Figure~\ref{fig:abl_smape}).
+Grain B drops weekends and keeps national holidays (Table~\ref{tab:ablation}).
 Test sMAPE falls, and boosting and least squares enter the top three behind TimesFM.
-Skill on B uses lag 5 (Figure~\ref{fig:abl_ss}).
+Skill on B uses lag 5.
 Lag 1 already beats lag 5, so many skill scores are positive.
 Those scores do not transfer to grain A, where the reference is lag 7.
 Weekday holidays remain in the series.
@@ -74,11 +63,12 @@ It does not estimate an energy.
 A gain for E2 is not a gain for E1.
 
 TimesFM has the lowest test sMAPE on grains A and B and on the weekly series.
-Figures~\ref{fig:pred-m}, \ref{fig:pred-b}, and \ref{fig:pred-w} plot realized collection against the lowest test-sMAPE forecasts on the monthly, business-day, and weekly grains.
+Figures~\ref{fig:pred-m}, \ref{fig:pred-b}, and \ref{fig:pred-w} plot realized collection against the sMAPE leader on the monthly, business-day, and weekly grains (a second forecast is shown only when its test sMAPE is within 5\% of the leader).
 The calendar-day (grain A) holdout is in Appendix~\ref{app:pred-a}.
-On the monthly figure that set includes E2, the sMAPE leader.
-It does not include E1 as that leader.
-On the business-day and weekly figures the set includes TimesFM.
+Figure~\ref{fig:residual} shows the holdout residual $\hat y - y$ for those three leaders.
+On the monthly figure the leader is E2, the disagreement proxy.
+It is not E1.
+On the business-day and weekly figures the leader is TimesFM.
 If the TimesFM weights are unavailable, the seasonal naive is still defined.
 On the monthly grain that naive remains competitive.
 
@@ -86,19 +76,18 @@ On the monthly grain that naive remains competitive.
   \centering
   \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_monthly.png}
   \caption{Monthly holdout.
-  Realized collection and the forecasts with the lowest test sMAPE.
-  The lowest test sMAPE on this grain is E2, the disagreement proxy.
+  Solid black: realized collection.
+  Dashed: E2, the lowest test-sMAPE forecast on this grain.
   The vertical axis is millions of BRL.}
   \label{fig:pred-m}
 \end{figure}
-
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_daily_b.png}
   \caption{Grain B, business days.
-  Realized collection and the forecasts with the lowest test sMAPE.
-  The lowest test sMAPE is TimesFM 3.0.
+  Solid black: realized collection.
+  Dashed: TimesFM (leader) and HGB (within 5\% sMAPE of the leader).
   The vertical axis is millions of BRL.}
   \label{fig:pred-b}
 \end{figure}
@@ -107,8 +96,19 @@ On the monthly grain that naive remains competitive.
   \centering
   \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_weekly.png}
   \caption{Weekly series.
-  Realized collection and the forecasts with the lowest test sMAPE.
-  The lowest test sMAPE is TimesFM 3.0.
+  Solid black: realized collection.
+  Dashed: TimesFM, the lowest test-sMAPE forecast on this grain.
   The vertical axis is millions of BRL.}
   \label{fig:pred-w}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_residual_leaders.png}
+  \caption{Holdout residual $\hat y - y$ (millions of BRL) for the sMAPE leader on each main-text grain.
+  Left: monthly (E2).
+  Center: grain B (TimesFM).
+  Right: weekly (TimesFM).
+  The dashed line is zero residual.}
+  \label{fig:residual}
 \end{figure}

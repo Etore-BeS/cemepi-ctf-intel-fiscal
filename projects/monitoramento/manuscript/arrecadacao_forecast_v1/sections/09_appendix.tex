@@ -2,16 +2,95 @@
 \label{app:pred-a}
 
 Grain A keeps every calendar day, including weekends with many zeros.
-Figure~\ref{fig:pred-a} shows the same style of holdout plot as in the main text.
-Test sMAPE on this grain is higher than on grain B for every family in Figure~\ref{fig:smape_grain}.
+Figure~\ref{fig:pred-a} shows the same clean holdout style as in the main text (Actual + sMAPE leader).
+Test sMAPE on this grain is higher than on grain B for every family in Table~\ref{tab:top3}.
 TimesFM 3.0 still has the lowest test sMAPE among the models in the freeze.
 
 \begin{figure}[ht]
   \centering
   \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_daily_a.png}
   \caption{Grain A, calendar days.
-  Realized collection and the forecasts with the lowest test sMAPE.
-  The lowest test sMAPE is TimesFM 3.0.
+  Solid black: realized collection.
+  Dashed: TimesFM, the lowest test-sMAPE forecast on this grain.
   The vertical axis is millions of BRL.}
   \label{fig:pred-a}
+\end{figure}
+
+\section{Family-level bar charts}
+\label{app:bars}
+
+The main text ranks models with tables.
+Figures~\ref{fig:smape_grain}--\ref{fig:abl_ss} repeat those ranks as grouped bars for readers who prefer a visual scan.
+They are not an additional experiment.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_smape_by_grain.png}
+  \caption{Test sMAPE by model family and grain, for the March 2026 extract.
+  The vertical axis is percent.
+  Lower is better.
+  Each grain is ranked on its own.}
+  \label{fig:smape_grain}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_skill_by_grain.png}
+  \caption{Skill score~\eqref{eq:ss} by model family and grain.
+  Zero is the seasonal naive of that grain.
+  A positive value means lower test sMAPE than that naive.}
+  \label{fig:ss_grain}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_smape.png}
+  \caption{Test sMAPE on grain A and on grain B.
+  Grain A keeps every calendar day, including weekend and empty-slip zeros.
+  Grain B keeps Monday--Friday and keeps Brazilian national holidays.
+  Lower is better.}
+  \label{fig:abl_smape}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_skill.png}
+  \caption{Skill score on grain A and on grain B.
+  The reference is the lag-7 seasonal naive on A and the lag-5 seasonal naive on B.}
+  \label{fig:abl_ss}
+\end{figure}
+
+\section{Full model zoo (small multiples)}
+\label{app:small-multiples}
+
+Figures~\ref{fig:sm-m}--\ref{fig:sm-b} show every freeze forecast against realized collection, one panel per model, with a shared vertical axis inside each grain.
+Light gray is actual in every panel.
+These replace overcrowded multi-model line plots in the main text.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_monthly.png}
+  \caption{Monthly holdout: every model versus actual (shared $y$).}
+  \label{fig:sm-m}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_weekly.png}
+  \caption{Weekly holdout: every model versus actual (shared $y$).}
+  \label{fig:sm-w}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_daily_a.png}
+  \caption{Grain A: every model versus actual (shared $y$).}
+  \label{fig:sm-a}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_daily_b.png}
+  \caption{Grain B: every model versus actual (shared $y$).}
+  \label{fig:sm-b}
 \end{figure}
