@@ -17,6 +17,10 @@ references/
 ## Descrição detalhada
 [docs/C_divida_macro.md](docs/C_divida_macro.md)
 
+## EDA completo
+
+Notebook único do fluxo PGE: [`notebooks/playground/EDA_completo.ipynb`](notebooks/playground/EDA_completo.ipynb). No Mac, com o HD montado, defina `DATA_ROOT` como em [`docs/EDA_completo.md`](docs/EDA_completo.md).
+
 ## Modelo de dados (API / dump)
 
 Notebook de playground com inventário `/meta`, argumento fact vs satélite e diagrama ER (Plotly + Mermaid/HTML + PNG):
