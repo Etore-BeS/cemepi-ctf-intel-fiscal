@@ -16,3 +16,13 @@ references/
 
 ## Descrição detalhada
 [docs/C_divida_macro.md](docs/C_divida_macro.md)
+
+## Modelo de dados (API / dump)
+
+Notebook de playground com inventário `/meta`, argumento fact vs satélite e diagrama ER (Plotly + Mermaid/HTML + PNG):
+
+[`notebooks/playground/modelo_dados_api_er_v0.ipynb`](notebooks/playground/modelo_dados_api_er_v0.ipynb)
+
+Figuras estáticas: `output/figures/macro_er_*.png` e `macro_er_mermaid_v0.html`.
+
+**Leitura rápida:** fact de estoque = `debito` (grão `ID_DEBITO` × foto `ANO_EXTRACAO`/`MES_EXTRACAO`); fact de pagamento = `arrecadacao`; satélites em `ID_DEBITO`; `faturamento` em `CNPJ`; BCB/IBGE fora do DB. Freeze `extracao=2026-03`.

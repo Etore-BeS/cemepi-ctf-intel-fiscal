@@ -1,0 +1,31 @@
+<!DOCTYPE html><html><head><meta charset='utf-8'><title>Macro ER Mermaid</title><script type='module'>  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });</script><style>body{font-family:system-ui,sans-serif;margin:1.5rem}.ext{border:2px dashed #888;padding:1rem;margin-top:1.5rem;border-radius:8px}code{background:#f4f4f4;padding:0.1rem 0.3rem}</style></head><body><h1>ER Macro — dump Inteligência Fiscal</h1><p>Freeze <code>extracao=2026-03</code>. Fact estoque: <b>debito</b>; fact evento: <b>arrecadacao</b>.</p><pre class='mermaid'>
+erDiagram
+    DEBITO ||--o{ ARRECADACAO : "ID_DEBITO"
+    DEBITO ||--o{ AJUIZAMENTO : "ID_DEBITO"
+    DEBITO ||--o{ STATUS_PROTESTO : "ID_DEBITO"
+    DEBITO ||--o{ SOLICITACAOPARCELAMENTO : "ID_DEBITO"
+    DEBITO ||--o{ DEBITO_RECEITA : "ID_DEBITO"
+    DEBITO }o--|| FATURAMENTO_MASCARADO : "CNPJ_DEVEDOR=CNPJ"
+
+    DEBITO {
+        BIGINT ID_DEBITO PK
+        BIGINT ANO_EXTRACAO PK
+        BIGINT MES_EXTRACAO PK
+        VARCHAR TIPO_DEBITO
+        DOUBLE VALOR_SEM_HONORARIOS
+        VARCHAR CNPJ_DEVEDOR FK
+    }
+    ARRECADACAO {
+        BIGINT ID_GARE_SEFAZ PK
+        BIGINT ID_DEBITO FK
+        BIGINT ANO
+        BIGINT MES
+        DOUBLE VALOR_TOTAL_GARE
+    }
+    FATURAMENTO_MASCARADO {
+        BIGINT ID_FATURAMENTO PK
+        VARCHAR CNPJ FK
+        VARCHAR MES_ANO_REFERENCIA
+        DOUBLE VL_FATURAMENTO
+    }
+</pre><div class='ext'><h2>Fora do DB (sem FK)</h2><ul><li>BCB SGS — Selic, IPCA</li><li>IBGE — PIB / atividade</li><li>Calendário REFIS / transação / Res. 9/2024</li></ul><p>Merge apenas por <b>mês civil</b> do painel mensal.</p></div><h2>Lacunas</h2><ul><li>Sem tabela <code>garantia</code></li><li>Sem dívida <b>não inscrita</b></li></ul></body></html>

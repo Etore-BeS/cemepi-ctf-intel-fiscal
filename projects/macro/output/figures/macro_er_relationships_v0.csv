@@ -1,0 +1,8 @@
+from,to,on,card,tipo
+debito,arrecadacao,ID_DEBITO,1:0..N,fact→fact evento
+debito,ajuizamento,ID_DEBITO,1:0..N,fact→satélite
+debito,protesto,ID_DEBITO,1:0..N,fact→satélite
+debito,parcelamento,ID_DEBITO,1:0..N,fact→satélite
+debito,receita,ID_DEBITO,1:0..N,fact→satélite
+debito,faturamento,CNPJ_DEVEDOR=CNPJ,N:N via agregação,fact→entidade
+debito/arrecadacao,BCB/IBGE,ano-mês civil,1:1 mês,externo
