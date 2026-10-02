@@ -16,6 +16,7 @@ later run matches the manuscript exports:
         GRAIN_PATTERN,
         LEGEND_ITEMWIDTH,
         LEGEND_SIZE,
+        LEGEND_SYMBOL_SCALE,
         TICK_SIZE,
         TITLE_SIZE,
         apply_grouped_bar_layout,
@@ -26,6 +27,7 @@ later run matches the manuscript exports:
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import plotly.graph_objects as go
 
@@ -42,8 +44,11 @@ AXIS_TITLE_SIZE = 48
 TICK_SIZE = 42
 # Legend must stay readable in a two-column NeurIPS PDF; exceed tick size.
 LEGEND_SIZE = 56
-# Legend symbol width (px). Plotly default is 30; bump for print ID.
-LEGEND_ITEMWIDTH = 78
+# Legend symbol width (px). Plotly default is 30; drives line length in the legend.
+LEGEND_ITEMWIDTH = 120
+# Plotly hardcodes bar legend squares at 12x12 and caps constant marker size at 12.
+# After Kaleido, scale those symbols so color swatches match the large legend face.
+LEGEND_SYMBOL_SCALE = 3.5
 # Kaleido puts the first title line's baseline at this y, not the cap top.
 # A 58px face needs about 48px above the baseline, plus padding.
 TITLE_BASELINE = 96
@@ -246,6 +251,69 @@ def apply_grouped_bar_layout(fig: go.Figure, *, y_title: str, height: int) -> No
     )
 
 
+def enlarge_legend_symbols(svg: str, *, scale: float = LEGEND_SYMBOL_SCALE) -> str:
+    """Grow Plotly legend color markers after export.
+
+    Plotly.js draws bar swatches as a fixed ``M6,6H-6V-6H6Z`` (12x12) and, with
+    ``itemsizing='constant'``, caps scatter markers at 12px and legend line
+    strokes at 5px. Layout ``itemwidth`` only lengthens line segments. Scale the
+    legend symbol transforms (and line stroke widths) so print swatches read at
+    roughly 2-3x the stock size beside the large legend face.
+    """
+    if scale == 1:
+        return svg
+
+    def scale_points(match: re.Match[str]) -> str:
+        inner = match.group(1)
+
+        def fix_transform(tm: re.Match[str]) -> str:
+            existing = tm.group(1)
+            if "scale(" in existing:
+                return tm.group(0)
+            return f'transform="{existing} scale({scale:g})"'
+
+        inner = re.sub(r'transform="([^"]+)"', fix_transform, inner)
+        return f'<g class="legendpoints">{inner}</g>'
+
+    def scale_lines(match: re.Match[str]) -> str:
+        inner = match.group(1)
+
+        def fix_stroke(sm: re.Match[str]) -> str:
+            return f"stroke-width: {float(sm.group(1)) * scale:g}px"
+
+        inner = re.sub(r"stroke-width:\s*([0-9.]+)px", fix_stroke, inner)
+        return f'<g class="legendlines">{inner}</g>'
+
+    svg = re.sub(r'<g class="legendpoints">([\s\S]*?)</g>', scale_points, svg)
+    svg = re.sub(r'<g class="legendlines">([\s\S]*?)</g>', scale_lines, svg)
+    return svg
+
+
+def _rasterize_svg(svg_path: Path, png_path: Path, *, width: int, height: int) -> None:
+    """Rasterize the post-processed SVG so PNG legend swatches match SVG."""
+    import shutil
+    import subprocess
+
+    converter = shutil.which("rsvg-convert")
+    if converter is None:
+        raise RuntimeError(
+            "rsvg-convert is required to bake enlarged legend symbols into PNG"
+        )
+    subprocess.run(
+        [
+            converter,
+            "-w",
+            str(width),
+            "-h",
+            str(height),
+            "-o",
+            str(png_path),
+            str(svg_path),
+        ],
+        check=True,
+    )
+
+
 def write_publication_figure(
     fig: go.Figure,
     stem_path: Path,
@@ -254,10 +322,16 @@ def write_publication_figure(
     height: int,
     scale: int,
 ) -> tuple[Path, Path]:
-    """Write PNG (``width * scale`` pixels) and SVG next to each other."""
+    """Write SVG, enlarge legend color markers, then rasterize PNG to match."""
     stem_path.parent.mkdir(parents=True, exist_ok=True)
     png_path = stem_path.with_suffix(".png")
     svg_path = stem_path.with_suffix(".svg")
-    fig.write_image(png_path, width=width, height=height, scale=scale)
     fig.write_image(svg_path, width=width, height=height)
+    svg_path.write_text(enlarge_legend_symbols(svg_path.read_text()))
+    _rasterize_svg(
+        svg_path,
+        png_path,
+        width=width * scale,
+        height=height * scale,
+    )
     return png_path, svg_path

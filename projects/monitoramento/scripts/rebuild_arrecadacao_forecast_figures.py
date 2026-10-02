@@ -46,6 +46,7 @@ from arrecadacao_figure_theme import (
     GRAIN_ORDER,
     GRAIN_PATTERN,
     INK,
+    LEGEND_SYMBOL_SCALE,
     LINE_MARGIN,
     MANUSCRIPT_STEMS,
     MARKER_SIZE_SHORT,
@@ -635,6 +636,35 @@ def assert_svg_readable(svg_path: Path) -> None:
         raise SystemExit(
             f"{svg_path.name}: legend ends {height - legend_bottom:.1f}px from the edge"
         )
+    symbol = re.search(
+        r'<g class="legendpoints">[^/][\s\S]*?scale\(([0-9.]+)\)',
+        text,
+    )
+    has_symbol_paths = bool(
+        re.search(r'<g class="legendpoints">\s*<path\b', text)
+    )
+    line_stroke = re.search(
+        r'<g class="legendlines">[\s\S]*?stroke-width:\s*([0-9.]+)px',
+        text,
+    )
+    if has_symbol_paths:
+        if not symbol:
+            raise SystemExit(
+                f"{svg_path.name}: legendpoints missing scale({LEGEND_SYMBOL_SCALE})"
+            )
+        got = float(symbol.group(1))
+        if abs(got - LEGEND_SYMBOL_SCALE) > 0.01:
+            raise SystemExit(
+                f"{svg_path.name}: legend symbol scale {got} != {LEGEND_SYMBOL_SCALE}"
+            )
+    if line_stroke:
+        # stock Plotly constant line stroke is 5px; post-scale multiplies it
+        got = float(line_stroke.group(1))
+        expected = 5.0 * LEGEND_SYMBOL_SCALE
+        if got + 0.01 < expected:
+            raise SystemExit(
+                f"{svg_path.name}: legend line stroke {got}px < {expected}px"
+            )
 
 
 def copy_manuscript(fig_dir: Path, manuscript_dir: Path) -> None:
