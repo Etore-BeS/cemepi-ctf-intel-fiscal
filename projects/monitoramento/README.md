@@ -9,10 +9,14 @@ Pergunta de pesquisa: com o dump mensal de estoque inscrito e arrecadação (GAR
 
 ## Layout
 ```text
+# (archived) src/arrecadacao_forecast/ → .local/archive/arrecadacao_forecast_pkg/
+# models+protocol inline in articles/arrecadacao_forecast_paper_v1.ipynb
 notebooks/
   estoque_arrecadacao_eda_forecast_v0.ipynb
+  articles/arrecadacao_forecast_paper_v1.ipynb
   gare_janelas_mensais_v0.ipynb
   *_sample.ipynb
+manuscript/arrecadacao_forecast_v1/  # NeurIPS draft (sources + figures; build PDF gitignored)
 output/figures/   # PNGs estáticos (Plotly + Kaleido) para preview no GitHub
 docs/             # descrição da frente + galeria
 references/

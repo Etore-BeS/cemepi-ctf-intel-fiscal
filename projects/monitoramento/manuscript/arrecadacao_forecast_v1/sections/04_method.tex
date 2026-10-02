@@ -20,34 +20,35 @@ The same steps apply to every grain.
 \end{enumerate}
 
 Figure~\ref{fig:protocol} draws this path for every grain.
-Stage~1 and Stage~2 are separate families.
-They share the same cut, the same selection step, and the same test rank.
+Stage~1 fits the point-forecast families first.
+Stage~2 runs after that: E2 needs the Stage~1 boosting and seasonal-naive forecasts, and E1 may use Stage~1 forecasts as energy candidates.
+Both stages share the same cut, the same selection step, and the same test rank.
 E1 and E2 add an accept-or-abstain rule at forecast time.
 The threshold $\tau$ in those rules is chosen in step~3.
 
 \begin{figure}[H]
   \centering
   \begin{tikzpicture}[
-      font=\footnotesize,
+      font=\normalsize,
       node distance=5.5mm and 3mm,
       wide/.style={draw, rounded corners=2pt, align=center,
-                   inner sep=4pt, minimum width=124mm, fill=white,
+                   inner sep=5pt, minimum width=124mm, fill=white,
                    line width=0.5pt},
       grain/.style={draw, rounded corners=2pt, align=center,
-                    inner sep=3pt, text width=26mm, minimum height=14mm,
+                    inner sep=3.5pt, text width=28mm, minimum height=16mm,
                     fill=white, line width=0.5pt},
       stage/.style={draw, rounded corners=2pt, align=center,
-                    inner sep=4pt, fill=black!8, line width=0.5pt},
+                    inner sep=5pt, fill=black!8, line width=0.5pt},
       rule/.style={draw, rounded corners=2pt, align=center,
-                   inner sep=3.5pt, text width=56mm, fill=white,
-                   line width=0.4pt, font=\footnotesize},
+                   inner sep=4pt, text width=56mm, fill=white,
+                   line width=0.4pt, font=\normalsize},
       arr/.style={-{Stealth[length=2.2mm]}, line width=0.7pt},
       bus/.style={line width=0.7pt}
     ]
     \node[wide] (ex) {Extract \texttt{extracao=2026-03}};
     \node[wide, below=of ex] (build) {Build one series per grain};
 
-    \node[grain, below=8mm of build, anchor=north, xshift=-46.5mm] (gm)
+    \node[grain, below=8mm of build, anchor=north, xshift=-48mm] (gm)
       {Monthly\\stock and collection};
     \node[grain, right=of gm] (ga) {A\\calendar day\\zeros kept};
     \node[grain, right=of ga] (gb) {B\\Mon--Fri\\holidays kept};
@@ -57,36 +58,40 @@ The threshold $\tau$ in those rules is chosen in step~3.
       {Train $\;\vert\;$ Validation $\;\vert\;$ Test\\[1pt]
        {\itshape one contiguous cut}};
 
-    \node[stage, below=8mm of split, anchor=north, xshift=-30mm] (s1)
-      {\parbox[t][44mm][t]{54mm}{\raggedright
-        \textbf{Stage 1}\\[2pt]
-        M0 naive\\
-        M1 least squares, ridge\\
-        M2 SARIMAX\\
-        M3 boosting\\
-        M4 Prophet\\
-        M5 MLP\\
-        M6 forest\\
-        M7 Gaussian process\\
-        M8 kernel ridge\\
-        M9 TimesFM (frozen)\par}};
-    \node[stage, anchor=north west, at={($(s1.north east)+(4mm,0)$)}] (s2)
-      {\parbox[t][44mm][t]{54mm}{\raggedright
-        \textbf{Stage 2}\\[2pt]
-        E1 TEM\\
-        E2 proxy (not TEM)\\
-        E3 diffusion\\
-        E4 score\par}};
+    \node[stage, below=8mm of split] (s1)
+      {\parbox{118mm}{\centering
+        \textbf{Stage 1 --- point forecasts (M0--M9)}\\[3pt]
+        {\small
+        M0 naive\quad
+        M1 least squares / ridge\quad
+        M2 SARIMAX\quad
+        M3 boosting\quad
+        M4 Prophet\\[1pt]
+        M5 MLP\quad
+        M6 forest\quad
+        M7 Gaussian process\quad
+        M8 kernel ridge\quad
+        M9 TimesFM (frozen)}
+        \par}};
 
-    \coordinate (midS) at ($(s1.south)!0.5!(s2.south)$);
-    \node[wide, below=8mm of midS] (sel) {Select by validation sMAPE};
+    \node[stage, below=7mm of s1] (s2)
+      {\parbox{118mm}{\centering
+        \textbf{Stage 2 --- after Stage 1}\\[3pt]
+        {\small
+        E1 TEM (may use Stage~1 forecasts as candidates)\\[1pt]
+        E2 proxy, not TEM (needs Stage~1 boost $+$ seasonal naive)\\[1pt]
+        E3 diffusion\quad
+        E4 score}
+        \par}};
+
+    \node[wide, below=8mm of s2] (sel) {Select by validation sMAPE};
     \node[wide, below=of sel] (refit) {Refit on train $+$ validation};
     \node[wide, below=of refit] (fc) {Forecast the test block};
     \node[wide, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
     \node[wide, below=of rank] (skill)
       {Secondary: skill score vs seasonal naive};
 
-    \node[font=\footnotesize\itshape, below=7mm of skill] (rtitle)
+    \node[font=\normalsize\itshape, below=7mm of skill] (rtitle)
       {Forecast-time rules};
     \node[rule, below=3mm of rtitle, anchor=north, xshift=-31mm] (c1)
       {\textbf{E1.} Energy $\lt \tau$: that candidate.\\
@@ -107,23 +112,17 @@ The threshold $\tau$ in those rules is chosen in step~3.
       \draw[bus] (\n.south) -- (\n.south |- forkS);
     \draw[arr] (forkS) -- (split.north);
 
-    \draw[arr] (split.south) -- ++(0,-4mm) coordinate (forkM);
-    \draw[bus] (s1.north |- forkM) -- (s2.north |- forkM);
-    \draw[arr] (s1.north |- forkM) -- (s1.north);
-    \draw[arr] (s2.north |- forkM) -- (s2.north);
-
-    \coordinate (forkE) at ($(midS)+(0,-4mm)$);
-    \draw[bus] (s1.south |- forkE) -- (s2.south |- forkE);
-    \draw[bus] (s1.south) -- (s1.south |- forkE);
-    \draw[bus] (s2.south) -- (s2.south |- forkE);
-    \draw[arr] (forkE) -- (sel.north);
+    \draw[arr] (split) -- (s1);
+    \draw[arr] (s1) -- (s2);
+    \draw[arr] (s2) -- (sel);
 
     \draw[arr] (sel) -- (refit);
     \draw[arr] (refit) -- (fc);
     \draw[arr] (fc) -- (rank);
     \draw[arr] (rank) -- (skill);
   \end{tikzpicture}
-  \caption{Every grain from the March 2026 extract follows this path: one contiguous train--validation--test cut, then Stage~1 or Stage~2.
+  \caption{Every grain from the March 2026 extract follows one contiguous train--validation--test cut.
+  Stage~1 fits the point-forecast families first; Stage~2 runs next (E2 needs Stage~1 boosting and seasonal-naive forecasts; E1 may use Stage~1 forecasts as energy candidates).
   Settings are chosen by validation sMAPE, the chosen model is refit on train plus validation, and the official rank is test sMAPE (the skill score against that grain's seasonal naive is secondary).
   The notes are forecast-time rules only: E1 returns the lowest-energy candidate when that energy is below $\tau$ and otherwise the seasonal naive; E2 returns the seasonal naive when boosting and the seasonal naive disagree by more than $\tau$, and returns boosting otherwise (E2 is not TEM).}
   \label{fig:protocol}
@@ -393,9 +392,11 @@ We do not substitute another model.
 \subsection{Stage 2 models}
 \label{sec:energy}
 
-Stage 2 asks two further questions.
+Stage~2 comes after Stage~1.
+It asks two further questions.
 Does an energy threshold lower test sMAPE relative to the seasonal naive?
 Does a simpler switch, with no energy, do so?
+E2 reuses Stage~1 boosting and seasonal-naive forecasts.
 Only E1 is TEM.
 
 \paragraph{E1: selective TEM.}
@@ -430,8 +431,9 @@ Coverage is the share of test times that take the first line.
 The sMAPE tables do not report coverage.
 
 \paragraph{E2: disagreement proxy.}
-E2 predicts either the boosting forecast or the seasonal naive.
+E2 predicts either the Stage~1 boosting forecast or the Stage~1 seasonal naive.
 It does not compute~\eqref{eq:ebm}.
+Those two Stage~1 forecasts must exist before E2 is evaluated.
 At each time let
 \begin{equation}
   E_t = \bigl|\hat y_t^{\mathrm{boost}} - \hat y_t^{\mathrm{seas}}\bigr|.

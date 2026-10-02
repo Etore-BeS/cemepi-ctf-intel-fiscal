@@ -4,6 +4,8 @@
 
 Com o dump mensal de estoque + GARE (`extracao` congelada), qual horizonte e quais baselines permitem prever arrecadação de forma **reproduzível** (*walk-forward*)?
 
+Manuscript: `manuscript/arrecadacao_forecast_v1/` (NeurIPS-style draft).
+
 Notebooks: `notebooks/estoque_arrecadacao_eda_forecast_v0.ipynb` (EDA + M0–M5 walk-forward MAPE/SMAPE/RMSE); `notebooks/gare_janelas_mensais_v0.ipynb` (janelas GARE — Fase B).
 
 ## Escopo (frente B)

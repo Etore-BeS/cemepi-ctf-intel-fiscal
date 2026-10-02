@@ -16,6 +16,8 @@
 \newcommand{\lt}{<}\newcommand{\gt}{>}
 \usepackage{graphicx}
 \usepackage{float}
+\usepackage[font=normalsize,labelfont=bf,labelsep=period]{caption}
+\captionsetup{font={normalsize},labelfont={bf}}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,calc}
 \usepackage{microtype}
@@ -47,6 +49,9 @@ across Monthly, Daily, and Weekly Grains}
 \input{sections/06_discussion}
 \input{sections/07_conclusion}
 \input{sections/08_limitations}
+
+\appendix
+\input{sections/09_appendix}
 
 \bibliographystyle{plainnat}
 \bibliography{refs}

@@ -74,18 +74,41 @@ It does not estimate an energy.
 A gain for E2 is not a gain for E1.
 
 TimesFM has the lowest test sMAPE on grains A and B and on the weekly series.
-Figure~\ref{fig:pred} plots realized collection against the best test-sMAPE forecasts in each grain.
-On the monthly panel that set includes E2, the sMAPE leader.
+Figures~\ref{fig:pred-m}, \ref{fig:pred-b}, and \ref{fig:pred-w} plot realized collection against the lowest test-sMAPE forecasts on the monthly, business-day, and weekly grains.
+The calendar-day (grain A) holdout is in Appendix~\ref{app:pred-a}.
+On the monthly figure that set includes E2, the sMAPE leader.
 It does not include E1 as that leader.
-On the daily and weekly panels the set includes TimesFM.
+On the business-day and weekly figures the set includes TimesFM.
 If the TimesFM weights are unavailable, the seasonal naive is still defined.
 On the monthly grain that naive remains competitive.
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_top.png}
-  \caption{Realized collection and the forecasts with the lowest test sMAPE, by grain.
-  On the monthly panel the lowest sMAPE is E2, the disagreement proxy.
-  On grains A and B and on the weekly series the lowest sMAPE is TimesFM 3.0.}
-  \label{fig:pred}
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_monthly.png}
+  \caption{Monthly holdout.
+  Realized collection and the forecasts with the lowest test sMAPE.
+  The lowest test sMAPE on this grain is E2, the disagreement proxy.
+  The vertical axis is millions of BRL.}
+  \label{fig:pred-m}
+\end{figure}
+
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_daily_b.png}
+  \caption{Grain B, business days.
+  Realized collection and the forecasts with the lowest test sMAPE.
+  The lowest test sMAPE is TimesFM 3.0.
+  The vertical axis is millions of BRL.}
+  \label{fig:pred-b}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_weekly.png}
+  \caption{Weekly series.
+  Realized collection and the forecasts with the lowest test sMAPE.
+  The lowest test sMAPE is TimesFM 3.0.
+  The vertical axis is millions of BRL.}
+  \label{fig:pred-w}
 \end{figure}

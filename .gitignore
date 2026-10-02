@@ -35,9 +35,18 @@ pipelines/litigancia/scripts/data/recollect_round2_icms.log
 *.local.ipynb
 .superpowers/
 
-projects/litigancia/manuscript/*.aux
-projects/litigancia/manuscript/*.log
-projects/litigancia/manuscript/*.out
+# LaTeX build (manuscripts)
+**/manuscript/**/*.aux
+**/manuscript/**/*.log
+**/manuscript/**/*.out
+**/manuscript/**/*.toc
+**/manuscript/**/*.fls
+**/manuscript/**/*.fdb_latexmk
+**/manuscript/**/*.synctex.gz
+**/manuscript/**/*.bbl
+**/manuscript/**/*.blg
+# Prefer compile-on-demand; litigancia may still track data_descriptor.pdf historically
+**/manuscript/**/main.pdf
 
 # Generated / heavy research artifacts (never publish)
 **/artifacts/
