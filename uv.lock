@@ -248,6 +248,8 @@ dependencies = [
     { name = "deltalake" },
     { name = "duckdb" },
     { name = "fake-useragent" },
+    { name = "gitpython" },
+    { name = "huggingface-hub" },
     { name = "ijson" },
     { name = "ipykernel" },
     { name = "juscraper" },
@@ -270,6 +272,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "seaborn" },
     { name = "statsmodels" },
+    { name = "timesfm" },
     { name = "tqdm" },
 ]
 
@@ -294,6 +297,8 @@ requires-dist = [
     { name = "deltalake", specifier = ">=1.5.1" },
     { name = "duckdb", specifier = ">=1.5.0" },
     { name = "fake-useragent", specifier = ">=2.0.3" },
+    { name = "gitpython", specifier = ">=3.1.62" },
+    { name = "huggingface-hub", specifier = ">=1.31.0" },
     { name = "ijson", specifier = ">=3.5.0" },
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "juscraper", git = "ssh://git@github.com/Etore-BeS/juscraper.git" },
@@ -316,6 +321,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "statsmodels", specifier = ">=0.14.0" },
+    { name = "timesfm", specifier = ">=3.0.2" },
     { name = "tqdm", specifier = ">=4.67.3" },
 ]
 
@@ -936,6 +942,30 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1a/16/e5a507d42c0eb629b48ebe6c278f2d8c3f929bb6b28f18108bdd66d8ae12/genai_prices-0.1.6.tar.gz", hash = "sha256:802c1e4cc3ed5e70a09083b83af441a58d91f62e12768f7f1b6b26c98a33fcac", size = 111810 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/48/a1/43fa2a4c5557cd977e83eecec265b0b77b726b0c7b9f2f180b46c6fdb458/genai_prices-0.1.6-py3-none-any.whl", hash = "sha256:35ac8043dbcf2958488129413bfecba7304fe12a68ad4a78c5b0d15281e82814", size = 118834 },
+]
+
+[[package]]
+name = "gitdb"
+version = "4.0.12"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "smmap" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/94/63b0fc47eb32792c7ba1fe1b694daec9a63620db1e313033d18140c2320a/gitdb-4.0.12.tar.gz", hash = "sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571", size = 394684 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/61/5c78b91c3143ed5c14207f463aecfc8f9dbb5092fb2869baf37c273b2705/gitdb-4.0.12-py3-none-any.whl", hash = "sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf", size = 62794 },
+]
+
+[[package]]
+name = "gitpython"
+version = "3.1.62"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "gitdb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e0/db/3ca813cbacb23ab6fe46ff38a9b5ef8e73e970c8051f2ce903aacafe0446/gitpython-3.1.62.tar.gz", hash = "sha256:1791de66309bc0c7cfca40bf8d2e3de7ca091cbf94e6051be1ad0722c61062af", size = 231728 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/0b/29d7965215f8ef830a7ca1f42997fe13e5693d85e9edb18f938d063ef5f2/gitpython-3.1.62-py3-none-any.whl", hash = "sha256:7002251225e10e29d2e1f49e6532613fe5d5d9f0b6f1f02997a52b38fe56899e", size = 222753 },
 ]
 
 [[package]]
@@ -3407,6 +3437,15 @@ wheels = [
 ]
 
 [[package]]
+name = "smmap"
+version = "5.0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/ea/49c993d6dfdd7338c9b1000a0f36817ed7ec84577ae2e52f890d1a4ff909/smmap-5.0.3.tar.gz", hash = "sha256:4d9debb8b99007ae47165abc08670bd74cb74b5227dda7f643eccc4e9eb5642c", size = 22506 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/d4/59e74daffcb57a07668852eeeb6035af9f32cbfd7a1d2511f17d2fe6a738/smmap-5.0.3-py3-none-any.whl", hash = "sha256:c106e05d5a61449cf6ba9a1e650227ecfb141590d2a98412103ff35d89fc7b2f", size = 24390 },
+]
+
+[[package]]
 name = "sniffio"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3527,6 +3566,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/b7/4d/08c89e34946fce2aec4fbb45c9016efd5f4d7f24af8e5d93296e935631d8/threadpoolctl-3.6.0.tar.gz", hash = "sha256:8ab8b4aa3491d812b623328249fab5302a68d2d71745c8a4c719a2fcaba9f44e", size = 21274 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/d5/f9a850d79b0851d1d4ef6456097579a9005b31fea68726a4ae5f2d82ddd9/threadpoolctl-3.6.0-py3-none-any.whl", hash = "sha256:43a0b8fd5a2928500110039e43a5eed8480b918967083ea48dc3ab9f13c4a7fb", size = 18638 },
+]
+
+[[package]]
+name = "timesfm"
+version = "3.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "numpy" },
+    { name = "safetensors" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/75/c5/1138508a4bd74f2c7ea91b2ca95b126cda8e40cadf8a2dadc9e0d812297f/timesfm-3.0.2.tar.gz", hash = "sha256:a602deba10b9323132d0bc694c08e6cfaf144d7b9e4554da33155b6a9cb0ea5c", size = 100423 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d9/08/06f17372e1843e203d579241ce199594a22d5c705a3315623697f50697f6/timesfm-3.0.2-py3-none-any.whl", hash = "sha256:cfa3d22ddc3f019f0d9d95f19055428c4a4713526dafd7e5d1a7769782e7613f", size = 125052 },
 ]
 
 [[package]]
