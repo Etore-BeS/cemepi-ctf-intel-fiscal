@@ -26,3 +26,12 @@ Notebook de playground com inventário `/meta`, argumento fact vs satélite e di
 Figuras estáticas: `output/figures/macro_er_*.png` e `macro_er_mermaid_v0.html`.
 
 **Leitura rápida:** fact de estoque = `debito` (grão `ID_DEBITO` × foto `ANO_EXTRACAO`/`MES_EXTRACAO`); fact de pagamento = `arrecadacao`; satélites em `ID_DEBITO`; `faturamento` em `CNPJ`; BCB/IBGE fora do DB. Freeze `extracao=2026-03`.
+
+## EDA completo (PGE / Profa. Lívia)
+
+Notebook único, etapa a etapa: [`notebooks/EDA_completo.ipynb`](notebooks/EDA_completo.ipynb).
+
+Documentação em linguagem tributária (LEIA-ME, glossário de variáveis, resultados):
+
+[`docs/livia_eda/LEIA-ME.md`](docs/livia_eda/LEIA-ME.md)
+
