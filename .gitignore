@@ -62,3 +62,26 @@ docs/superpowers/
 projects/macro/notebooks/eda_completo_artifacts/*.parquet
 projects/macro/notebooks/eda_completo_artifacts/*.html
 projects/macro/notebooks/eda_completo_artifacts/amostra_*.parquet
+
+# pipelines/cnpj_enrich: o workdir fica no HD ($CNPJ_PIPELINE_WORKDIR) e nunca entra no git.
+# Barreira extra caso alguém aponte o workdir para dentro do repo: estado, zips RFB, Parquet, sócios, pacotes.
+pipelines/cnpj_enrich/**/state.sqlite*
+pipelines/cnpj_enrich/**/*.zip
+pipelines/cnpj_enrich/**/*.zip.part
+pipelines/cnpj_enrich/**/*.parquet
+pipelines/cnpj_enrich/**/*.csv
+pipelines/cnpj_enrich/**/*.csv.gz
+pipelines/cnpj_enrich/**/*.duckdb
+pipelines/cnpj_enrich/**/_tmp_*
+pipelines/cnpj_enrich/workdir/
+**/cnpj_enrich/collect/
+**/cnpj_enrich/rfb/
+**/cnpj_enrich/enrich/
+**/cnpj_enrich/socios/
+**/cnpj_enrich/regime_tributario/
+**/cnpj_enrich/build/
+**/cnpj_enrich/export/
+**/cnpj_enrich/tmp/
+**/cnpj_enriquecido_ref*/
+**/socios_hashed.parquet
+**/socios_arestas.parquet
