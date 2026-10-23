@@ -1,0 +1,34 @@
+# Instalação (uma vez): uv sync --group dev && uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+# Ref.: docs/ESTRUTURA.md §7 (notebooks sem saídas no git; PII antes de publicar).
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+        # _freeze/ não tem .ipynb hoje, mas fica explícito: nunca mexer no que o Quarto congelou.
+        exclude: ^lab/_freeze/
+
+  - repo: local
+    hooks:
+      - id: pii-check
+        name: pii_check (lab)
+        entry: python3 scripts/pii_check.py --config scripts/pii_allowlist.toml
+        language: system
+        files: ^lab/
+        exclude: ^lab/(_site|\.quarto)/
+        types: [text]
+
+      - id: check-freeze
+        name: check_freeze (lab, antes do push)
+        entry: python3 scripts/check_freeze.py --project lab
+        language: system
+        files: ^lab/
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: pytest-scripts
+        name: testes de scripts/
+        entry: uv run --no-project --with pytest python -m pytest -q scripts/tests
+        language: system
+        files: ^scripts/
+        pass_filenames: false

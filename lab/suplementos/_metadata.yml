@@ -1,0 +1,4 @@
+# Suplementos de artigos: congelados na tag de submissão (<slug>-submit-AAAAMMDD).
+# freeze: true = nunca reexecutar, nem localmente, num render do projeto inteiro.
+execute:
+  freeze: true

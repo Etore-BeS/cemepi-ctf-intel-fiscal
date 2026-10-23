@@ -1,0 +1,21 @@
+# Configuração do scripts/pii_check.py
+# Caminhos são relativos à raiz do repositório e aceitam glob (fnmatch: * casa também '/').
+
+# Pastas/arquivos que não são varridos (além dos padrões: site_libs, .quarto, imagens, parquet…)
+exclude = []
+
+# Colunas que nunca podem aparecer com valor ao lado no material publicado
+forbidden_columns = ["NOME_DEVEDOR", "CPF_DEVEDOR", "nome_socio", "cpf_cnpj_socio"]
+
+# E-mails permitidos (domínio inteiro ou endereço exato)
+allowed_email_domains = ["example.com", "example.org", "users.noreply.github.com"]
+allowed_emails = []
+
+# Exceções por arquivo. Para valores sensíveis, prefira sha256 a 'values'
+# (python3 -c "import hashlib;print(hashlib.sha256(b'VALOR').hexdigest())").
+#
+# [[allow]]
+# path   = "lab/eda/2026-10-23_concentracao.qmd"
+# rules  = ["cnpj"]            # "cpf" | "cnpj" | "email" | "coluna_proibida" | "*"
+# sha256 = ["<hash do valor>"] # opcional; sem values/sha256 = qualquer valor dessa regra no arquivo
+# reason = "total em R$ com 14 dígitos que passa no DV (falso positivo)"

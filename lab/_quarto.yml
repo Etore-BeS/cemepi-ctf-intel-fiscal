@@ -1,0 +1,48 @@
+# Laboratório (EDA vivo) — publicado no GitHub Pages pelo workflow .github/workflows/lab-pages.yml
+# Ref.: docs/ESTRUTURA.md §6. Quarto >= 1.10 (testado com 1.10.19 em 23/10/2026).
+project:
+  type: website
+  output-dir: _site
+  render:
+    - "*.qmd"
+    - "eda/*.qmd"
+    - "eda/*.ipynb"
+    - "suplementos/**/*.qmd"
+    - "!README.md"          # instruções para quem mantém, não é página do site
+
+lang: pt-BR
+
+execute:
+  # Executa só localmente (dados no HD). No CI o site é montado a partir de _freeze/.
+  # "auto": reexecuta um documento apenas quando a fonte muda. Suplementos usam freeze: true
+  # (ver suplementos/_metadata.yml).
+  freeze: auto
+  echo: false          # código escondido por padrão; use code-fold por página se quiser mostrar
+  warning: false
+
+website:
+  title: "Laboratório — dívida ativa de SP (CEMEPI / PGE-SP)"
+  repo-url: https://github.com/Etore-BeS/cemepi-ctf-intel-fiscal
+  repo-subdir: lab
+  repo-actions: [source]
+  page-navigation: true
+  navbar:
+    left:
+      - href: index.qmd
+        text: Início
+      - text: Suplementos de artigos
+        href: suplementos/index.qmd
+  page-footer:
+    left: "Somente agregados. Identificadores de contribuintes aparecem apenas como hash com sal."
+    right: "Fonte: dump Inteligência Fiscal (PGE-SP), `extracao` indicada em cada página."
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    number-sections: false
+    code-fold: true
+    code-tools: false
+    embed-resources: false   # não embutir JS: plotly.js vem da CDN (ver _environment)
+    df-print: kable

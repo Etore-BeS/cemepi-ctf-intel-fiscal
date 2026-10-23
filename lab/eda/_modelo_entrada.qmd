@@ -1,0 +1,42 @@
+---
+# Modelo de entrada. Copie para eda/AAAA-MM-DD_<tema>.qmd (arquivos com "_" no início não são publicados).
+title: "Tema da entrada"
+description: "Pergunta em uma frase."
+date: 2026-10-23
+jupyter: python3
+---
+
+**Dados:** `painel_icms` `vAAAA-MM-DD` · `extracao=AAAA-MM` · recorte: ICMS, PJ, 2016–2025.
+**Status:** exploração (não é resultado de artigo).
+
+```{python}
+#| label: setup
+from divida_ativa import io, paineis, viz_theme   # pacote comum (pipelines/divida_ativa)
+
+painel = paineis.carregar("painel_icms", versao="vAAAA-MM-DD")   # lê do HD via DATA_ROOT (.env)
+viz_theme.aplicar()
+```
+
+## Pergunta
+
+…
+
+## Método
+
+Na primeira aparição de cada método ou métrica: definição com fórmula e referência
+(`docs/references/referencias_grounded.md`), e como ela é aplicada aqui.
+
+## Resultado
+
+Antes de cada figura: como ler (eixos, comparação, o que não concluir).
+
+```{python}
+#| label: fig-exemplo
+#| fig-cap: "Legenda da figura."
+fig = viz_theme.figura_exemplo(painel)   # só agregados: nunca linhas com identificadores
+fig.show()
+```
+
+## O que não concluir
+
+…

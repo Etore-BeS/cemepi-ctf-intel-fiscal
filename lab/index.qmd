@@ -1,0 +1,48 @@
+---
+title: "Laboratório — dívida ativa de São Paulo"
+subtitle: "Exploração viva, datada, para discussão de pesquisa"
+date: 2026-10-23
+date-format: "DD/MM/YYYY"
+listing:
+  id: entradas
+  contents: "eda/*.{qmd,ipynb}"
+  type: table
+  fields: [date, title, description]
+  sort: "date desc"
+  date-format: "DD/MM/YYYY"
+  field-display-names:
+    date: "Data"
+    title: "Entrada"
+    description: "Pergunta"
+---
+
+## O que é este site
+
+Caderno de laboratório da pesquisa sobre a dívida ativa inscrita do Estado de São Paulo.
+Cada entrada é datada e diz: a pergunta, os dados usados (versão do painel), o que foi
+encontrado e o que **não** se pode concluir. As figuras dos artigos **não** saem daqui;
+saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
+
+- **Painel em uso:** `painel_icms` versão `vAAAA-MM-DD` (manifest em `data_manifests/`).
+- **Extração do dump:** `extracao=AAAA-MM`.
+- **Último render local:** ver a data desta página.
+
+## O que mudou nesta versão
+
+- *(AAAA-MM-DD)* Descreva em uma linha cada entrada nova ou alterada.
+
+## Questões para discussão (2026-10-23)
+
+> Modelo. Mantenha uma seção por data, a mais recente no topo. Sem nomes de pessoas nem
+> referência a reuniões: as notas pessoais ficam em `.local/` (fora do git).
+
+1. **Pergunta:** *(ex.: o número de clusters deve ser 2, como indica a silhueta, ou 4?)*
+   **Evidência:** link para a entrada e a figura (`eda/AAAA-MM-DD_tema.qmd#fig-…`).
+   **Opções:** (a) … (b) …
+   **Proposta:** …
+2. **Pergunta:** …
+
+## Entradas
+
+::: {#entradas}
+:::

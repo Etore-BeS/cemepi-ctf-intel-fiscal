@@ -1,0 +1,3 @@
+/.quarto/
+/_site/
+# _freeze/ É versionado de propósito: o CI monta o site a partir dele.

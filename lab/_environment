@@ -1,0 +1,3 @@
+# Variáveis de ambiente lidas pelo Quarto ao renderizar este projeto.
+# Plotly carrega o plotly.js da CDN (uma tag <script> por página) em vez de embutir ~4 MB por figura.
+PLOTLY_RENDERER=notebook_connected
