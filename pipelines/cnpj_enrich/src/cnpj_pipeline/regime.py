@@ -21,7 +21,7 @@ from pathlib import Path
 from .collect import keys_glob
 from .config import Settings
 from .db import connect, q
-from .enrich import _csv, _rejects, extract_all
+from .enrich import _csv, _rejects, encoding_meta, extract_all
 from .layouts import REGIME_COLS, REGIME_FILES
 from .socios import _stale, keys_signature, manifest_sha
 from .state import State, run_unit
@@ -74,7 +74,7 @@ def run(s: Settings, state: State, force: bool = False) -> Path:
                 ) TO {q(tmp)} (FORMAT PARQUET, COMPRESSION ZSTD)""")
                 n = con.execute(f"SELECT COUNT(*) FROM read_parquet({q(tmp)})").fetchone()[0]
                 return n, {"zip": zname, "sha256": sha, "keys": ksig, "members": [p.name for p in csvs],
-                           "rejects": _rejects(con)}
+                           "rejects": _rejects(con), "encoding": encoding_meta(csvs)}
             run_unit(state, "regime", zname, final, work, force=True)
             shutil.rmtree(extract_root / stem, ignore_errors=True)
 

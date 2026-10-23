@@ -25,7 +25,7 @@ from pathlib import Path
 from .collect import keys_glob
 from .config import Settings
 from .db import connect, q
-from .enrich import _csv, _extract, _rejects
+from .enrich import _csv, _extract, _rejects, encoding_meta
 from .layouts import CODE_COLS, FAIXA_ETARIA, IDENTIFICADOR_SOCIO, SOCIOS_COLS, SOCIOS_FILES, sql_map
 from .state import State, run_unit
 
@@ -119,7 +119,8 @@ def run(s: Settings, state: State, files: list[str] | None = None, force: bool =
                     WHERE r1.cnpj_raiz IS NOT NULL OR r2.cnpj_raiz IS NOT NULL
                 ) TO {q(tmp)} (FORMAT PARQUET, COMPRESSION ZSTD)""")
                 n = con.execute(f"SELECT COUNT(*) FROM read_parquet({q(tmp)})").fetchone()[0]
-                return n, {"zip": zname, "sha256": sha, "keys": ksig, "rejects": _rejects(con)}
+                return n, {"zip": zname, "sha256": sha, "keys": ksig, "rejects": _rejects(con),
+                           "encoding": encoding_meta([csv])}
             run_unit(state, "socios", zname, final, work, force=True)
             shutil.rmtree(csv.parent, ignore_errors=True)
 

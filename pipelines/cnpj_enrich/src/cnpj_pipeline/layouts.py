@@ -1,4 +1,5 @@
-"""Layout of the RFB open CNPJ files (metadata 'cnpj-metadados.pdf'): no header, ';' separator, '"' quote, Latin-1.
+"""Layout of the RFB open CNPJ files (metadata 'cnpj-metadados.pdf'): no header, ';' separator, '"' quote, Latin-1
+(cp1252 in practice; transcoded to UTF-8 on extraction, see encoding.py).
 
 Privacy rule enforced here: only the columns in KEEP_* ever leave the CSV reader in `enrich`. Names (razao_social,
 nome_fantasia), addresses, CEP, phones, fax and e-mail are never selected, so they never reach cnpj_enriquecido.
