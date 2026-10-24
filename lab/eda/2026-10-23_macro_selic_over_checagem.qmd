@@ -1,0 +1,294 @@
+---
+title: "Macro × dívida: Selic over no lugar da meta e checagem dos dados das correlações"
+description: "As correlações com a Selic mudam quando se usa a taxa efetiva (over) em vez da meta? Os dados macro das correlações estão certos em fonte, unidade, frequência, defasagem e cobertura? De onde vem a correlação entre emprego e estoque?"
+date: 2026-10-23
+jupyter: python3
+---
+
+**Dados:** `macro.duckdb` (tabela `MACRO`, séries do SGS/BCB), a série SGS 4189 baixada do BCB em 23/10/2026 e os agregados do EDA completo (série mensal de arrecadação, pagadores e CDAs novas; estoque anual do painel ICMS). `extracao=2026-03`.
+**Recorte:** de 2016 a 2025. 2026 fica fora (decisão de 23/10/2026): o ano estava incompleto nos dados da dívida (até março) e nas macros.
+**Status:** exploração e checagem de dados. Correlação não é efeito.
+
+```{python}
+#| label: setup
+import sys, json, hashlib, os
+from datetime import datetime, date
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+import numpy as np
+import pandas as pd
+import polars as pl
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from scipy import stats
+pd.set_option("display.max_colwidth", None)
+import _lab_base as B
+
+INI, FIM = date(2016, 1, 1), date(2025, 12, 1)
+SELIC_OVER_FILE = B.DATA_ROOT / "interim/macro_bcb/sgs_4189_baixado_2026-10-23.json"
+SELIC_OVER_SHA = "2842d28c2258209be22e098c9a47d06eec7b5f6b566be3f064e251f91fa43d0a"
+
+def fisher_ci(r, n, z=1.959964):
+    if n <= 3 or not np.isfinite(r) or abs(r) >= 1:
+        return (np.nan, np.nan)
+    a, se = np.arctanh(r), 1 / np.sqrt(n - 3)
+    return float(np.tanh(a - z * se)), float(np.tanh(a + z * se))
+
+import duckdb
+con = duckdb.connect(str(B.DUCKDB_MACRO), read_only=True)
+macro_long = con.execute("SELECT codigo_serie, nome, unidade, data, valor, fonte FROM MACRO").pl()
+con.close()
+macro_download = datetime.fromtimestamp(B.DUCKDB_MACRO.stat().st_mtime).date()
+```
+
+## 1. Selic over no lugar da Selic meta (MAC-03)
+
+**Fontes conferidas no catálogo de dados abertos do BCB em 23/10/2026:**
+
+- **SGS 432**, usada até agora: *Taxa de juros, Meta Selic definida pelo Copom*, em % a.a. É a meta, que só muda nas reuniões do Copom.
+- **SGS 4189**: *Taxa de juros, Selic acumulada no mês anualizada base 252*, em % a.a., mensal. Segundo o BCB, é a "taxa média ajustada das operações compromissadas com prazo de um dia útil lastreadas com títulos públicos federais custodiados no Selic", ou seja, a Selic efetiva (over), já na mesma unidade da meta.
+- **Descartada:** a SGS 1178 (Selic anualizada base 252) é a mesma taxa em frequência diária. A versão mensal 4189 evita uma agregação a mais.
+
+```{python}
+#| label: tbl-selic
+#| tbl-cap: "Selic meta (média mensal da série diária 432) e Selic over (4189), de 2016 a 2025."
+raw = SELIC_OVER_FILE.read_bytes()
+assert hashlib.sha256(raw).hexdigest() == SELIC_OVER_SHA, "arquivo da SGS 4189 mudou"
+over = (pl.DataFrame(json.loads(raw)).with_columns(pl.col("data").str.to_date("%d/%m/%Y").alias("mes"),
+                                                   pl.col("valor").cast(pl.Float64).alias("selic_over"))
+        .select("mes", "selic_over"))
+wide = (macro_long.with_columns(pl.col("data").dt.truncate("1mo").alias("mes"))
+        .group_by("mes", "codigo_serie").agg(pl.col("valor").mean())
+        .pivot(on="codigo_serie", index="mes", values="valor").sort("mes"))
+NOMES = {"1": "ptax", "189": "igpm", "432": "selic_meta", "433": "ipca", "4380": "pib_mensal", "7478": "ipca15",
+         "20540": "credito_pj", "24369": "desocupacao", "24379": "ocupados", "29034": "comprometimento", "29037": "endividamento"}
+wide = wide.rename({k: v for k, v in NOMES.items() if k in wide.columns}).select("mes", *NOMES.values())
+wide = wide.join(over, on="mes", how="left")
+w = wide.filter(pl.col("mes").is_between(INI, FIM))
+s = w.select("mes", "selic_meta", "selic_over").drop_nulls()
+dif = (s["selic_over"] - s["selic_meta"]).to_numpy()
+pd.DataFrame([
+    {"série": "meta (432)", "meses": s.height, "média": s["selic_meta"].mean(), "mín.": s["selic_meta"].min(), "máx.": s["selic_meta"].max()},
+    {"série": "over (4189)", "meses": s.height, "média": s["selic_over"].mean(), "mín.": s["selic_over"].min(), "máx.": s["selic_over"].max()},
+    {"série": "over − meta (p.p.)", "meses": s.height, "média": dif.mean(), "mín.": dif.min(), "máx.": dif.max()},
+]).round(3).assign(**{"correlação meta × over": [np.corrcoef(s["selic_meta"], s["selic_over"])[0, 1], None, None]})
+```
+
+```{python}
+#| label: fig-selic
+#| fig-cap: "Selic meta (média do mês) e Selic over (4189), % a.a., 2016–2025."
+fig = go.Figure([go.Scatter(x=s["mes"], y=s["selic_meta"], name="Meta (432)", line=dict(color=B.CEMEPI["deep_teal"])),
+                 go.Scatter(x=s["mes"], y=s["selic_over"], name="Over (4189)", line=dict(color=B.CEMEPI["sand"], dash="dash"))])
+fig.update_layout(yaxis_title="% a.a.", height=360)
+fig.show()
+```
+
+**Como ler:** a over fica sempre um pouco abaixo da meta (cerca de 0,1 p.p.) com pequena diferença e muda dentro do mês, em vez de mudar só nas datas do Copom. Nas tabelas abaixo, as correlações com a over e com a meta coincidem até a terceira casa decimal. A troca é de rigor de definição e não muda nenhum resultado.
+
+```{python}
+#| label: tbl-selic-corr-mensal
+#| tbl-cap: "Correlações mensais (2016–2025) entre fluxos da dívida no mês t e a Selic no mês t−k: meta e over lado a lado, em nível e em primeira diferença."
+serie = (pl.read_parquet(B.EDA_ARTIFACTS / "serie_mensal_icms.parquet").with_columns(pl.col("mes").cast(pl.Date))
+         .select("mes", "arrec_receita", "n_pagadores", "n_novas").sort("mes"))
+xl = wide.select("mes", "selic_meta", "selic_over")
+for k in (1, 2, 3):
+    xl = xl.join(wide.select(pl.col("mes").dt.offset_by(f"{k}mo"), pl.col("selic_meta").alias(f"selic_meta_l{k}"),
+                             pl.col("selic_over").alias(f"selic_over_l{k}")), on="mes", how="left")
+jm = serie.join(xl, on="mes", how="inner").filter(pl.col("mes").is_between(INI, FIM)).sort("mes")
+YS = ["arrec_receita", "n_pagadores", "n_novas"]
+linhas = []
+for forma in ("nível", "Δ mensal"):
+    d = jm if forma == "nível" else jm.with_columns([pl.col(c).diff() for c in jm.columns if c != "mes"])
+    for yc in YS:
+        for k in range(4):
+            row = {"forma": forma, "Y (mês t)": yc, "k": k}
+            for x in ("selic_meta", "selic_over"):
+                xc = x if k == 0 else f"{x}_l{k}"
+                sub = d.select(yc, xc).drop_nulls()
+                row[f"r {x.split('_')[1]}"] = float(np.corrcoef(sub[yc], sub[xc])[0, 1])
+                row["n"] = sub.height
+            linhas.append(row)
+cm = pd.DataFrame(linhas)
+cm["diferença (over − meta)"] = cm["r over"] - cm["r meta"]
+cm.round(3)
+```
+
+```{python}
+#| label: tbl-selic-corr-anual
+#| tbl-cap: "Correlações anuais (2016–2025, n = 10) entre agregados do painel ICMS e a Selic média do ano: meta e over, com IC de 95% de Fisher."
+agg = pl.read_parquet(B.EDA_ARTIFACTS / "sanidade_painel_anual.parquet").select(
+    "ano", pl.col("estoque").alias("estoque_sum"), pl.col("arrecadado").alias("arrec_sum"), pl.col("n_unique").alias("n_id"))
+agg = agg.with_columns((pl.col("arrec_sum") / pl.col("estoque_sum")).alias("taxa_carteira"))
+media = wide.with_columns(pl.col("mes").dt.year().alias("ano")).group_by("ano").agg(pl.exclude("mes").mean())
+ann = agg.join(media, on="ano", how="inner").sort("ano")
+ann10 = ann.filter(pl.col("ano").is_between(2016, 2025))
+linhas = []
+for yc in ("taxa_carteira", "estoque_sum", "arrec_sum", "n_id"):
+    for x in ("selic_meta", "selic_over"):
+        r = float(np.corrcoef(ann10[yc], ann10[x])[0, 1])
+        lo, hi = fisher_ci(r, ann10.height)
+        linhas.append({"Y anual": yc, "Selic": x, "n": ann10.height, "Pearson": r, "IC95% inf.": lo, "IC95% sup.": hi})
+pd.DataFrame(linhas).round(3)
+```
+
+**O que não concluir:** com 10 anos, os intervalos de confiança são muito largos. As séries mensais têm autocorrelação forte, e a correlação em nível mistura tendências comuns. Há 24 pares mensais e 8 anuais nas duas tabelas, sem correção para comparações múltiplas.
+
+## 2. Checagem dos dados das correlações (MAC-07)
+
+### 2.1 Inventário das séries macro
+
+```{python}
+#| label: tbl-inventario
+#| tbl-cap: "Séries da tabela MACRO: nome e unidade como vieram do SGS, frequência inferida pelo intervalo mediano entre datas, cobertura e datas posteriores ao download."
+inv = []
+for (cod,), d in macro_long.sort("data").group_by("codigo_serie", maintain_order=True):
+    dd = d["data"].to_numpy().astype("datetime64[D]")
+    gap = float(np.median(np.diff(dd).astype(int))) if dd.size > 1 else np.nan
+    freq = "diária" if gap <= 3 else "mensal" if gap <= 31 else "trimestral" if gap <= 92 else "anual"
+    inv.append({"código SGS": int(cod), "nome": d["nome"][0], "unidade": d["unidade"][0], "frequência inferida": freq,
+                "primeira": str(d["data"].min()), "última": str(d["data"].max()), "obs.": d.height,
+                "nulos": int(d["valor"].null_count()), "datas após o download": int((d["data"] > macro_download).sum()),
+                "usada nas correlações": str(cod) in NOMES})
+inv = pd.DataFrame(inv).sort_values("código SGS")
+print(f"macro.duckdb gravado em {macro_download} (data do arquivo).")
+inv
+```
+
+**Como ler:** a coluna "datas após o download" deveria ser zero. Valores acima de zero indicam datas posteriores à gravação do arquivo.
+
+### 2.2 Unidades, transformações e defasagens usadas no EDA completo
+
+```{python}
+#| label: tbl-transformacoes
+#| tbl-cap: "Como cada série entra nas correlações do EDA completo (7E e 7F) e o ponto de atenção da checagem."
+uso = pd.DataFrame([
+    ("selic_meta", 432, "% a.a.", "média do mês da série diária", "É a meta, não a taxa efetiva: trocada pela over (seção 1)."),
+    ("ipca", 433, "% no mês", "valor do mês", "Variação mensal (fluxo), não índice: a média anual é a inflação média mensal, não a do ano."),
+    ("ipca15", 7478, "% no mês", "valor do mês", "Mesma observação do IPCA e muito correlacionado com ele (redundante)."),
+    ("igpm", 189, "% no mês", "valor do mês", "Mesma observação do IPCA."),
+    ("ptax", 1, "R$/US$", "média do mês da série diária", "Nível nominal com tendência."),
+    ("pib_mensal", 4380, "R$ milhões correntes", "valor do mês, sem log nem deflator", "Nominal: cresce com a inflação, como o estoque. Correlação em nível capta tendência comum."),
+    ("credito_pj", 20540, "R$ milhões (saldo)", "valor do mês, sem log nem deflator", "Saldo nominal: mesma observação do PIB."),
+    ("desocupacao", 24369, "%", "valor do mês", "PNAD Contínua. Conferir nos metadados do SGS se o valor mensal é de trimestre móvel (meses vizinhos se sobrepõem)."),
+    ("ocupados", 24379, "mil pessoas", "valor do mês", "Nível com tendência, mesma observação da desocupação sobre trimestre móvel. Ver 2.5."),
+    ("comprometimento", 29034, "%", "valor do mês", "Divulgação com defasagem (última data na tabela acima)."),
+    ("endividamento", 29037, "%", "valor do mês", "Divulgação com defasagem."),
+], columns=["variável", "SGS", "unidade", "transformação no EDA", "ponto de atenção"])
+uso
+```
+
+**Defasagens.** Nos heatmaps mensais do EDA completo, a defasagem é da macro: Y no mês t contra a macro em t−k, com k de 0 a 3. A tabela longa do mesmo trecho também defasa o Y, o que inverte o sentido. As duas convenções aparecem lado a lado no texto, mas os nomes das colunas não indicam qual é qual. As tabelas desta página usam só a primeira convenção.
+
+### 2.3 Cobertura: o ano de 2026 entrou nas correlações
+
+```{python}
+#| label: tbl-cobertura
+#| tbl-cap: "Cobertura dos agregados usados nas correlações do EDA completo. Os arquivos de correlação salvos (corr_macro_mensal.csv e corr_macro_anual_painel.csv) usam todo o período disponível."
+cmen = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_mensal.csv")
+can = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_anual_painel.csv")
+pd.DataFrame([
+    {"item": "série mensal de fluxos: primeiro e último mês", "valor": f"{serie['mes'].min()} a {serie['mes'].max()}"},
+    {"item": "n das correlações mensais salvas (máximo)", "valor": int(cmen["n"].max())},
+    {"item": "meses de 2016-01 a 2025-12", "valor": 120},
+    {"item": "n das correlações anuais 'média do ano' salvas (máximo)", "valor": int(can.filter(pl.col("spec") == "media_anual")["n"].max())},
+    {"item": "anos de 2016 a 2025", "valor": 10},
+    {"item": "arrecadação de 2026 no agregado anual (R$ bi)", "valor": round(float(ann.filter(pl.col("ano") == 2026)["arrec_sum"][0]) / 1e9, 2)},
+    {"item": "arrecadação de 2025 no agregado anual (R$ bi)", "valor": round(float(ann.filter(pl.col("ano") == 2025)["arrec_sum"][0]) / 1e9, 2)},
+    {"item": "linhas repetidas em corr_macro_anual_painel.csv", "valor": int(can.height - can.unique().height)},
+])
+```
+
+**Como ler:** n = 123 meses vai de 2016-01 a 2026-03, e n = 11 anos inclui 2026. Em 2026 a dívida só tem janeiro a março, enquanto as macros do ano já vão até meados de 2026. O ponto de 2026 mistura períodos diferentes e puxa as correlações de nível.
+
+### 2.4 Valores atípicos nas variações mensais
+
+```{python}
+#| label: tbl-outliers
+#| tbl-cap: "Meses de 2016 a 2025 em que a variação mensal de uma série fica a mais de 5 desvios robustos (MAD) da mediana. z robusto = (Δx − mediana) / (1,4826 × MAD)."
+base = wide.join(serie, on="mes", how="left").filter(pl.col("mes").is_between(INI, FIM)).sort("mes")
+out = []
+for c in [c for c in base.columns if c != "mes"]:
+    d = base.select("mes", pl.col(c).diff().alias("d")).drop_nulls()
+    v = d["d"].to_numpy()
+    mad = np.median(np.abs(v - np.median(v)))
+    if mad == 0:
+        continue
+    z = (v - np.median(v)) / (1.4826 * mad)
+    for m, zz, vv in zip(d["mes"], z, v):
+        if abs(zz) > 5:
+            out.append({"série": c, "mês": str(m)[:7], "Δ no mês": vv, "z robusto": zz})
+pd.DataFrame(out).sort_values(["série", "mês"]).round(3) if out else "nenhum mês acima do limiar"
+```
+
+**O que não concluir:** um valor atípico pode ser um evento real (pandemia, programa de parcelamento, mudança de meta) e não um erro. A tabela só diz onde olhar. Correlações de Pearson são sensíveis a esses meses.
+
+### 2.5 A anomalia emprego × estoque
+
+No EDA completo, a correlação anual entre o estoque somado do painel ICMS e o número de ocupados (PNAD Contínua, média do ano) saiu forte e positiva. O sinal esperado não é óbvio, então vale ver de onde ela vem.
+
+```{python}
+#| label: tbl-emprego
+#| tbl-cap: "Estoque anual do painel ICMS e ocupados (média do ano): a correlação original e variantes. IC de 95% de Fisher (aproximado para n tão pequeno)."
+def linha(nome, a, b):
+    m = ~(np.isnan(a) | np.isnan(b))
+    r = float(np.corrcoef(a[m], b[m])[0, 1]); rho = float(stats.spearmanr(a[m], b[m])[0])
+    lo, hi = fisher_ci(r, int(m.sum()))
+    return {"variante": nome, "n": int(m.sum()), "Pearson": r, "IC95% inf.": lo, "IC95% sup.": hi, "Spearman": rho}
+a11 = ann.filter(pl.col("ano").is_between(2016, 2026))
+y10, x10 = ann10["estoque_sum"].to_numpy(), ann10["ocupados"].to_numpy()
+t10 = ann10["ano"].to_numpy().astype(float)
+res = lambda v: v - np.polyval(np.polyfit(t10, v, 1), t10)
+sem20 = ann10["ano"].to_numpy() != 2020
+pd.DataFrame([
+    linha("original: nível, 2016–2026 (inclui 2026 parcial)", a11["estoque_sum"].to_numpy(), a11["ocupados"].to_numpy()),
+    linha("nível, 2016–2025", y10, x10),
+    linha("nível, 2016–2025 sem 2020", y10[sem20], x10[sem20]),
+    linha("primeira diferença, 2016–2025", np.diff(y10), np.diff(x10)),
+    linha("primeira diferença, sem as variações que envolvem 2020", np.diff(y10)[~np.isin(t10[1:], [2020, 2021])], np.diff(x10)[~np.isin(t10[1:], [2020, 2021])]),
+    linha("desvio da tendência linear, 2016–2025", res(y10), res(x10)),
+    linha("desvio da tendência linear, sem 2020", res(y10)[sem20], res(x10)[sem20]),
+]).round(3)
+```
+
+```{python}
+#| label: fig-emprego
+#| fig-cap: "Estoque do painel ICMS, CDAs no painel e ocupados (PNAD Contínua), índice 2016 = 100, de 2016 a 2025."
+fig = go.Figure()
+for i, (c, n) in enumerate((("estoque_sum", "Estoque (R$)"), ("n_id", "CDAs no painel"), ("ocupados", "Ocupados"))):
+    v = ann10[c].to_numpy()
+    fig.add_trace(go.Scatter(x=ann10["ano"], y=100 * v / v[0], mode="lines+markers", name=n,
+                             line=dict(color=B.color(i), dash=B.DASHES[i])))
+fig.update_layout(yaxis_title="Índice (2016 = 100)", height=380)
+fig.show()
+```
+
+```{python}
+#| label: tbl-estoque-anual
+#| tbl-cap: "Agregados anuais do painel ICMS usados como Y (de 2016 a 2025), para conferência."
+ann10.select("ano", (pl.col("estoque_sum") / 1e9).alias("estoque R$ bi"), (pl.col("arrec_sum") / 1e9).alias("arrecadado R$ bi"),
+             "n_id", (100 * pl.col("taxa_carteira")).alias("taxa carteira %"), "ocupados", "desocupacao").to_pandas().round(3)
+```
+
+**Como ler:**
+
+- **Réplica:** a primeira linha reproduz o número do EDA completo (r = 0,873, n = 11). Tirar 2026 e tirar 2020 baixa um pouco o valor, mas a correlação em nível continua alta.
+- **Diferenças:** em primeira diferença, Pearson continua alto, mas Spearman fica perto de zero e negativo. A diferença entre os dois mostra que a correlação das variações depende de poucos pontos. Sem as variações que envolvem 2020, a correlação muda de sinal e o intervalo inclui zero. Toda a correlação das variações vem de 2020: o emprego caiu e o estoque somado do painel também caiu, e os dois voltaram a subir depois.
+- **Tendência e 2020:** retirar só a tendência linear não elimina a correlação, e sem 2020 o intervalo passa a incluir zero. O padrão "sobe, cai em 2020, volta a subir" é o mesmo nas duas séries.
+- **A queda de 2020 parece vir da extração:** o estoque cai de R$ 410,6 bi (2019) para R$ 328,9 bi (2020), e o número de CDAs no painel cai junto (de 2,18 mi para 1,81 mi). Uma queda tão grande e simultânea na contagem de CDAs sugere que ela vem de como o dado de 2020 foi extraído (CDAs que saem e voltam ao painel, ou cobertura da extração), e não da economia. Isso deve ser conferido quando a tabela DEBITO corrigida chegar.
+
+**O que não concluir:** com 9 ou 10 pontos, nenhuma dessas correlações sustenta afirmação no artigo.
+
+## Resumo da checagem
+
+- **Fonte e unidade:** as 11 séries vêm do SGS/BCB, com nome e unidade gravados na tabela. Meta (432) e over (4189) estão na mesma unidade (% a.a.).
+- **Cobertura:** as correlações salvas no EDA completo incluem 2026, que está incompleto. Esta página refaz as contas de 2016 a 2025.
+- **Nominal × real:** PIB mensal e crédito PJ entram em reais correntes, sem deflator nem log. Em nível, a correlação com o estoque nominal capta a tendência comum.
+- **Frequência:** séries diárias (meta, PTAX) viram média do mês. A periodicidade da PNAD Contínua (trimestre móvel ou não) ainda precisa ser conferida nos metadados do SGS.
+- **Defasagens:** há duas convenções no EDA (macro defasada e Y defasado). Daqui em diante, usar só a da macro defasada.
+- **Emprego × estoque:** a correlação reproduz (0,873) e se apoia na tendência comum e no vale de 2020, que aparece também na contagem de CDAs. Antes de interpretar, conferir o estoque de 2020 na DEBITO corrigida. Ver 2.5.
+
+```{python}
+#| label: cache
+#| echo: false
+B.cache_summary().to_pandas()
+```
