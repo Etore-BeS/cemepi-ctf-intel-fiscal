@@ -52,9 +52,9 @@ O leitor CSV do `enrich` só projeta as colunas de `layouts.KEEP`. Testes confer
 | porte | VARCHAR / char(2) | Empresas.porte | 00 NAO INFORMADO, 01 MICRO EMPRESA, 03 EMPRESA DE PEQUENO PORTE, 05 DEMAIS |
 | porte_descricao | VARCHAR | leiaute | |
 | capital_social | DECIMAL(18,2) / numeric(18,2) | Empresas.capital_social | Vírgula decimal convertida. É o valor declarado, sem atualização. |
-| opcao_simples | BOOLEAN | Simples.opcao_pelo_simples | S = true, N = false, ausente = NULL |
+| opcao_simples | BOOLEAN | Simples.opcao_pelo_simples | S = true, N = false. CNPJ (raiz) que não aparece no arquivo do Simples = false (não optante), inclusive quando não há cadastro na RFB; as datas ficam NULL |
 | data_opcao_simples, data_exclusao_simples | DATE | Simples | `YYYYMMDD`. `00000000` vira NULL. |
-| opcao_mei | BOOLEAN | Simples.opcao_mei | |
+| opcao_mei | BOOLEAN | Simples.opcao_mei | S = true, N = false; fora do arquivo do Simples = false (mesma regra de `opcao_simples`) |
 | data_opcao_mei, data_exclusao_mei | DATE | Simples | |
 | data_inicio_atividade | DATE | Estabelecimentos | |
 | situacao_cadastral | VARCHAR / char(2) | Estabelecimentos | 01 NULA, 02 ATIVA, 03 SUSPENSA, 04 INAPTA, 08 BAIXADA |

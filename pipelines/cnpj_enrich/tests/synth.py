@@ -93,8 +93,11 @@ def make_world(root: Path, n_roots: int = 300, seed: int = 0, years=(2024, 2025,
                                  "20210305", "01", "", "", "20100101", rng.choice(["4711302", "2511000", "6201501"]),
                                  "4930202,6202300", "RUA", SENTINEL, "10", "", SENTINEL, "01000000", "SP", "6291" if i % 30 == 13 else "7107",
                                  "11", "99999999", "", "", "", "", f"{SENTINEL}@x.com", "", ""))
-        simp.append(qv(r, "S" if f["mei"] or rng.random() < 0.5 else "N", "20180101", "00000000",
-                       "S" if f["mei"] else "N", "20180101" if f["mei"] else "00000000", "00000000"))
+        opt = "S" if f["mei"] or rng.random() < 0.5 else "N"
+        f["in_simples"] = f["mei"] or i % 10 != 7           # some RFB firms never appear in the Simples file
+        if f["in_simples"]:
+            simp.append(qv(r, opt, "20180101", "00000000",
+                           "S" if f["mei"] else "N", "20180101" if f["mei"] else "00000000", "00000000"))
     # duplicates across files + a malformed line + a non-debtor firm
     first_in = next(r for r in roots if firms[r]["in_rfb"] and firms[r]["estab_in_rfb"])
     c0 = firms[first_in]["cnpjs"][0]

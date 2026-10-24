@@ -69,6 +69,17 @@ def test_build_one_row_per_cnpj_and_values(world, done):
     assert any(k.startswith("12ABC345") for k in rows)          # alphanumeric CNPJ survives end to end
 
 
+def test_simples_absent_is_false_not_null(world, done):
+    con, t = table(done)
+    assert con.execute(f"SELECT COUNT(*) FROM {t} WHERE opcao_simples IS NULL OR opcao_mei IS NULL").fetchone()[0] == 0
+    absent = {c for f in world["firms"].values() if not f.get("in_simples") for c in f["cnpjs"]}
+    rows = con.execute(f"SELECT opcao_simples, opcao_mei, data_opcao_simples, data_exclusao_simples, data_opcao_mei, "
+                       f"data_exclusao_mei FROM {t} WHERE cnpj IN (SELECT unnest(?::VARCHAR[]))", [sorted(absent)]).fetchall()
+    assert rows and all(r == (False, False, None, None, None, None) for r in rows)
+    assert any(f["in_rfb"] and not f.get("in_simples") for f in world["firms"].values())   # case exercised
+    assert con.execute(f"SELECT COUNT(*) FROM {t} WHERE opcao_simples").fetchone()[0] > 0
+
+
 def test_no_personal_columns_or_values(done):
     con, t = table(done)
     cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {t}").fetchall()]
