@@ -285,7 +285,7 @@ def test_regime_fault_then_resume(base, regime_done, tmp_path):
 
 # -------------------------------------------------------------------------------------------------- export
 def _pkg(wd):
-    return next((wd / "export").glob("cnpj_enriquecido_ref*"))
+    return next(p for p in (wd / "export").glob("cnpj_enriquecido_ref*") if not p.name.endswith("_LOCAL_NAO_SUBIR"))
 
 
 def _scan_pii(pkg, con):
@@ -334,9 +334,12 @@ def test_export_socios_anonymised_edges(world, exported):
     firms = con.execute(f"SELECT COUNT(DISTINCT cnpj_basico) FROM {v} WHERE socio_id = '{pf_id}'").fetchone()[0]
     assert firms == 2                                            # connectable network
     one = next(r for r in world["socios_rows"] if r[1] == "2" and r[2].endswith("JOSÉ ÇÃO"))
-    got = con.execute(f"SELECT socio_id, ano_entrada_sociedade, faixa_etaria FROM {v} WHERE cnpj_basico = '{one[0]}' "
+    got = con.execute(f"SELECT socio_id, decada_entrada_sociedade, faixa_etaria FROM {v} WHERE cnpj_basico = '{one[0]}' "
                       "AND socio_tipo = 'PF' AND qualificacao_socio = '49'").fetchall()
-    assert (H(person_key(one[2], one[3])), int(one[5][:4]), one[10]) in got
+    assert (H(person_key(one[2], one[3])), int(one[5][:4]) // 10 * 10, one[10]) in got   # api: decade only
+    assert "ano_entrada_sociedade" not in cols
+    m_api = json.loads((pkg / "MANIFEST.json").read_text())
+    assert m_api["socios_detail"] == "api" and m_api["api_upload_allowed"] is True
     assert all(len(i) == 64 for (i,) in con.execute(f"SELECT socio_id FROM {v} WHERE socio_tipo <> 'PJ'").fetchall())
     readme = (pkg / "README.md").read_text()
     assert "Relatório de risco de reidentificação (sócios pessoa física)" in readme and "k<5" in readme
@@ -352,6 +355,27 @@ def test_export_socios_anonymised_edges(world, exported):
             assert r.returncode == 0, r.stderr + r.stdout
         n = int(duck_cli(db, "SELECT COUNT(*) FROM socios_vinculos"))
         assert n == m["socios_rows"]                             # loading twice does not duplicate
+
+
+def test_export_socios_detail_local(world, exported):
+    wd, api_pkg, _ = exported
+    cli(wd, "export", "--with-socios", "--socios-detail", "local", env={"CNPJ_HASH_SALT": SALT})
+    pkg = wd / "export" / (api_pkg.name + "_LOCAL_NAO_SUBIR")
+    assert pkg.is_dir() and api_pkg.is_dir()                  # the API package is untouched, the local one is apart
+    m = json.loads((pkg / "MANIFEST.json").read_text())
+    assert m["socios_detail"] == "local" and m["api_upload_allowed"] is False
+    assert (pkg / "NAO_SUBIR.txt").exists() and "NÃO SUBIR" in (pkg / "README.md").read_text()
+    con = duckdb.connect()
+    v = f"read_parquet('{pkg}/data/socios_vinculos.parquet')"
+    cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {v}").fetchall()]
+    assert "ano_entrada_sociedade" in cols and "decada_entrada_sociedade" not in cols
+    a = f"read_parquet('{api_pkg}/data/socios_vinculos.parquet')"
+    assert con.execute(f"SELECT COUNT(*) FROM {v}").fetchone() == con.execute(f"SELECT COUNT(*) FROM {a}").fetchone()
+    assert con.execute(f"SELECT COUNT(*) FROM {v} l JOIN {a} p USING (cnpj_basico, socio_id, qualificacao_socio) "
+                       "WHERE l.ano_entrada_sociedade // 10 * 10 <> p.decada_entrada_sociedade").fetchone()[0] == 0
+    assert_salt_nowhere(pkg)
+    assert subprocess.run(sha256_check_cmd(), cwd=pkg, capture_output=True).returncode == 0
+    cli(wd, "export", "--with-socios", env={"CNPJ_HASH_SALT": SALT})   # leave the API package as the fixture expects
 
 
 def test_export_pf_policy_anonimizar(world, exported):

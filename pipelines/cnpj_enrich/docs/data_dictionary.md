@@ -169,8 +169,9 @@ No Postgres, `cnpj` e `cnpj_raiz` são `varchar(64)` no pacote, para caber o id 
 | socio_tipo, identificador_socio | `PJ`/`PF`/`ESTRANGEIRO` e o código 1/2/3 |
 | socio_cnpj_raiz | só PJ |
 | qualificacao_socio, qualificacao_socio_descricao | |
-| ano_entrada_sociedade | só o ano |
+| decada_entrada_sociedade | versão API (padrão, `--socios-detail api`): só a década de entrada (ex.: 2010 = 2010–2019) |
+| ano_entrada_sociedade | só no pacote local (`--socios-detail local`, pasta `..._LOCAL_NAO_SUBIR`): o ano exato. Esse pacote nunca vai para a API |
 | faixa_etaria, faixa_etaria_descricao | |
 | empresa_devedora, socio_pj_devedor, ref_rfb | |
 
-**Não entram:** nome, CPF mascarado, representante legal (CPF e nome), qualificação do representante, país, razão social do sócio PJ, data completa de entrada. A carga apaga e regrava as linhas do mesmo `ref_rfb` numa transação, então é idempotente. O README do pacote traz o relatório de risco de reidentificação (contagens de combinações com k<5).
+**Não entram:** nome, CPF mascarado, representante legal (CPF e nome), qualificação do representante, país, razão social do sócio PJ, data completa de entrada (e, na versão API, o ano exato). A carga apaga e regrava as linhas do mesmo `ref_rfb` numa transação, então é idempotente. O README do pacote traz o relatório de risco de reidentificação (contagens de combinações com k<5).

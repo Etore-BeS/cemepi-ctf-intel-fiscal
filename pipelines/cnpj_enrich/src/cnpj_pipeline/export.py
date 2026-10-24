@@ -18,6 +18,10 @@ has the same id in every firm; type, qualification, entry YEAR and age band. No 
 representative, no country, no PJ partner name. Without the salt the export with partners fails. The salt is read from
 the environment only: never written to the package, the manifest, the state or the log.
 The package README gets a re-identification risk report (k-anonymity of PF partners on quasi-identifiers).
+Partner detail (`--socios-detail`): `api` (default) is the version that may be loaded on the API server: the entry
+year is generalised to the DECADE (`decada_entrada_sociedade`). `local` keeps the exact entry year and writes the
+package to `cnpj_enriquecido_ref<REF>_LOCAL_NAO_SUBIR/` (MANIFEST `api_upload_allowed: false`): it stays on the
+researcher's disk under the PGE NDA and must never be loaded on the API.
 """
 from __future__ import annotations
 
@@ -60,21 +64,33 @@ CAPITAL_FAIXAS = [(0, "0"), (1_000, "ate 1 mil"), (10_000, "1 mil a 10 mil"), (5
                   (100_000, "50 mil a 100 mil"), (500_000, "100 mil a 500 mil"), (1_000_000, "500 mil a 1 milhao"),
                   (10_000_000, "1 milhao a 10 milhoes")]
 SOCIOS_TABLE = "socios_vinculos"
-SOCIOS_COLUMNS = [  # exported anonymised links: no name, no CPF, no representative (SOCIOS_PERSONAL never appears)
-    ("cnpj_basico", "VARCHAR", "char(8)"),
-    ("socio_id", "VARCHAR", "text"), ("socio_tipo", "VARCHAR", "text"), ("identificador_socio", "VARCHAR", "char(1)"),
-    ("socio_cnpj_raiz", "VARCHAR", "char(8)"),
-    ("qualificacao_socio", "VARCHAR", "char(2)"), ("qualificacao_socio_descricao", "VARCHAR", "text"),
-    ("ano_entrada_sociedade", "INTEGER", "integer"),
-    ("faixa_etaria", "VARCHAR", "char(1)"), ("faixa_etaria_descricao", "VARCHAR", "text"),
-    ("empresa_devedora", "BOOLEAN", "boolean"), ("socio_pj_devedor", "BOOLEAN", "boolean"),
-    ("ref_rfb", "VARCHAR", "char(7)"),
-]
+SOCIOS_DETAILS = ("api", "local")
+ENTRY_COLUMN = {"api": "decada_entrada_sociedade", "local": "ano_entrada_sociedade"}
+LOCAL_SUFFIX = "_LOCAL_NAO_SUBIR"
+
+
+def socios_columns(detail: str = "api") -> list[tuple[str, str, str]]:
+    """Exported anonymised links: no name, no CPF, no representative (SOCIOS_PERSONAL never appears).
+    `api`: entry decade only; `local`: exact entry year (local package, never loaded on the API)."""
+    return [
+        ("cnpj_basico", "VARCHAR", "char(8)"),
+        ("socio_id", "VARCHAR", "text"), ("socio_tipo", "VARCHAR", "text"), ("identificador_socio", "VARCHAR", "char(1)"),
+        ("socio_cnpj_raiz", "VARCHAR", "char(8)"),
+        ("qualificacao_socio", "VARCHAR", "char(2)"), ("qualificacao_socio_descricao", "VARCHAR", "text"),
+        (ENTRY_COLUMN[detail], "INTEGER", "integer"),
+        ("faixa_etaria", "VARCHAR", "char(1)"), ("faixa_etaria_descricao", "VARCHAR", "text"),
+        ("empresa_devedora", "BOOLEAN", "boolean"), ("socio_pj_devedor", "BOOLEAN", "boolean"),
+        ("ref_rfb", "VARCHAR", "char(7)"),
+    ]
+
+
+SOCIOS_COLUMNS = socios_columns("api")
 SOCIOS_COLUMN_NAMES = [c for c, _, _ in SOCIOS_COLUMNS]
+SOCIOS_COLUMN_NAMES_LOCAL = [c for c, _, _ in socios_columns("local")]
 
 
-def _ddl_socios(pg: bool) -> str:
-    cols = ",\n    ".join(f"{c} {p if pg else d}" for c, d, p in SOCIOS_COLUMNS)
+def _ddl_socios(pg: bool, detail: str = "api") -> str:
+    cols = ",\n    ".join(f"{c} {p if pg else d}" for c, d, p in socios_columns(detail))
     return (f"CREATE TABLE IF NOT EXISTS {SOCIOS_TABLE} (\n    {cols}\n);\n"
             f"CREATE INDEX IF NOT EXISTS {SOCIOS_TABLE}_basico_idx ON {SOCIOS_TABLE} (cnpj_basico);\n"
             f"CREATE INDEX IF NOT EXISTS {SOCIOS_TABLE}_socio_idx ON {SOCIOS_TABLE} (socio_id);\n")
@@ -96,20 +112,29 @@ def _vinculos_sql(soc_src: Path) -> str:
                CASE WHEN {pj} THEN socio_cnpj_raiz END AS socio_cnpj_raiz,
                qualificacao_socio, qualificacao_socio_descricao,
                year(data_entrada_sociedade)::INTEGER AS ano_entrada_sociedade,
+               (year(data_entrada_sociedade) // 10 * 10)::INTEGER AS decada_entrada_sociedade,
                faixa_etaria, faixa_etaria_descricao, empresa_devedora, socio_pj_devedor, ref_rfb
         FROM read_parquet({q(soc_src)}) CROSS JOIN _hk"""
 
 
-RISK_SETS = [  # (label, quasi-identifiers) on the PF partner links; firm attributes come from the full build
-    ("faixa etária × município × CNAE (pedido)", ["faixa_etaria", "municipio", "cnae"]),
-    ("faixa etária × município × CNAE × ano de entrada", ["faixa_etaria", "municipio", "cnae", "ano_entrada_sociedade"]),
-    ("generalizado: faixa etária × UF × seção CNAE", ["faixa_etaria", "uf", "cnae_secao"]),
-    ("dentro da empresa: CNPJ × qualificação × faixa × ano de entrada", ["cnpj_basico", "qualificacao_socio",
-                                                                       "faixa_etaria", "ano_entrada_sociedade"]),
-]
+def risk_sets(detail: str = "api") -> list[tuple[str, list[str]]]:
+    """(label, quasi-identifiers) on the PF partner links, with the entry column AS EXPORTED (decade for `api`,
+    year for `local`); firm attributes come from the full build."""
+    e = "década de entrada" if detail == "api" else "ano de entrada"
+    return [
+        ("faixa etária × município × CNAE (atributos da empresa via CNPJ)", ["faixa_etaria", "municipio", "cnae"]),
+        (f"faixa etária × município × CNAE × {e}", ["faixa_etaria", "municipio", "cnae", "entrada"]),
+        ("generalizado: faixa etária × UF × seção CNAE", ["faixa_etaria", "uf", "cnae_secao"]),
+        (f"generalizado: faixa etária × UF × seção CNAE × {e}", ["faixa_etaria", "uf", "cnae_secao", "entrada"]),
+        (f"dentro da empresa: CNPJ × qualificação × faixa × {e}", ["cnpj_basico", "qualificacao_socio",
+                                                                  "faixa_etaria", "entrada"]),
+    ]
 
 
-def risk_report(con, vinc: Path, build_glob: str) -> tuple[str, list[dict]]:
+RISK_SETS = risk_sets("api")
+
+
+def risk_report(con, vinc: Path, build_glob: str, detail: str = "api") -> tuple[str, list[dict]]:
     """k-anonymity of PF partners: k = distinct socio_id per combination of quasi-identifiers. Firm municipality and
     CNAE are taken from the FULL build (not the PF-suppressed export), because anyone holding the firm CNPJ can look
     them up in the public RFB data. Only aggregate counts are reported, never the rare combinations themselves."""
@@ -120,14 +145,14 @@ def risk_report(con, vinc: Path, build_glob: str) -> tuple[str, list[dict]]:
                       QUALIFY row_number() OVER (PARTITION BY cnpj_raiz
                                                  ORDER BY (matriz_filial = 'MATRIZ') DESC NULLS LAST, cnpj) = 1)
         SELECT DISTINCT v.socio_id, v.cnpj_basico, v.qualificacao_socio, COALESCE(v.faixa_etaria, '?') AS faixa_etaria,
-               COALESCE(v.ano_entrada_sociedade::VARCHAR, '?') AS ano_entrada_sociedade,
+               COALESCE(v.{ENTRY_COLUMN[detail]}::VARCHAR, '?') AS entrada,
                COALESCE(f.municipio, '(sem cadastro)') AS municipio, COALESCE(f.uf, '?') AS uf,
                COALESCE(f.cnae, '(sem cadastro)') AS cnae, COALESCE(f.cnae_secao, '?') AS cnae_secao
         FROM read_parquet({q(vinc)}) v LEFT JOIN firm f ON f.cnpj_raiz = v.cnpj_basico
         WHERE v.socio_tipo = 'PF'""")
     n_links, n_pf = con.execute("SELECT COUNT(*), COUNT(DISTINCT socio_id) FROM _pf").fetchone()
     out = []
-    for label, qi in RISK_SETS:
+    for label, qi in risk_sets(detail):
         cols = ", ".join(qi)
         r = con.execute(f"""
             WITH c AS (SELECT {cols}, COUNT(DISTINCT socio_id) AS k, COUNT(*) AS links FROM _pf GROUP BY ALL),
@@ -144,6 +169,9 @@ def risk_report(con, vinc: Path, build_glob: str) -> tuple[str, list[dict]]:
                     "distribuicao_k_lt_5": {int(k): int(c) for k, c in dist}})
     con.execute("DROP TABLE _pf")
     lines = ["", "## Relatório de risco de reidentificação (sócios pessoa física)", "",
+             f"Versão de `socios_vinculos` medida: **{detail}** ("
+             + ("vai para a API: entrada só por década" if detail == "api" else
+                "LOCAL, NÃO SUBIR: ano de entrada exato") + "). "
              f"Gerado por `cnpj_pipeline export --with-socios`. Base: {n_links:,} vínculos PF–empresa, {n_pf:,} "
              "pessoas físicas distintas (pelo `socio_id`). `k` = número de pessoas distintas que compartilham a mesma "
              "combinação de quase-identificadores. Município e CNAE vêm do cadastro completo da empresa (e não da "
@@ -185,10 +213,10 @@ def ddl_postgres() -> str:
             f"no names, addresses, phones, e-mails or partners. See data_dictionary.md.';\n")
 
 
-def load_duckdb_sql(with_socios: bool = False, ref: str = "") -> str:
+def load_duckdb_sql(with_socios: bool = False, ref: str = "", detail: str = "api") -> str:
     cols = ", ".join(EXPORT_COLUMN_NAMES)
-    sc = ", ".join(SOCIOS_COLUMN_NAMES)
-    soc = (f"""{_ddl_socios(False)}DELETE FROM {SOCIOS_TABLE} WHERE ref_rfb = '{ref}';
+    sc = ", ".join(c for c, _, _ in socios_columns(detail))
+    soc = (f"""{_ddl_socios(False, detail)}DELETE FROM {SOCIOS_TABLE} WHERE ref_rfb = '{ref}';
 INSERT INTO {SOCIOS_TABLE} ({sc}) SELECT {sc} FROM read_parquet('data/socios_vinculos.parquet');
 """ if with_socios else "")
     return f"""-- Idempotent load into DuckDB. Run from the package directory:
@@ -203,11 +231,11 @@ SELECT ref_rfb, COUNT(*) AS rows FROM {TABLE} GROUP BY ref_rfb ORDER BY ref_rfb;
 """
 
 
-def load_postgres_sql(with_socios: bool = False, ref: str = "") -> str:
+def load_postgres_sql(with_socios: bool = False, ref: str = "", detail: str = "api") -> str:
     cols = ", ".join(EXPORT_COLUMN_NAMES)
     upd = ",\n        ".join(f"{c} = EXCLUDED.{c}" for c in EXPORT_COLUMN_NAMES if c != "cnpj")
-    sc = ", ".join(SOCIOS_COLUMN_NAMES)
-    soc = (f"""{_ddl_socios(True)}DELETE FROM {SOCIOS_TABLE} WHERE ref_rfb = '{ref}';
+    sc = ", ".join(c for c, _, _ in socios_columns(detail))
+    soc = (f"""{_ddl_socios(True, detail)}DELETE FROM {SOCIOS_TABLE} WHERE ref_rfb = '{ref}';
 \\copy {SOCIOS_TABLE} ({sc}) FROM PROGRAM 'gzip -dc data/socios_vinculos.csv.gz' WITH (FORMAT csv, HEADER true)
 """ if with_socios else "")
     return f"""-- Idempotent load into PostgreSQL (psql). Run from the package directory:
@@ -229,6 +257,13 @@ SELECT ref_rfb, COUNT(*) AS rows FROM {TABLE} GROUP BY ref_rfb ORDER BY ref_rfb;
 """
 
 
+LOCAL_BANNER = """> **PACOTE LOCAL — NÃO SUBIR PARA A API NEM PARA A VPS.**
+> Gerado com `export --socios-detail local`: `socios_vinculos` traz o ANO exato de entrada na sociedade (mais
+> risco de reidentificação, veja o relatório no fim). Uso só local, sob o NDA da PGE. Para a API use o pacote
+> sem o sufixo `_LOCAL_NAO_SUBIR` (gerado com `--socios-detail api`, o padrão). `MANIFEST.json`:
+> `api_upload_allowed: false`.
+
+"""
 SH_DUCKDB = """#!/usr/bin/env bash
 # Usage: ./load_duckdb.sh /path/to/api.duckdb     (stop the API or use a maintenance window: DuckDB has one writer)
 set -euo pipefail
@@ -332,9 +367,12 @@ def pf_risk_report(con, pq: Path) -> tuple[str, list[dict]]:
 
 
 def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: bool = False,
-        hash_salt_env: str | None = None) -> Path:
+        hash_salt_env: str | None = None, socios_detail: str = "api") -> Path:
     if pf_policy not in PF_POLICIES:
         raise SystemExit(f"--pf-policy must be one of {', '.join(PF_POLICIES)}")
+    if socios_detail not in SOCIOS_DETAILS:
+        raise SystemExit(f"--socios-detail must be one of {', '.join(SOCIOS_DETAILS)}")
+    local = with_socios and socios_detail == "local"
     src = s.build_dir / "cnpj_enriquecido"
     if not list(src.glob("*.parquet")):
         raise SystemExit("export: run `build` first")
@@ -346,7 +384,7 @@ def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: boo
         salt = read_salt(hash_salt_env, who)          # fails without the salt, before writing anything
     if with_socios and not soc_src.exists():
         raise SystemExit("export --with-socios: run `socios` first")
-    name = f"cnpj_enriquecido_ref{s.ref_rfb}"
+    name = f"cnpj_enriquecido_ref{s.ref_rfb}" + (LOCAL_SUFFIX if local else "")
     final = s.export_dir / name
     scratch = s.temp_dir / "export_scratch"           # clear-text intermediates: on the HD, never in the package
 
@@ -373,12 +411,12 @@ def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: boo
             n_soc = None
             if with_socios:
                 clear = scratch / "vinculos.parquet"       # firm keys in clear, persons already pseudonymised
-                con.execute(f"COPY (SELECT {', '.join(SOCIOS_COLUMN_NAMES)} FROM ({_vinculos_sql(soc_src)})) "
+                cols = [c for c, _, _ in socios_columns(socios_detail)]
+                con.execute(f"COPY (SELECT {', '.join(cols)} FROM ({_vinculos_sql(soc_src)})) "
                             f"TO {q(clear)} (FORMAT PARQUET, COMPRESSION ZSTD)")
-                md, risk = risk_report(con, clear, str(src / "*.parquet"))
+                md, risk = risk_report(con, clear, str(src / "*.parquet"), socios_detail)
                 risk_md += md
                 spq = tmp / "data" / "socios_vinculos.parquet"
-                cols = SOCIOS_COLUMN_NAMES
                 if pf_policy == "anonimizar":   # PF-linked firms (MEI...) get the same HMAC ids as in cnpj_enriquecido
                     pfr = (f"(SELECT DISTINCT cnpj_raiz FROM {b} WHERE pessoa_fisica_vinculada)")
                     m = {"cnpj_basico": f"CASE WHEN v.cnpj_basico IN {pfr} THEN {hmac_sql('v.cnpj_basico')} "
@@ -404,15 +442,19 @@ def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: boo
             raise RuntimeError("export: duplicated cnpj")
         (tmp / "sql" / "ddl_duckdb.sql").write_text(ddl_duckdb())
         (tmp / "sql" / "ddl_postgres.sql").write_text(ddl_postgres())
-        (tmp / "sql" / "load_duckdb.sql").write_text(load_duckdb_sql(with_socios, s.ref_rfb))
-        (tmp / "sql" / "load_postgres.sql").write_text(load_postgres_sql(with_socios, s.ref_rfb))
+        (tmp / "sql" / "load_duckdb.sql").write_text(load_duckdb_sql(with_socios, s.ref_rfb, socios_detail))
+        (tmp / "sql" / "load_postgres.sql").write_text(load_postgres_sql(with_socios, s.ref_rfb, socios_detail))
         for fn, txt in (("load_duckdb.sh", SH_DUCKDB), ("load_postgres.sh", SH_POSTGRES)):
             (tmp / fn).write_text(txt); os.chmod(tmp / fn, 0o755)
         shutil.copy(_doc("data_dictionary.md"), tmp / "data_dictionary.md")
-        (tmp / "README.md").write_text(_doc("EXPORT_README.md").read_text() + risk_md)
+        banner = (LOCAL_BANNER if local else "")
+        (tmp / "README.md").write_text(banner + _doc("EXPORT_README.md").read_text() + risk_md)
+        if local:
+            (tmp / "NAO_SUBIR.txt").write_text(LOCAL_BANNER)
         for r in (risk or []):
-            log.info("export risk (socios PF): %s: %d of %d combinations with k<5; %d PF (%.2f%%) in them",
-                     r["conjunto"], r["combinacoes_k_lt_5"], r["combinacoes"], r["pf_em_k_lt_5"], r["pct_pf_em_k_lt_5"])
+            log.info("export risk (socios PF, detail=%s): %s: %d of %d combinations with k<5; %d PF (%.2f%%) in them",
+                     socios_detail, r["conjunto"], r["combinacoes_k_lt_5"], r["combinacoes"], r["pf_em_k_lt_5"],
+                     r["pct_pf_em_k_lt_5"])
         for r in (pf_risk or []):
             log.info("export risk (PF-linked CNPJ rows): %s: %d of %d combinations with k<5; %d rows (%.2f%%)",
                      r["conjunto"], r["combinacoes_k_lt_5"], r["combinacoes"], r["linhas_em_k_lt_5"],
@@ -429,7 +471,9 @@ def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: boo
                                         "rows": "pessoa_fisica_vinculada = true"} if pf_policy == "anonimizar" else None),
                     "pf_reidentification_risk": pf_risk,
                     "with_socios": with_socios, "socios_rows": n_soc,
-                    "socios_columns": SOCIOS_COLUMN_NAMES if with_socios else None,
+                    "socios_detail": socios_detail if with_socios else None,
+                    "api_upload_allowed": not local,
+                    "socios_columns": cols if with_socios else None,
                     "socios_pseudonym": ({**pseudo, "message": "NOME_NORMALIZADO|miolo_do_CPF"} if with_socios else None),
                     "socios_reidentification_risk": risk,
                     "pf_linked_rows": pf,
@@ -438,7 +482,7 @@ def run(s: Settings, state: State, pf_policy: str = "suprimir", with_socios: boo
                     "rfb_files_sha256": {k: v.get("sha256") for k, v in rfb.get("files", {}).items()},
                     "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
         (tmp / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
-        return n, {"pf_policy": pf_policy, "with_socios": with_socios}
+        return n, {"pf_policy": pf_policy, "with_socios": with_socios, "socios_detail": socios_detail}
     run_unit(state, "export", name, final, work, force=True)
     log.info("export: package ready at %s (nothing was sent to any server)", final)
     return final

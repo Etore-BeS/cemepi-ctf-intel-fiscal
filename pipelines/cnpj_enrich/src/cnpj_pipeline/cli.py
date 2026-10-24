@@ -70,6 +70,9 @@ def parser() -> argparse.ArgumentParser:
                    help="natural-person-linked rows; 'anonimizar' (recommended, needs the salt) or suprimir (default)")
     x.add_argument("--with-socios", action="store_true",
                    help="also export the anonymised socios_vinculos (needs --hash-salt-env; default: no partners)")
+    x.add_argument("--socios-detail", default="api", choices=["api", "local"],
+                   help="with --with-socios: 'api' (default) = entry DECADE, the version for the API server; "
+                        "'local' = exact entry year, package suffixed _LOCAL_NAO_SUBIR (never load it on the API)")
     x.add_argument("--hash-salt-env", default="CNPJ_HASH_SALT", metavar="VAR",
                    help="env variable holding the HMAC salt (default CNPJ_HASH_SALT); required by --with-socios and "
                         "--pf-policy anonimizar")
@@ -142,7 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         build.run(s, state, force=args.force)
     if args.stage in ("export", "all"):
         export.run(s, state, pf_policy=args.pf_policy, with_socios=args.with_socios,
-                   hash_salt_env=args.hash_salt_env or "CNPJ_HASH_SALT")
+                   hash_salt_env=args.hash_salt_env or "CNPJ_HASH_SALT",
+                   socios_detail=getattr(args, "socios_detail", "api"))
     if args.stage == "status":
         for row in state.summary():
             print("\t".join("" if v is None else str(v) for v in row))

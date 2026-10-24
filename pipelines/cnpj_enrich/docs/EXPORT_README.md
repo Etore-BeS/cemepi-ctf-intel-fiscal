@@ -96,7 +96,9 @@ Tudo roda no computador local, contra uma cópia local da API/base. Nada aqui to
 - Saídas publicadas (papers, figuras) só devem trazer agregados, nunca o CNPJ de MEI.
 
 **Sócios (`socios_vinculos`, só com `--with-socios`)**
-- Fica: CNPJ da empresa (`cnpj_basico`, a raiz) em claro, porque já é a chave da API; tipo do sócio; qualificação; **ano** de entrada; faixa etária; flags de devedor.
+- Fica: CNPJ da empresa (`cnpj_basico`, a raiz) em claro, porque já é a chave da API; tipo do sócio; qualificação; **década** de entrada (`decada_entrada_sociedade`); faixa etária; flags de devedor.
+- Duas versões (`--socios-detail`): `api` (padrão) é a única que pode ser carregada na API, com a entrada só por década. `local` mantém o **ano** exato (`ano_entrada_sociedade`), sai na pasta `..._LOCAL_NAO_SUBIR` com `api_upload_allowed: false` no `MANIFEST.json` e fica só no disco do pesquisador, sob o NDA da PGE.
+- Município e CNAE da empresa não estão em `socios_vinculos`, mas qualquer um chega a eles pelo CNPJ (em `cnpj_enriquecido` ou na RFB). Por isso o relatório de risco mede também faixa × município × CNAE: a generalização para UF × seção do CNAE só vale se a API não expuser município e CNAE fino da empresa junto com os sócios.
 - Sócio PJ: `socio_id` = CNPJ em claro. Sócio PF ou estrangeiro: `socio_id` = HMAC-SHA256(sal, nome normalizado + `|` + miolo do CPF), com o nome sem acento, em maiúsculas e com espaços simples. A mesma pessoa tem o mesmo id em todas as empresas, e a rede continua conectável.
 - Sai: nome, CPF mascarado, representante legal (CPF e nome), país, razão social do sócio PJ.
 - Na política `anonimizar`, empresas PF-vinculadas (MEI etc.) aparecem em `cnpj_basico` / `socio_id` com o mesmo id HMAC de `cnpj_enriquecido`.
