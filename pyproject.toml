@@ -24,11 +24,15 @@ dependencies = [
     "tqdm>=4.67.3",
 ]
 
+[project.scripts]
+cnpj-pipeline = "cnpj_pipeline.cli:main"      # pipelines/cnpj_enrich (uv run cnpj-pipeline <etapa>)
+
 [dependency-groups]
 # uv sync                      → base + dev (padrão)
 # uv sync --group litigancia   → + coleta TJSP/lake (precisa de acesso SSH ao repo juscraper)
 # uv sync --group forecast     → + modelos de previsão (timesfm)
 # uv sync --group lab          → + motor Jupyter mínimo para o Quarto renderizar lab/
+# uv sync --group cnpj         → + pipelines/cnpj_enrich (Dados Abertos CNPJ da RFB; pglast só valida a DDL nos testes)
 dev = [
     "ipykernel>=7.1.0",
     "nbconvert>=7.16.0",
@@ -60,6 +64,12 @@ nlp = [
     "torch>=2.5.0",
     "transformers>=4.48.0",
 ]
+cnpj = [
+    "duckdb>=1.5.0",
+    "python-dotenv>=1.2.1",
+    "requests>=2.34.2",
+    "pglast>=7.0",
+]
 lab = [
     "ipykernel>=7.1.0",
     "jupyter-core>=5.7",
@@ -79,6 +89,7 @@ packages = [
   "pipelines/litigancia/src/scrapers",
   "pipelines/litigancia/src/utils",
   # "pipelines/divida_ativa/src/divida_ativa",   # descomentar no passo 6 do MIGRACAO.md
+  "pipelines/cnpj_enrich/src/cnpj_pipeline",
 ]
 
 [tool.hatch.metadata]
@@ -92,4 +103,4 @@ override-dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["scripts/tests", "pipelines/litigancia/tests"]
+testpaths = ["scripts/tests", "pipelines/litigancia/tests", "pipelines/cnpj_enrich/tests"]
