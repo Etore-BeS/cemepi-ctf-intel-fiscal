@@ -2,7 +2,7 @@
   "nome": "cnpj_enriquecido",
   "versao": "rfb-2026-03",
   "caminho": "$CNPJ_PIPELINE_WORKDIR/build/2026-03/cnpj_enriquecido/",
-  "build_commit": "86f83e708cb4410eee28b9ffe95feb7ae40c8649-dirty",
+  "build_commit": "9073bafebba0e99fc7175e9140cf1b078304c598-dirty",
   "schema_version": 2,
   "fonte": {
     "ref_rfb": "2026-03",
@@ -56,82 +56,82 @@
   "arquivos": [
     {
       "arquivo": "kb=000.parquet",
-      "sha256": "04bca6d6eb8b578ace52782cc02c346f42f06cbebf92efac0938621a2f3faa99",
+      "sha256": "6594aba9b178f50b5357b17f91710d8ba5c2591f107fe20167e978822302d6e0",
       "linhas": 60343
     },
     {
       "arquivo": "kb=001.parquet",
-      "sha256": "ca08c1c963a1ff5d18a42c564964be972d1ad9104bbb896a8d3ebd92bf60f1b5",
+      "sha256": "24d55fe098fcb41ad921151c8ed5ded0dca56295b944a470685267016245f4d1",
       "linhas": 60262
     },
     {
       "arquivo": "kb=002.parquet",
-      "sha256": "8addd1f82f50b1c27869d2e1bc325b443fbcf3554f71dcb9a573a87e64d319fd",
+      "sha256": "b68eaf5e4e2bc7adec5cd123aed66f3d814d13a6ae7d834fb758e1b886af13f9",
       "linhas": 60895
     },
     {
       "arquivo": "kb=003.parquet",
-      "sha256": "d4169c95fa88038fff854e34d3c103f4d8c55fbbdbc95390a68896c445ecb6a9",
+      "sha256": "e5adb1bafb20a0da37fc0fc3e2f4c6b32782729b2abc4355d796d40e12cee8f0",
       "linhas": 61683
     },
     {
       "arquivo": "kb=004.parquet",
-      "sha256": "ee012206f37aa28d3683068ba3e7c13a17e5c1a4d8c00a7dac40aeff2edd0bab",
+      "sha256": "4a176f0076aa274655bcc290c1e32d44eded954a7e307562de1d2a0cd3fc9660",
       "linhas": 60842
     },
     {
       "arquivo": "kb=005.parquet",
-      "sha256": "7c21a9a935c3161246f721780904df905a978e2567d5e2c5992248e64aa16ce5",
+      "sha256": "edf08e0f6704750f7d53b39ec5dcfdf70f191af9d31223dbda6adb3730e0351c",
       "linhas": 59911
     },
     {
       "arquivo": "kb=006.parquet",
-      "sha256": "52bc84deee8ded7f4e117a579fbce60cb3a94bc3ef819698f050ef2e11f5b14f",
+      "sha256": "41e76ced23f47442c6a741dfcbbc760d515a95f7d291f8f025cfaa4310de3c00",
       "linhas": 60016
     },
     {
       "arquivo": "kb=007.parquet",
-      "sha256": "5a96f45813b637d7c1932c921dcd17cdcda362e47750cd1c7b1a9a11c41de0b0",
+      "sha256": "1347c5a511ee9c9a322b3b6a3479af393d295050be1e7b7d91e9a52a9777ba01",
       "linhas": 60974
     },
     {
       "arquivo": "kb=008.parquet",
-      "sha256": "25a9f32889d9de975934e8616060e9d476037e8e5adcf2c1921fa44ec792accf",
+      "sha256": "bfbad5543a6474b2e0b000bb592f09125449ccdd6ad70b10f92792be7e6c36e7",
       "linhas": 59914
     },
     {
       "arquivo": "kb=009.parquet",
-      "sha256": "fb9044b5a5eca7b0a38cbc94f77bb81f866a6e9728b94187648257ecab66a748",
+      "sha256": "591e9c74a8fecd6cd544057127e7aadd88345c45508c981b5f43494505969f10",
       "linhas": 60125
     },
     {
       "arquivo": "kb=010.parquet",
-      "sha256": "762f8d604f4b346d1ac22e653617cede888117faaba09ee488b459488b1269f0",
+      "sha256": "105081d5f15f97f2e35af85beed1c81bc9de0221520a539ef9709bd53f352f3e",
       "linhas": 60324
     },
     {
       "arquivo": "kb=011.parquet",
-      "sha256": "2f523d2a6f52700b2cf8477e20e8957ad6efac5829b151c3a5aae392dc2994c1",
+      "sha256": "7e7d871b9fe54e59da88e59557a9a9365be454fb9c6d25f169af59cc24999d00",
       "linhas": 60599
     },
     {
       "arquivo": "kb=012.parquet",
-      "sha256": "0939d1a3014db35aa8b02e78f17c237e3658638b3340dee303bcea922f4a5f80",
+      "sha256": "c9f504ba9ffda58b78a76248f83f0f54a2cf43a6fc076ccb4a6d216b6e08c239",
       "linhas": 60910
     },
     {
       "arquivo": "kb=013.parquet",
-      "sha256": "0c6affecbb21a2a7329af635b7c4357ded8b63cc01f983913b6dbbc62cc3439b",
+      "sha256": "d7975a13a1bcbd86ddbf3190a59e17db47b1f4c81cd336414615a98f9bc04a3f",
       "linhas": 60427
     },
     {
       "arquivo": "kb=014.parquet",
-      "sha256": "12b7af4fa400f93456b3533c548e3525a5f970094b8764c48af68b9cff991273",
+      "sha256": "981f5364c1ad98e1b0c772ce6d5522e4326ee34dc28efde064927622a61c60a3",
       "linhas": 60665
     },
     {
       "arquivo": "kb=015.parquet",
-      "sha256": "c7921b9bc692612c2df456f7956ffe408ae00eb51ec858259aa2c6d97899b00e",
+      "sha256": "d7cad2821b431120b0954e2186daa99f64965ff5bbc64a0466e589875af730ee",
       "linhas": 60720
     }
   ],

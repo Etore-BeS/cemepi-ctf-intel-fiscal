@@ -121,12 +121,13 @@ j AS (
            {_code('emp.qualificacao_responsavel', 2)} AS qualificacao_responsavel,
            lpad(trim(emp.porte), 2, '0') AS porte,
            TRY_CAST(replace(replace(trim(emp.capital_social), '.', ''), ',', '.') AS DECIMAL(18,2)) AS capital_social,
-           -- not in the Simples file = not an option (false), not unknown; the dates stay NULL
-           CASE WHEN simp.cnpj_basico IS NULL THEN false
+           -- firm in the RFB but not in the Simples file = not an option (false); firm not in the RFB at all
+           -- (match_nivel nao_encontrado) = unknown (NULL); the dates stay NULL in both cases
+           CASE WHEN est.cnpj14 IS NULL AND emp.cnpj_basico IS NULL AND er.cnpj_basico IS NULL THEN NULL WHEN simp.cnpj_basico IS NULL THEN false
                 ELSE CASE upper(trim(simp.opcao_simples)) WHEN 'S' THEN true WHEN 'N' THEN false END END AS opcao_simples,
            {_date('simp.data_opcao_simples')} AS data_opcao_simples,
            {_date('simp.data_exclusao_simples')} AS data_exclusao_simples,
-           CASE WHEN simp.cnpj_basico IS NULL THEN false
+           CASE WHEN est.cnpj14 IS NULL AND emp.cnpj_basico IS NULL AND er.cnpj_basico IS NULL THEN NULL WHEN simp.cnpj_basico IS NULL THEN false
                 ELSE CASE upper(trim(simp.opcao_mei)) WHEN 'S' THEN true WHEN 'N' THEN false END END AS opcao_mei,
            {_date('simp.data_opcao_mei')} AS data_opcao_mei,
            {_date('simp.data_exclusao_mei')} AS data_exclusao_mei,
