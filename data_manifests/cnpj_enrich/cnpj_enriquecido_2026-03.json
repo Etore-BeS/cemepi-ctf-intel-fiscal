@@ -1,0 +1,143 @@
+{
+  "nome": "cnpj_enriquecido",
+  "versao": "rfb-2026-03",
+  "caminho": "$CNPJ_PIPELINE_WORKDIR/build/2026-03/cnpj_enriquecido/",
+  "build_commit": "2108648f4b9b1049e39b53ec4a71d2f442080994",
+  "schema_version": 2,
+  "fonte": {
+    "ref_rfb": "2026-03",
+    "rfb_zips": {
+      "Cnaes.zip": "95de6fc8705ffcac1c238dc3f84e75e68aae5aeb31fc31db0574efe85171118f",
+      "Empresas0.zip": "3b51cc15721a0879036d29b6786a5a482fb97f2458cf938d970f5a8d9fe0efa3",
+      "Empresas1.zip": "1b50a35780a530121396ede9e884d89b5ad542209205e2c076af0c2d99ad4d0c",
+      "Empresas2.zip": "c5aa3fcd833844fe0e7994a709823c4672a088fdd42abe5a663978c924a24495",
+      "Empresas3.zip": "4fc6225a6e3f3e4b281aab521696d2a788139d8e56da8bc3b7feb6b194208c5e",
+      "Empresas4.zip": "136e9c25e89188785d552d8ac0d1164e8a858d3a9e3e8d9d30f3834962aef3d5",
+      "Empresas5.zip": "b947d512de362d6810c04ccc909a0577030d55963272dc1d8d08ae98ee266f71",
+      "Empresas6.zip": "f7a9484d014e96d22ac4f7d556dcb9bf98a7313d81de43e9fb2967f5f714e2f8",
+      "Empresas7.zip": "20c9104afceeec72f3b0ff0cd301c66a7a2aa1fadb0cdb9d7d5296bf7bc5db48",
+      "Empresas8.zip": "ec7f328bf342d3cd0ef34c9799481a90e1ff75785ec460335c46f32b2b242d7b",
+      "Empresas9.zip": "969d56911c72cc2bb9a1b9ebd00a138ef9b1dab30d5f851a42db3db951edc928",
+      "Estabelecimentos0.zip": "5eeaffb571cd5f43ecb968bc96e555523563265c6ac2ac615849b15ad031d571",
+      "Estabelecimentos1.zip": "11610643483527619a73999072f7e0b91e813426e067f32f5b93812bd70d4664",
+      "Estabelecimentos2.zip": "03f2ea661c90fd3b65d510a28345a90a833a7b40e2380160847e2a6ca5954de5",
+      "Estabelecimentos3.zip": "776af8701f39341de5c4a69379c15cb9812426e678456f0bbd7e93e68b132c5c",
+      "Estabelecimentos4.zip": "fd5af31cc6fd5b6aa90523336b253c3cd7dd7b4aed2f8ccada324317d7b1326c",
+      "Estabelecimentos5.zip": "a4a117af218329b220ad23c00803d08da594650cff1098fac1dad08a533ba4f7",
+      "Estabelecimentos6.zip": "93c1c18d06e3b2726f3ad62889a12adb164dd33585dd9c7b2ae60fb665e3378a",
+      "Estabelecimentos7.zip": "4bdc6da4d177c346fa7b50cf6d592658dbb17c06e11d1f01ffd86460d6147e1f",
+      "Estabelecimentos8.zip": "cb75c6af060b90ed5709fe952ed343268200b5e62cd38757dcb626ee576b6bf6",
+      "Estabelecimentos9.zip": "db2d47964b0ce8c2962ae00391af237388a5eee2ab3c511cb04f315de7948ef3",
+      "Motivos.zip": "71c98346ea787ae8e07c41fa20ed9d9aecc079eb1842ec82c75e231cad2f726e",
+      "Municipios.zip": "c728d8030e5cc88d169a3e7e55884569d2ac8ca0d17cf4bfa2d3d2e56baa5050",
+      "Naturezas.zip": "f162e5f8561718d297284dc3846f4e611d2baa87d084f3a84ad597ef71aaa25f",
+      "Paises.zip": "b9e8a4be6d5c1f270ef81c1a64a4b21489ca9a315a57508a54b0f8c0aff82262",
+      "Qualificacoes.zip": "2bb94604348885666dfc92bb1b2e3b8482957e074c2a2e239ec55a75b4013d7d",
+      "Simples.zip": "8bb1bec9d8865089004430950ac44eb0088d39c4b4a634a561f1bf9d8c4f95c6",
+      "Socios0.zip": "678cb219f6aa6dded71120b88087d502065e3bfb3d6128640debd7b13d76eb69",
+      "Socios1.zip": "7d14f4a9737b3250a481d7ec108034c469c25e3d9c49f85324810b256b8ee30c",
+      "Socios2.zip": "1f18eb48a8b39f90321c233975412e83fca7eddf12e53ece7b5210662063b0a9",
+      "Socios3.zip": "b2fca5d9f41952c46731636fccce8b84964adca2d3f70285bebb00f17bac57a5",
+      "Socios4.zip": "88b7752c9afad26d7468d0b31fe961fd7c2ad35c745917f44e9b6c1f1c1c999e",
+      "Socios5.zip": "4b8b904f22e54cae2230dbfd1e1bbd8b2ec91caef5fe9bd0abae5fdcd7b2a80d",
+      "Socios6.zip": "05d560d8abd8ffc46b5842659ac131f88d415f790eeb3d2bd12f35a0ab21da9d",
+      "Socios7.zip": "1cfc0a9af4029dc16742c665b0b83b995d525384cff78a9ddb5149af501351e4",
+      "Socios8.zip": "2feeb5cf30327cb9d73e9f4a0f124a4002a2a4e2697c083d30714b47726b0f17",
+      "Socios9.zip": "30db4353ebbc670c2deaabccc8d3113ae027aab09e01039cdf82ad80e89c2218",
+      "entidades-imunes-e-isentas.zip": "c98f57ab0841e666654cdd9a8b69f17ce3dcfc149bb4581e3152be98d14b46f7",
+      "entidades-lucro-arbitrado.zip": "56422c11e9428c63190c95058d25cd8ab99a306acd3cab0f15d2ea619a7ee7bd",
+      "entidades-lucro-presumido.zip": "cc9ef09e8a6ae6d5426f7e3b511b1b1e21927cb0cb5946049e994c667f387aab",
+      "entidades-lucro-real.zip": "f308d5754a2758162f0e57330c21e92b2faa64d70baa721b6ae4e6093a468042",
+      "municipios_ibge.csv": "60da8e582c1021c4be21cc9b45c4bf791f98f75a40df242b4b2ff4a4121da89b"
+    },
+    "regime_tributario": "9c813ac8492a1bcd84f998bc6d66935728350da250df1d18f49920259728058a",
+    "debito": "CNPJs distintos de DEBITO (DuckDB CEMEPI, somente leitura; só CNPJ_DEVEDOR/tributo/valor)"
+  },
+  "arquivos": [
+    {
+      "arquivo": "kb=000.parquet",
+      "sha256": "4c26fd9924d1e46fab364b88616c7763391db3d34c95c6f49a0a7b9002c0c357",
+      "linhas": 60343
+    },
+    {
+      "arquivo": "kb=001.parquet",
+      "sha256": "c7d0e86f284093f3225f067d58d4a40ffda86bb8abc83331d390803ce7f8e318",
+      "linhas": 60262
+    },
+    {
+      "arquivo": "kb=002.parquet",
+      "sha256": "8f8b75a43ef662304b2053701a2c1e184f527c1322208ebc95ea0faa2ecdcf8f",
+      "linhas": 60895
+    },
+    {
+      "arquivo": "kb=003.parquet",
+      "sha256": "70aab1ccbcb1c3d8b649cc4bcb2f38d2bc69ba80b8b16432f9140d88fc4058a8",
+      "linhas": 61683
+    },
+    {
+      "arquivo": "kb=004.parquet",
+      "sha256": "fe46f66f7a6b90aceb3ee5aff52854d793f2536786d1f32edd8211c19504ab4b",
+      "linhas": 60842
+    },
+    {
+      "arquivo": "kb=005.parquet",
+      "sha256": "854fb02822d8c919f5283e4f21e680fd22af6e2f3a7c216df222b51522b9ee52",
+      "linhas": 59911
+    },
+    {
+      "arquivo": "kb=006.parquet",
+      "sha256": "ef61f323541bcd1e64f27f45b428fbabdbde02a665312d40d921d96e5e089048",
+      "linhas": 60016
+    },
+    {
+      "arquivo": "kb=007.parquet",
+      "sha256": "65b21fdefb674a7c00e5761fef8c36f74fd2721cb213169e2d618484f14f2c65",
+      "linhas": 60974
+    },
+    {
+      "arquivo": "kb=008.parquet",
+      "sha256": "e8aede7f51a9218b6d2d21835ba906016c2a45654aaeb277885ae8e4cf928822",
+      "linhas": 59914
+    },
+    {
+      "arquivo": "kb=009.parquet",
+      "sha256": "6609ad246a4ef7c676137ff7282021ba91b289ee4f360b59d81ae762d706c020",
+      "linhas": 60125
+    },
+    {
+      "arquivo": "kb=010.parquet",
+      "sha256": "d28c358eb5f0dcf79004b9b2ac87a37f896a18c27c26af5c20465caec73bd210",
+      "linhas": 60324
+    },
+    {
+      "arquivo": "kb=011.parquet",
+      "sha256": "c88ec2e329ce9a0240a14ccb744a0c169b4ff3889bedd5c155f5d8421f94da71",
+      "linhas": 60599
+    },
+    {
+      "arquivo": "kb=012.parquet",
+      "sha256": "1f8fa4c56a280c352cf5f433e9aeb009abe478574ade13fb8415d9b9734fe0d2",
+      "linhas": 60910
+    },
+    {
+      "arquivo": "kb=013.parquet",
+      "sha256": "a8009a96f6a277aeb225d74b1125799705e4dc08ceb45063ac976fbc82f321a3",
+      "linhas": 60427
+    },
+    {
+      "arquivo": "kb=014.parquet",
+      "sha256": "f59a482711c1024ddae765bea070fff01b994dc0e9446993cf34ca20709368b5",
+      "linhas": 60665
+    },
+    {
+      "arquivo": "kb=015.parquet",
+      "sha256": "a5da56372802bae353a92b291fb98c01d6e46088e3dcf80cb04ddaf27dc4234d",
+      "linhas": 60720
+    }
+  ],
+  "linhas": 968610,
+  "filtros": [
+    "1 linha por CNPJ devedor (14 dígitos)",
+    "socios ficam fora (só local)"
+  ]
+}
