@@ -23,24 +23,40 @@ Cada entrada é datada e diz: a pergunta, os dados usados (versão do painel), o
 encontrado e o que **não** se pode concluir. As figuras dos artigos **não** saem daqui;
 saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
-- **Painel em uso:** `painel_icms` versão `vAAAA-MM-DD` (manifest em `data_manifests/`).
-- **Extração do dump:** `extracao=AAAA-MM`.
+- **Base em uso:** dump Inteligência Fiscal (PGE-SP), `extracao=2026-03`. Os painéis e caches do EDA do artigo (`paper_eda_v1`) são reaproveitados pela chave de cache, sem reextração.
+- **Recorte padrão das entradas novas:** de 2016 a 2025. 2026 só tem janeiro a março e fica fora dos gráficos e das correlações.
 - **Último render local:** ver a data desta página.
 
 ## O que mudou nesta versão
 
-- *(AAAA-MM-DD)* Descreva em uma linha cada entrada nova ou alterada.
+- *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.
+- *(2026-10-23)* **K-means no top 1% das CDAs ICMS:** 100 inicializações por k, de k=2 a k=8, com cotovelo e silhueta; k=2 e k=4 comparados por estabilidade entre sementes, ARI, tamanhos e perfis agregados; a figura da seção 5.18 refeita.
+- *(2026-10-23)* **Selic over e checagem das correlações macro:** a Selic meta (SGS 432) trocada pela Selic over (SGS 4189); fonte, unidade, frequência, defasagem, cobertura e valores atípicos das séries conferidos; a correlação entre emprego e estoque decomposta.
+- *(2026-10-23)* **EDA completo:** o notebook convertido sem mudar a lógica, com caminhos lidos do `.env`. O recorte é o original, com 2026 parcial; as correções estão nas três entradas acima.
 
 ## Questões para discussão (2026-10-23)
 
-> Modelo. Mantenha uma seção por data, a mais recente no topo. Sem nomes de pessoas nem
-> referência a reuniões: as notas pessoais ficam em `.local/` (fora do git).
+1. **Pergunta:** quantos grupos usar no top 1%: k=2 ou k=4?
+   **Evidência:** [K-means no top 1%](eda/2026-10-23_kmeans_top1.qmd). As três leituras não apontam o mesmo k:
+   - o cotovelo da inércia, pela curvatura, aponta k=3;
+   - a silhueta do K-means é maior em k=4 do que em k=2 na base de dez/2025;
+   - a silhueta do agrupamento hierárquico (Gower) é maior em k=2, mas esse k=2 só separa 93 CDAs (0,4%) do resto, nas duas bases. Não é a mesma divisão do K-means (ARI perto de zero).
 
-1. **Pergunta:** *(ex.: o número de clusters deve ser 2, como indica a silhueta, ou 4?)*
-   **Evidência:** link para a entrada e a figura (`eda/AAAA-MM-DD_tema.qmd#fig-…`).
-   **Opções:** (a) … (b) …
-   **Proposta:** …
-2. **Pergunta:** …
+   O k=2 separa autuação e declarado. O k=4 subdivide a autuação por situação (suspensa, inscrita, liberada para ajuizamento) e tem um grupo pequeno.
+   **Opções:** (a) k=2, mais estável entre bases; (b) k=4, mais informativo e com estabilidade aceitável; (c) mostrar os dois.
+   **Proposta:** a decidir. A página não escolhe k.
+2. **Pergunta:** a correção da figura 5.18 é a pedida?
+   **Evidência:** [K-means no top 1%](eda/2026-10-23_kmeans_top1.qmd), seção 5.18. No artigo, o primeiro componente do PCA era dominado pelo número de pagamentos, por causa da escala robusta com IQR zero, e as cores de dois grupos eram quase iguais. A página refaz o PCA com a escala usada na distância de Gower e com uma paleta distinta.
+   **Opções:** (a) a correção é essa; (b) o pedido era outro (eixo, rótulo, tipo de gráfico).
+   **Proposta:** confirmar o que se esperava da figura.
+3. **Pergunta:** a correlação entre emprego e estoque fica no texto?
+   **Evidência:** [Selic over e checagem](eda/2026-10-23_macro_selic_over_checagem.qmd), seção 2.5. Em primeira diferença, a correlação depende do ano de 2020, quando o estoque e a contagem de CDAs do painel caem juntos.
+   **Opções:** (a) retirar até conferir o estoque de 2020 na tabela DEBITO corrigida; (b) manter só em diferença ou desvio da tendência, com a ressalva.
+   **Proposta:** (a).
+4. **Pergunta:** o EDA completo deve ser refeito com o corte em 2025?
+   **Evidência:** [EDA completo](eda/2026-10-23_eda_completo.qmd). A conversão mantém 2026 parcial para ficar fiel ao notebook.
+   **Opções:** (a) manter como registro e usar as páginas corrigidas; (b) refazer o corte nesta página também.
+   **Proposta:** (a).
 
 ## Entradas
 

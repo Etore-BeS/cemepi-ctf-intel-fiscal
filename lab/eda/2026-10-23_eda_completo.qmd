@@ -1,0 +1,4175 @@
+---
+title: "EDA completo da dívida inscrita (versão do notebook, convertida para o laboratório)"
+description: "Conversão fiel do notebook EDA_completo.ipynb para o laboratório: inventário, sanidade, buckets, painel ICMS, domínio, GARE, macros e painel de recuperação. Os caminhos vêm do .env; as saídas são só agregados."
+date: 2026-10-23
+jupyter: python3
+---
+
+**O que é esta página:** é o notebook `EDA_completo.ipynb` convertido sem mudar a lógica. Ele roda a partir dos artefatos já gravados no HD (pasta `EDA_ARTIFACTS` do `.env`) e só consulta a base quando um artefato falta. As células lentas continuam desligadas, como no original.
+**Dados:** `cemepi.duckdb` e `macro.duckdb` em `DATA_ROOT` (do `.env`), `extracao=2026-03`.
+**Recorte:** é o do notebook original, inclusive com 2026 parcial nas séries e correlações. As correções feitas em 23/10/2026 estão em páginas próprias:
+
+- [Concentração da dívida e liquidação em R$](2026-10-23_concentracao_e_liquidacao.qmd): corte em 2025, B.8.5 em R$, concentração por tributo e por devedor.
+- [K-means no top 1%](2026-10-23_kmeans_top1.qmd): k de 2 a 8, k=2 contra k=4, figura 5.18 corrigida.
+- [Selic over e checagem das correlações macro](2026-10-23_macro_selic_over_checagem.qmd): correlações refeitas de 2016 a 2025.
+
+**Stack:** Polars, com DuckDB só para `ATTACH`/`COUNT` em `.duckdb`.
+
+```{python}
+#| label: setup
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import polars as pl
+import plotly.express as px
+import plotly.io as pio
+
+sys.path.insert(0, str(Path.cwd()))
+import _lab_base as B  # lê só as chaves de caminho do .env e troca caminhos locais por $VARIAVEL no print
+
+DATA_ROOT = B.env_path("DATA_ROOT")        # pasta com cemepi.duckdb e macro.duckdb
+EDA_ARTIFACTS = B.EDA_ARTIFACTS            # artefatos do notebook (cópia no HD)
+
+fonte_ok = DATA_ROOT.is_dir() and EDA_ARTIFACTS.is_dir()
+print(f"polars {pl.__version__}")
+print("FONTE OK — DATA_ROOT e EDA_ARTIFACTS existem." if fonte_ok else "FONTE NÃO MONTADA — confira DATA_ROOT e EDA_ARTIFACTS no .env.")
+```
+
+### DoD — etapa 0
+- Célula de setup roda sem crash.
+- Imprime `FONTE OK` ou `FONTE NÃO MONTADA` de forma explícita.
+- **Não** inventa contagens nem abre débito ainda.
+
+```{python}
+assert "fonte_ok" in dir() or "fonte_ok" in globals()
+print("DoD etapa 0:", "PASS" if fonte_ok else "PASS (fonte ausente, aviso emitido)")
+```
+
+## 1. Inventário / sanidade (fatiado)
+
+Uma célula = uma tabela, **base completa** (sem amostra). Ordem: leve → pesado. `DEBITO` (~800M) por último.
+
+Helper Polars/DuckDB abaixo; depois rode só a próxima tabela.
+
+```{python}
+from __future__ import annotations
+
+from typing import Any
+
+import duckdb
+import polars as pl
+
+assert "DATA_ROOT" in globals() and "fonte_ok" in globals(), "Rode a etapa 0."
+inventario: list[dict[str, Any]] = []
+ARTIFACTS = EDA_ARTIFACTS
+ARTIFACTS.mkdir(exist_ok=True)
+CACHE_JSON = ARTIFACTS / "inventario.json"
+
+
+def _save_inventario() -> None:
+    """Persiste após cada tabela — não precisa rerodar o censo."""
+    import json as _json
+    slim = []
+    for r in inventario:
+        slim.append({
+            "label": r.get("label"),
+            "n": r.get("n"),
+            "ncols": r.get("ncols"),
+            "cols": r.get("cols"),
+            "null_pct": r.get("null_pct"),
+            "ranges": {k: [str(a), str(b)] for k, (a, b) in (r.get("ranges") or {}).items()},
+        })
+    CACHE_JSON.write_text(_json.dumps(slim, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"cache → {CACHE_JSON}")
+
+
+def load_inventario() -> list[dict[str, Any]]:
+    import json as _json
+    if not CACHE_JSON.is_file():
+        print("sem cache ainda")
+        return []
+    data = _json.loads(CACHE_JSON.read_text(encoding="utf-8"))
+    print(f"carregou {len(data)} relações de {CACHE_JSON}")
+    return data
+
+
+def describe_duckdb_table(db_name: str, table: str) -> dict[str, Any]:
+    """Censo completo de UMA tabela (SQL). Rode célula a célula."""
+    db = DATA_ROOT / db_name
+    label = f"{db_name}:{table}"
+    if any(r.get("label") == label for r in inventario):
+        print(f"já no cache — skip {label}")
+        return next(r for r in inventario if r.get("label") == label)
+    if not fonte_ok or not db.is_file():
+        print(f"FONTE/arquivo ausente — skip {label}")
+        return {"label": label, "n": None, "skipped": True}
+
+    con = duckdb.connect()
+    alias = "dbx"
+    try:
+        con.execute(f"ATTACH '{db}' AS {alias} (READ_ONLY)")
+        rel = f'{alias}."{table}"'
+        print(f"… {label} COUNT(*) …")
+        n = int(con.execute(f"SELECT COUNT(*) FROM {rel}").fetchone()[0])
+        cols_df = con.execute(f"DESCRIBE SELECT * FROM {rel}").pl()
+        col_names = cols_df["column_name"].to_list()
+
+        print(f"… {label} % nulos ({len(col_names)} cols) …")
+        null_exprs = ", ".join(
+            f'AVG(CASE WHEN "{c}" IS NULL THEN 1.0 ELSE 0.0 END) AS "{c}"' for c in col_names
+        )
+        null_row = con.execute(f"SELECT {null_exprs} FROM {rel}").fetchone()
+        null_pct = {c: float(null_row[i] or 0.0) for i, c in enumerate(col_names)}
+
+        dateish = [c for c in col_names if any(k in c.lower() for k in ("data", "date", "dt_", "ano", "mes"))]
+        ranges: dict[str, tuple[Any, Any]] = {}
+        for c in dateish:
+            lo, hi = con.execute(f'SELECT MIN("{c}"), MAX("{c}") FROM {rel}').fetchone()
+            ranges[c] = (lo, hi)
+
+        print(f"\n=== {label} ===")
+        print(f"linhas={n:,}  colunas={len(col_names)}  [BASE COMPLETA]")
+        if ranges:
+            print("intervalos:")
+            for c, (lo, hi) in ranges.items():
+                print(f"  {c}: {lo} → {hi}")
+        for c, v in sorted(null_pct.items(), key=lambda x: -x[1])[:15]:
+            print(f"  null {c}: {100*v:.1f}%")
+
+        row = {"label": label, "n": n, "ncols": len(col_names), "cols": col_names, "null_pct": null_pct, "ranges": ranges}
+        inventario.append(row)
+        _save_inventario()
+        return row
+    finally:
+        try:
+            con.execute(f"DETACH {alias}")
+        except Exception:
+            pass
+        con.close()
+
+
+# Não zera progresso: se já existe cache, carrega
+if CACHE_JSON.is_file():
+    inventario = load_inventario()
+else:
+    inventario = []
+
+print("helper ok — tabelas já no cache:", [r.get("label") for r in inventario])
+print("rode só as células que ainda faltam.")
+```
+
+### `macro.duckdb` → `MACRO`
+
+```{python}
+describe_duckdb_table("macro.duckdb", "MACRO")
+```
+
+### `cemepi.duckdb` → `AJUIZAMENTO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "AJUIZAMENTO")
+```
+
+### `cemepi.duckdb` → `ARRECADACAO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "ARRECADACAO")
+```
+
+### `cemepi.duckdb` → `DEBITO_RECEITA`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "DEBITO_RECEITA")
+```
+
+### `cemepi.duckdb` → `SOLICITACAOPARCELAMENTO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "SOLICITACAOPARCELAMENTO")
+```
+
+### `cemepi.duckdb` → `STATUS_PROTESTO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "STATUS_PROTESTO")
+```
+
+### `cemepi.duckdb` → `FATURAMENTO_MASCARADO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "FATURAMENTO_MASCARADO")
+```
+
+### `cemepi.duckdb` → `DEBITO`
+
+```{python}
+describe_duckdb_table("cemepi.duckdb", "DEBITO")
+```
+
+### DoD — etapa 1
+- Helper rodou.
+- Pelo menos `MACRO` + `AJUIZAMENTO` + `ARRECADACAO` no `inventario` (ou você parou antes de `DEBITO` de propósito).
+- Sem amostra.
+
+```{python}
+labels = [r["label"] for r in inventario] if "inventario" in globals() else []
+print("no inventario:", labels)
+need = {"macro.duckdb:MACRO", "cemepi.duckdb:AJUIZAMENTO", "cemepi.duckdb:ARRECADACAO"}
+ok = need.issubset(set(labels))
+print("DoD etapa 1 (mínimo MACRO+AJUIZAMENTO+ARRECADACAO):", "PASS" if ok else "parcial — continue as células")
+```
+
+## 1b. Cache + InfoViz
+
+Depois do censo (ou só com o JSON já salvo): carrega o cache, monta tabela-resumo e gráficos Plotly legíveis — sem jargão de banco.
+
+```{python}
+# Se reiniciou o kernel: rode etapa 0 + helper, depois isto (sem rerodar tabelas)
+import json
+from pathlib import Path
+
+import plotly.express as px
+import polars as pl
+
+assert "ARTIFACTS" in globals(), "Rode o helper da etapa 1."
+inv = inventario if inventario else load_inventario()
+if not inv:
+    raise RuntimeError("inventario vazio — rode ao menos uma tabela ou confira eda_completo_artifacts/inventario.json")
+
+rows = []
+for r in inv:
+    if r.get("n") is None:
+        continue
+    top_null = sorted((r.get("null_pct") or {}).items(), key=lambda x: -x[1])[:3]
+    top_s = "; ".join(f"{c} {100*v:.0f}%" for c, v in top_null) if top_null else "—"
+    ranges = r.get("ranges") or {}
+    # pega um intervalo de data se houver
+    span = "—"
+    for k, v in ranges.items():
+        if "data" in k.lower() or k.lower().startswith("dt"):
+            span = f"{v[0]} → {v[1]}" if isinstance(v, (list, tuple)) else str(v)
+            break
+    rows.append({
+        "tabela": r["label"],
+        "linhas": r["n"],
+        "colunas": r.get("ncols"),
+        "maiores_%_nulos": top_s,
+        "exemplo_intervalo_data": span,
+    })
+
+resumo = pl.DataFrame(rows).sort("linhas", descending=True)
+print(resumo)
+resumo_path = ARTIFACTS / "inventario_resumo.csv"
+resumo.write_csv(resumo_path)
+print("CSV →", resumo_path)
+```
+
+### Como ler
+
+Cada linha = uma **tabela** da base PGE/CEMEPI. **Linhas** = quantos registros existem. **Maiores % nulos** = campos que mais faltam (ex.: honorários ou CPF quando só há CNPJ). Intervalo de data = do mais antigo ao mais recente naquele campo.
+
+```{python}
+# Barras: tamanho das tabelas (escala log se misturar MACRO e DEBITO)
+plot_df = resumo.to_pandas() if False else resumo  # polars only
+pdf = resumo.with_columns(pl.col("linhas").cast(pl.Float64))
+fig = px.bar(
+    pdf.to_dicts(),
+    x="linhas",
+    y="tabela",
+    orientation="h",
+    log_x=True,
+    title="Volume por tabela (eixo X em log)",
+    labels={"linhas": "Nº de registros", "tabela": ""},
+)
+fig.update_layout(height=max(320, 40 * len(pdf)), margin=dict(l=20, r=20, t=50, b=40))
+fig.show()
+fig.write_html(str(ARTIFACTS / "fig_volume_tabelas.html"))
+print("HTML →", ARTIFACTS / "fig_volume_tabelas.html")
+```
+
+```{python}
+# Heat-ish: top nulos empilhados em texto já está no resumo; gráfico dos 5 maiores null por tabela inventariada
+recs = []
+for r in inv:
+    for c, v in sorted((r.get("null_pct") or {}).items(), key=lambda x: -x[1])[:5]:
+        if v <= 0:
+            continue
+        recs.append({"tabela": r["label"], "campo": c, "pct_nulo": 100 * v})
+if not recs:
+    print("sem nulos > 0 nas tabelas carregadas")
+else:
+    fig2 = px.bar(
+        recs,
+        x="pct_nulo",
+        y="campo",
+        color="tabela",
+        orientation="h",
+        title="Campos com mais ausência (até 5 por tabela)",
+        labels={"pct_nulo": "% nulo", "campo": ""},
+    )
+    fig2.update_layout(height=max(360, 28 * len(recs)), legend_title_text="")
+    fig2.show()
+    fig2.write_html(str(ARTIFACTS / "fig_nulos_top.html"))
+```
+
+### Próximo (apresentação)
+
+Sugestão lean pra professora: 1 slide “o que tem na base” (barra de volumes) + 1 “onde faltam dados” (nulos) + glossário das 3–4 tabelas que vamos usar no modelo (DEBITO, ARRECADACAO, macros). Etapa 2 (de-para ICMS/IPVA/TAXAS) alimenta o próximo bloco visual.
+
+## 2. Tipo de débito em quatro grupos: ICMS, IPVA, ITCMD e TAXAS (estoque no corte)
+
+**Métrica de stakeholder — valor por grupo:** estoque de `VALOR_SEM_HONORARIOS` **em um único corte** de extração (`ANO_EXTRACAO` × `MES_EXTRACAO`), com **1 linha por `ID_DEBITO`** (CDA).
+
+### Armadilha: somar todas as extrações
+
+Cada CDA reaparece a cada mês de extração. `SUM(VALOR_SEM_HONORARIOS)` sobre a tabela inteira **multiplica o estoque pelo nº de meses** em que a dívida ficou no `DEBITO`. O estoque real do ICMS fica na casa das **centenas de bilhões** (painel ICMS 2026 ≈ R$ 450 bi), não de trilhões.
+
+### O que esta etapa faz
+
+1. Escolhe o **último ANO×MES válido** (mês 1–12, ano plausível; pula carga parcial se o mês final tiver < 80% da mediana dos 6 anteriores). Override: `CORTE = (ano, mes)` no topo da célula.
+2. Filtra só esse corte → `GROUP BY ID_DEBITO` (dedup defensivo) → agrega por `TIPO_DEBITO` → grupos.
+3. Grava `tipo_debito_buckets.csv` (por tipo bruto), `tipo_debito_buckets_resumo.csv` (por grupo), `idade_cda_por_bucket.csv` (inclui a linha **Base geral**) e regenera as figuras de composição e idade.
+
+**Regra de classificação (ordem):**
+1. nome contém `IPVA` → **IPVA**;
+2. contém `ICMS` → **ICMS**;
+3. contém `ITCMD`, ou `ITBI` com `Doação`/`Causa Mortis` (nome antigo do imposto sobre heranças e doações) → **ITCMD**;
+4. resto (multas, taxas judiciárias, reposições, contribuições etc.) → **TAXAS**.
+
+A coluna `regra` fica no CSV. Célula **autossuficiente** (só precisa da etapa 0): rode apenas esta célula de código, nunca Restart+Run All.
+
+```{python}
+# Etapa 2 — de-para TIPO_DEBITO → ICMS | IPVA | ITCMD | TAXAS em UM corte (último ANO×MES de extração válido).
+# Célula autossuficiente: só precisa da etapa 0 (DATA_ROOT / fonte_ok). Gera CSV + figuras de grupo + idade.
+# NÃO soma extrações: cada CDA entra uma vez (1 linha por ID_DEBITO no corte).
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+import calendar as _cal
+
+import duckdb
+import plotly.express as px
+import plotly.graph_objects as go
+import polars as pl
+
+assert "fonte_ok" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+db = DATA_ROOT / "cemepi.duckdb"
+assert db.is_file(), db
+
+# None = automático (último ANO×MES completo). Para fixar: CORTE = (2026, 3)
+CORTE: tuple[int, int] | None = None
+
+out_dir = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+out_dir.mkdir(exist_ok=True)
+FIGS = out_dir / "_pdf_figs"
+FIGS.mkdir(exist_ok=True)
+tmp = DATA_ROOT / "_duckdb_tmp_eda"
+tmp.mkdir(exist_ok=True)
+
+GRUPOS = ["ICMS", "IPVA", "ITCMD", "TAXAS"]  # ordem fixa nas tabelas e figuras
+CORES = {"ICMS": "#154C56", "IPVA": "#7C9A9E", "ITCMD": "#C47B3A", "TAXAS": "#8C4A3A"}
+
+# Regra (ordem): IPVA > ICMS > ITCMD (inclui ITBI doação/causa mortis, nome antigo) > TAXAS
+bucket_sql = """
+  CASE WHEN UPPER(tipo_bruto) LIKE '%IPVA%' THEN 'IPVA'
+       WHEN UPPER(tipo_bruto) LIKE '%ICMS%' THEN 'ICMS'
+       WHEN UPPER(tipo_bruto) LIKE '%ITCMD%'
+            OR (UPPER(tipo_bruto) LIKE '%ITBI%'
+                AND (UPPER(tipo_bruto) LIKE '%DOA%' OR UPPER(tipo_bruto) LIKE '%CAUSA MORTIS%')) THEN 'ITCMD'
+       ELSE 'TAXAS' END
+"""
+
+
+def bucket_de(tipo: str) -> tuple[str, str]:
+    t = (tipo or "").upper()
+    if "IPVA" in t:
+        return "IPVA", "contem IPVA"
+    if "ICMS" in t:
+        return "ICMS", "contem ICMS"
+    if "ITCMD" in t:
+        return "ITCMD", "contem ITCMD"
+    if "ITBI" in t and ("DOA" in t or "CAUSA MORTIS" in t):
+        return "ITCMD", "ITBI doacao/causa mortis (nome antigo do ITCMD)"
+    return "TAXAS", "nem IPVA, ICMS ou ITCMD"
+
+
+con = duckdb.connect()
+con.execute(f"SET temp_directory='{tmp}'")
+con.execute("SET max_temp_directory_size='50GiB'")
+con.execute("SET memory_limit='3GB'")
+con.execute("SET threads=2")
+con.execute("SET preserve_insertion_order=false")
+con.execute(f"ATTACH '{db}' AS cem (READ_ONLY)")
+
+try:
+    # 1) Corte. DEBITO tem lixo em ANO/MES (ex.: ANO_EXTRACAO=20242024) → filtra ano plausível e mês 1–12.
+    if CORTE is None:
+        y_hoje = date.today().year
+        cal = pl.DataFrame()
+        for lo in (y_hoje - 1, 2000):  # tenta só os 2 últimos anos (zonemap poda); senão abre
+            cal = con.execute(
+                f"""
+                SELECT ANO_EXTRACAO AS ano, MES_EXTRACAO AS mes, COUNT(*) AS n_linhas
+                FROM cem.DEBITO
+                WHERE ANO_EXTRACAO BETWEEN {lo} AND {y_hoje}
+                  AND MES_EXTRACAO BETWEEN 1 AND 12
+                GROUP BY 1, 2
+                ORDER BY 1, 2
+                """
+            ).pl()
+            if cal.height:
+                break
+        assert cal.height, "Nenhum ANO×MES de extração válido no DEBITO."
+        print("calendário de extração (fim):")
+        print(cal.tail(8))
+        rows = cal.rows()
+        ano_c, mes_c, _ = rows[-1]
+        for i in range(len(rows) - 1, -1, -1):
+            prev = [r[2] for r in rows[max(0, i - 6):i]]
+            ref_n = sorted(prev)[len(prev) // 2] if prev else 0
+            if not prev or rows[i][2] >= 0.8 * ref_n:
+                ano_c, mes_c = rows[i][0], rows[i][1]
+                break
+            print(f"  {rows[i][0]}-{rows[i][1]:02d} parece parcial ({rows[i][2]:,} linhas vs mediana {ref_n:,}) — volto um mês")
+        CORTE = (int(ano_c), int(mes_c))
+    ANO_CORTE, MES_CORTE = int(CORTE[0]), int(CORTE[1])
+    DATA_CORTE = date(ANO_CORTE, MES_CORTE, _cal.monthrange(ANO_CORTE, MES_CORTE)[1])
+    print(f"CORTE = {ANO_CORTE}-{MES_CORTE:02d} (idade medida em {DATA_CORTE})")
+
+    # 2) Snapshot: 1 linha por ID_DEBITO no corte.
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE snap AS
+        SELECT
+          ID_DEBITO,
+          any_value(COALESCE(CAST(TIPO_DEBITO AS VARCHAR), '(nulo)')) AS tipo_bruto,
+          any_value(COALESCE(CAST(SITUACAO_DEBITO AS VARCHAR), '(nulo)')) AS situacao,
+          COUNT(*) AS n_linhas,
+          MAX(VALOR_SEM_HONORARIOS) AS valor,
+          MIN(TRY_CAST(DATA_INSCRICAO AS DATE)) AS data_inscricao
+        FROM cem.DEBITO
+        WHERE ANO_EXTRACAO = {ANO_CORTE} AND MES_EXTRACAO = {MES_CORTE}
+        GROUP BY ID_DEBITO
+        """
+    )
+    agg = con.execute(
+        """
+        SELECT tipo_bruto,
+               SUM(n_linhas)::BIGINT AS n_linhas,
+               COUNT(*)::BIGINT      AS n_id,
+               SUM(valor)            AS soma_valor
+        FROM snap
+        GROUP BY 1
+        ORDER BY soma_valor DESC NULLS LAST
+        """
+    ).pl()
+    sit = con.execute(
+        f"""
+        SELECT {bucket_sql} AS bucket, situacao, COUNT(*) AS n_id, SUM(valor) AS soma_valor
+        FROM snap GROUP BY 1, 2 ORDER BY 1, soma_valor DESC NULLS LAST
+        """
+    ).pl()
+    # Idade por grupo + linha "Base geral" (todas as CDAs do corte) via GROUPING SETS.
+    idade = con.execute(
+        f"""
+        WITH s AS (
+          SELECT {bucket_sql} AS bucket,
+                 CASE WHEN data_inscricao IS NOT NULL AND data_inscricao <= DATE '{DATA_CORTE}'
+                      THEN date_diff('day', data_inscricao, DATE '{DATA_CORTE}') / 365.25 END AS idade
+          FROM snap
+        )
+        SELECT COALESCE(bucket, 'Base geral') AS bucket,
+               COUNT(*)            AS n_id,
+               COUNT(idade)        AS n_com_data_valida,
+               AVG(idade)          AS idade_media_anos,
+               quantile_cont(idade, 0.5) AS idade_mediana_anos
+        FROM s GROUP BY GROUPING SETS ((bucket), ())
+        """
+    ).pl()
+    linhas_por_id = con.execute("SELECT SUM(n_linhas) / COUNT(*) FROM snap").fetchone()[0]
+finally:
+    try:
+        con.execute("DETACH cem")
+    except Exception:
+        pass
+    con.close()
+
+print(f"linhas/ID no corte = {linhas_por_id:.4f} (esperado ≈ 1)")
+
+# 3) De-para (IPVA > ICMS > ITCMD > resto)
+b = [bucket_de(t) for t in agg["tipo_bruto"].to_list()]
+depara = agg.with_columns(
+    pl.Series("bucket", [x[0] for x in b]),
+    pl.Series("regra", [x[1] for x in b]),
+    pl.lit(ANO_CORTE).alias("ano_corte"),
+    pl.lit(MES_CORTE).alias("mes_corte"),
+).select("tipo_bruto", "bucket", "regra", "n_linhas", "n_id", "soma_valor", "ano_corte", "mes_corte")
+csv_path = out_dir / "tipo_debito_buckets.csv"
+depara.write_csv(csv_path)
+print(depara.filter(pl.col("bucket") == "ITCMD"))
+print("CSV →", csv_path)
+
+ordem = {g: i for i, g in enumerate(GRUPOS)}
+tot = (
+    depara.group_by("bucket")
+    .agg(
+        pl.col("n_linhas").sum(),
+        pl.col("n_id").sum(),
+        pl.col("soma_valor").sum(),
+        pl.len().alias("n_tipos"),
+    )
+    .with_columns(
+        (pl.col("n_id") / pl.col("n_id").sum() * 100).alias("pct_qtd"),
+        (pl.col("soma_valor") / pl.col("soma_valor").sum() * 100).alias("pct_valor"),
+        (pl.col("soma_valor") / 1e9).alias("valor_bi"),
+        (pl.col("soma_valor") / pl.col("n_id")).alias("valor_medio_por_cda"),
+        pl.lit(ANO_CORTE).alias("ano_corte"),
+        pl.lit(MES_CORTE).alias("mes_corte"),
+    )
+    .with_columns(pl.col("bucket").replace_strict(ordem, default=99).alias("_o"))
+    .sort("_o")
+    .drop("_o")
+)
+por_bucket = tot
+tot.write_csv(out_dir / "tipo_debito_buckets_resumo.csv")
+print(f"\npor grupo — corte {ANO_CORTE}-{MES_CORTE:02d} (1 linha por CDA):")
+print(tot)
+print("\ngrupo × situação no corte:")
+print(sit)
+
+icms_bi = float(tot.filter(pl.col("bucket") == "ICMS")["valor_bi"].sum() or 0)
+print(f"\nICMS no corte = R$ {icms_bi:,.1f} bi (ordem esperada: centenas de bi; painel 2026 ≈ R$ 450 bi)")
+if icms_bi > 2_000:
+    print("ALERTA: ICMS > R$ 2 tri — cheira a soma de extrações; confira o filtro do corte.")
+
+idade = (
+    idade.with_columns(
+        pl.lit(ANO_CORTE).alias("ano_corte"),
+        pl.lit(MES_CORTE).alias("mes_corte"),
+        pl.col("bucket").replace_strict({**ordem, "Base geral": 98}, default=99).alias("_o"),
+    )
+    .sort("_o")
+    .drop("_o")
+)
+idade.write_csv(out_dir / "idade_cda_por_bucket.csv")
+print(idade)
+print("CSV →", out_dir / "idade_cda_por_bucket.csv")
+
+
+# 4) Figuras (HTML + PNG). Títulos limpos para stakeholder.
+def _save(f, name: str) -> None:
+    f.write_html(str(out_dir / f"{name}.html"))
+    try:
+        f.write_image(str(FIGS / f"{name}.png"), width=1000, height=560, scale=2)
+        print("PNG →", FIGS / f"{name}.png")
+    except Exception as e:  # kaleido ausente/quebrado: HTML continua salvo
+        print(f"AVISO: PNG {name} não gravado ({type(e).__name__}: {e})")
+
+
+mes_txt = f"{MES_CORTE:02d}/{ANO_CORTE}"
+td = tot.to_dicts()
+fig = px.bar(
+    td, x="bucket", y="n_id", color="bucket", color_discrete_map=CORES, text="n_id",
+    category_orders={"bucket": GRUPOS},
+    title=f"Quantas CDAs há em cada tipo de débito? (estoque em {mes_txt})",
+    labels={"n_id": "Número de CDAs", "bucket": "Tipo de débito"},
+)
+fig.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+fig.update_layout(showlegend=False, margin=dict(t=60, b=40), separators=",.")
+fig.show()
+_save(fig, "fig_bucket_n_id")
+
+fig2 = px.bar(
+    td, x="bucket", y="valor_bi", color="bucket", color_discrete_map=CORES, text="valor_bi",
+    category_orders={"bucket": GRUPOS},
+    title=f"Quanto vale o estoque de cada tipo de débito? (R$ bilhões, {mes_txt})",
+    labels={"valor_bi": "Estoque (R$ bilhões)", "bucket": "Tipo de débito"},
+)
+fig2.update_traces(texttemplate="R$ %{text:,.1f} bi", textposition="outside")
+fig2.update_layout(showlegend=False, margin=dict(t=60, b=40), separators=",.")
+fig2.show()
+_save(fig2, "fig_bucket_valor")
+
+long = pl.concat([
+    por_bucket.select("bucket", pl.col("pct_qtd").alias("pct")).with_columns(pl.lit("% das CDAs").alias("Medida")),
+    por_bucket.select("bucket", pl.col("pct_valor").alias("pct")).with_columns(pl.lit("% do valor").alias("Medida")),
+])
+fig3 = px.bar(
+    long.to_dicts(), x="bucket", y="pct", color="Medida", barmode="group", text="pct",
+    category_orders={"bucket": GRUPOS},
+    color_discrete_sequence=["#7C9A9E", "#154C56"],
+    title=f"Participação de cada tipo de débito: quantidade de CDAs × valor ({mes_txt})",
+    labels={"pct": "% do total", "bucket": "Tipo de débito"},
+)
+fig3.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+fig3.update_layout(separators=",.")
+fig3.show()
+_save(fig3, "fig_bucket_pct_qtd_valor")
+
+# Médias por grupo com a média da base geral como referência (linha tracejada)
+idg = idade.filter(pl.col("bucket") != "Base geral")
+geral = idade.filter(pl.col("bucket") == "Base geral")
+media_geral = float(geral["idade_media_anos"][0])
+mediana_geral = float(geral["idade_mediana_anos"][0])
+fig_i = go.Figure()
+fig_i.add_bar(x=idg["bucket"].to_list(), y=idg["idade_media_anos"].to_list(), name="Média",
+              marker_color="#154C56", text=idg["idade_media_anos"].to_list(), texttemplate="%{text:.1f}")
+fig_i.add_bar(x=idg["bucket"].to_list(), y=idg["idade_mediana_anos"].to_list(), name="Mediana",
+              marker_color="#7C9A9E", text=idg["idade_mediana_anos"].to_list(), texttemplate="%{text:.1f}")
+fig_i.add_hline(y=media_geral, line_dash="dash", line_color="#C0392B",
+                annotation_text=f"Média da base geral: {media_geral:.1f} anos".replace(".", ","),
+                annotation_position="top right")
+fig_i.update_layout(
+    barmode="group", separators=",.",
+    title=f"Idade da CDA por tipo de débito, comparada à média geral ({mes_txt})",
+    xaxis_title="Tipo de débito", yaxis_title="Anos desde a inscrição",
+    legend_title_text="",
+)
+fig_i.show()
+_save(fig_i, "fig_idade_cda_bucket")
+```
+
+```{python}
+# Conferência: tabelas do corte já em memória (geradas na célula anterior).
+assert "depara" in globals() and "tot" in globals() and "csv_path" in globals(), \
+    "Rode a célula de código da etapa 2 (snapshot por corte) antes."
+print("CSV →", csv_path)
+print(tot)
+```
+
+### Como ler (pós-corte)
+
+`n_id` = CDAs distintas **no corte**. `soma_valor` = estoque `VALOR_SEM_HONORARIOS` **daquele mês** (1× por CDA) — compara com arrecadação / painel, **não** é soma de meses.
+
+Ordem de magnitude esperada no ICMS: **centenas de bilhões**, não trilhões. Se o gráfico passar de ~R$ 2 tri, o filtro do corte falhou.
+
+`n_linhas` no CSV ainda pode ser > `n_id` se o mesmo ID aparecer mais de uma vez *dentro* do mês; o estoque usado é `MAX(valor)` por ID.
+
+Se algum rótulo importante cair em TAXAS por engano, ajuste `bucket_de` / `bucket_sql` e reexecute **só a célula de código** acima.
+
+```{python}
+# Figuras fig_bucket_n_id / fig_bucket_valor já gravadas na célula do snapshot (etapa 2).
+from pathlib import Path
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+for name in ("fig_bucket_n_id.html", "fig_bucket_valor.html"):
+    p = out / name
+    print(("OK" if p.is_file() else "MISS"), p)
+for name in ("fig_bucket_n_id.png", "fig_bucket_valor.png"):
+    p = out / "_pdf_figs" / name
+    print(("OK" if p.is_file() else "MISS"), p)
+print("Se MISS: rode de novo a célula de código da etapa 2 (snapshot).")
+```
+
+```{python}
+print("DoD etapa 2:", "PASS" if csv_path.is_file() and depara.height > 0 else "FAIL")
+print("buckets:", sorted(depara["bucket"].unique().to_list()))
+```
+
+## 3. Descritiva — ICMS | IPVA | ITCMD | TAXAS
+
+Usa o CSV da etapa 2 (`tipo_debito_buckets.csv`) **já no nível do corte** (1 CDA). Contraste: **IPVA em quantidade** vs **ICMS em valor**; ITCMD é pequeno em quantidade, mas com valor médio por CDA alto.
+
+Idade da CDA: `idade_anos = (fim do mês de corte − DATA_INSCRICAO)/365.25`, média e mediana por grupo e para a **base geral** (todas as CDAs do corte) — também gerada na célula do snapshot (sem varrer todas as extrações).
+
+```{python}
+# Contraste % qtd vs % valor — lê o CSV do corte (leve; sem DEBITO).
+from pathlib import Path
+import polars as pl
+
+csv_path = (ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS) / "tipo_debito_buckets.csv"
+assert csv_path.is_file(), "Rode a etapa 2 (célula do snapshot) antes."
+depara = pl.read_csv(csv_path)
+GRUPOS = ["ICMS", "IPVA", "ITCMD", "TAXAS"]
+por_bucket = depara.group_by("bucket").agg(
+    pl.col("n_linhas").sum(),
+    pl.col("n_id").sum(),
+    pl.col("soma_valor").sum(),
+).with_columns(
+    (pl.col("n_id") / pl.col("n_id").sum() * 100).alias("pct_qtd"),
+    (pl.col("soma_valor") / pl.col("soma_valor").sum() * 100).alias("pct_valor"),
+    (pl.col("soma_valor") / 1e9).alias("valor_bi"),
+).with_columns(
+    pl.col("bucket").replace_strict({g: i for i, g in enumerate(GRUPOS)}, default=99).alias("_o")
+).sort("_o").drop("_o")
+print(por_bucket)
+if "ano_corte" in depara.columns:
+    print(f"corte no CSV: {depara['ano_corte'][0]}-{int(depara['mes_corte'][0]):02d}")
+```
+
+### Como ler % quantidade vs % valor
+
+Se IPVA tiver `pct_qtd` alto e `pct_valor` baixo, há muitos débitos de valor unitário baixo. ICMS com o inverso justifica focar o painel/modelos no ICMS. ITCMD aparece como grupo próprio: poucas CDAs, valor médio alto.
+
+Os percentuais usam o **estoque do corte** (não a soma de todas as extrações).
+
+```{python}
+# fig_bucket_pct_qtd_valor já gravada na célula do snapshot (etapa 2).
+from pathlib import Path
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+for name in ("fig_bucket_pct_qtd_valor.html",):
+    p = out / name
+    print(("OK" if p.is_file() else "MISS"), p)
+p_png = out / "_pdf_figs" / "fig_bucket_pct_qtd_valor.png"
+print(("OK" if p_png.is_file() else "MISS"), p_png)
+print(por_bucket if "por_bucket" in globals() else "(rode a célula anterior para ver a tabela)")
+```
+
+```{python}
+# Idade por bucket já calculada no snapshot (1 CDA no corte) — sem AVG sobre 800M linhas.
+from pathlib import Path
+import polars as pl
+
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+idade_path = out / "idade_cda_por_bucket.csv"
+assert idade_path.is_file(), "Rode a célula do snapshot (etapa 2) antes."
+idade = pl.read_csv(idade_path)
+print(idade)
+print("CSV →", idade_path)
+print("NOTA: idade = fim do mês de corte − DATA_INSCRICAO; grain = 1 linha por ID no corte.")
+```
+
+```{python}
+# fig_idade_cda_bucket já gravada na célula do snapshot (etapa 2).
+from pathlib import Path
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+html = out / "fig_idade_cda_bucket.html"
+png = out / "_pdf_figs" / "fig_idade_cda_bucket.png"
+csv_b = out / "tipo_debito_buckets.csv"
+idade_csv = out / "idade_cda_por_bucket.csv"
+print(("OK" if html.is_file() else "MISS"), html)
+print(("OK" if png.is_file() else "MISS"), png)
+print(
+    "DoD etapa 3:",
+    "PASS" if csv_b.is_file() and idade_csv.is_file() else "parcial — rode etapa 2 (snapshot)",
+)
+```
+
+## 4. Painel ICMS — base completa
+
+Todos os débitos com tipo ICMS. **Sem amostra. Sem filtrar taxa/arrecadação > 0.**
+
+Uma passada SQL: estoque médio por `ID_DEBITO × ANO_EXTRACAO`, left join com arrecadação anual (só IDs ICMS), `taxa = arrec/estoque` (0 quando não há GARE).
+
+Memória: temp no Meedi, `threads=2`, `memory_limit=3GB`, `preserve_insertion_order=false`. Se o parquet já existir, a célula **pula** o COPY.
+
+```{python}
+import duckdb
+import polars as pl
+import plotly.express as px
+
+assert fonte_ok
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+out.mkdir(exist_ok=True)
+db = DATA_ROOT / "cemepi.duckdb"
+tmp = DATA_ROOT / "_duckdb_tmp_eda"
+tmp.mkdir(exist_ok=True)
+painel_path = out / "painel_icms_completo.parquet"
+
+if painel_path.is_file() and painel_path.stat().st_size > 0:
+    print("SKIP COPY — já existe:", painel_path, f"({painel_path.stat().st_size/1e6:.0f} MB)")
+else:
+    con = duckdb.connect()
+    con.execute(f"SET temp_directory='{tmp}'")
+    con.execute("SET max_temp_directory_size='100GiB'")
+    con.execute("SET memory_limit='3GB'")
+    con.execute("SET threads=2")
+    con.execute("SET preserve_insertion_order=false")
+    con.execute(f"ATTACH '{db}' AS cem (READ_ONLY)")
+    print("… COPY painel ICMS completo → parquet (pode demorar bastante) …")
+    sql = f"""
+    COPY (
+      WITH estoque AS (
+        SELECT
+          ID_DEBITO,
+          ANO_EXTRACAO AS ano,
+          AVG(VALOR_SEM_HONORARIOS) AS estoque_medio,
+          MAX(TRY_CAST(DATA_INSCRICAO AS DATE)) AS data_inscricao
+        FROM cem.DEBITO
+        WHERE UPPER(CAST(TIPO_DEBITO AS VARCHAR)) LIKE '%ICMS%'
+          AND ANO_EXTRACAO BETWEEN 1990 AND 2030
+        GROUP BY 1, 2
+      ),
+      ids_icms AS (
+        SELECT DISTINCT ID_DEBITO FROM estoque
+      ),
+      arrec AS (
+        SELECT
+          a.ID_DEBITO,
+          a.ANO AS ano,
+          SUM(COALESCE(a.VALOR_RECEITA, 0)) AS arrecadado
+        FROM cem.ARRECADACAO a
+        SEMI JOIN ids_icms i USING (ID_DEBITO)
+        GROUP BY 1, 2
+      )
+      SELECT
+        e.ID_DEBITO,
+        e.ano,
+        e.estoque_medio,
+        e.data_inscricao,
+        COALESCE(a.arrecadado, 0) AS arrecadado,
+        CASE
+          WHEN e.estoque_medio > 0 THEN COALESCE(a.arrecadado, 0) / e.estoque_medio
+          ELSE NULL
+        END AS taxa
+      FROM estoque e
+      LEFT JOIN arrec a USING (ID_DEBITO, ano)
+    ) TO '{painel_path}' (FORMAT PARQUET)
+    """
+    con.execute(sql)
+    con.execute("DETACH cem")
+    con.close()
+    print("parquet →", painel_path)
+
+```
+
+```{python}
+# Resumo leve via scan (não carrega o parquet inteiro na RAM)
+# Figura stakeholder: só taxa de recuperação da carteira (Σarrec/Σestoque).
+# Preferir CSV agregado se já existir (evita re-scan só para o gráfico).
+from pathlib import Path
+import plotly.graph_objects as go
+import polars as pl
+
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+figs = out / "_pdf_figs"
+figs.mkdir(exist_ok=True)
+TEAL = "#154C56"
+
+csv_agg = out / "serie_agregada_icms_ano.csv"
+if csv_agg.is_file():
+    agg_ano = pl.read_csv(csv_agg).sort("ano")
+    # DoD / diagnóstico ainda via scan se o painel existir
+    if "painel_path" in globals() and Path(str(painel_path)).is_file():
+        lf = pl.scan_parquet(str(painel_path))
+        n = lf.select(pl.len()).collect().item()
+        anos = lf.select(pl.col("ano").min().alias("lo"), pl.col("ano").max().alias("hi")).collect()
+        share0 = lf.select((pl.col("taxa") == 0).mean()).collect().item()
+        print(f"linhas painel={n:,}  anos {anos['lo'][0]}→{anos['hi'][0]}  share taxa==0={share0:.3f}")
+    else:
+        n = int(agg_ano["n"].sum()) if "n" in agg_ano.columns else agg_ano.height
+        print("agg anual via CSV →", csv_agg)
+else:
+    lf = pl.scan_parquet(str(painel_path))
+    n = lf.select(pl.len()).collect().item()
+    anos = lf.select(pl.col("ano").min().alias("lo"), pl.col("ano").max().alias("hi")).collect()
+    share0 = lf.select((pl.col("taxa") == 0).mean()).collect().item()
+    print(f"linhas painel={n:,}  anos {anos['lo'][0]}→{anos['hi'][0]}  share taxa==0={share0:.3f}")
+    agg_ano = (
+        lf.group_by("ano")
+        .agg(
+            pl.col("arrecadado").sum().alias("arrec_sum"),
+            pl.col("estoque_medio").sum().alias("estoque_sum"),
+            pl.col("taxa").median().alias("taxa_mediana_all"),
+            pl.len().alias("n"),
+        )
+        .with_columns(
+            pl.when(pl.col("estoque_sum") > 0)
+            .then(pl.col("arrec_sum") / pl.col("estoque_sum"))
+            .otherwise(None)
+            .alias("taxa_carteira")
+        )
+        .sort("ano")
+        .collect()
+    )
+
+agg_plot = agg_ano.with_columns((pl.col("taxa_carteira") * 100).alias("taxa_pct"))
+# Diagnóstico (não entra no gráfico stakeholder): mediana micro ≈ 0
+if "taxa_mediana_all" in agg_plot.columns:
+    print("Diagnóstico mediana das razões CDA (fora do gráfico):")
+    print(agg_plot.select(["ano", "taxa_mediana_all", "taxa_carteira"]))
+
+ymax = float(agg_plot["taxa_pct"].max() or 0)
+fig = go.Figure(
+    go.Scatter(
+        x=agg_plot["ano"].to_list(),
+        y=agg_plot["taxa_pct"].to_list(),
+        mode="lines+markers",
+        line=dict(color=TEAL, width=3),
+        marker=dict(size=9, color=TEAL),
+        hovertemplate="Ano %{x}<br>Taxa de recuperação: %{y:.2f}%<extra></extra>",
+        name="Taxa de recuperação da carteira",
+    )
+)
+fig.update_layout(
+    title=dict(
+        text=(
+            "Taxa de recuperação da carteira ICMS a cada ano"
+            "<br><sup>Σ arrecadado ÷ Σ estoque (mesma série que fig_taxa_recuperacao_anual). "
+            "Faixa típica ~0,2%–0,7%/ano — recuperação pequena frente ao estoque.</sup>"
+        ),
+        font=dict(size=20, color=TEAL),
+        x=0.02,
+        xanchor="left",
+    ),
+    font=dict(family="Arial, Helvetica, sans-serif", size=14, color="#222"),
+    margin=dict(t=90, b=60, l=70, r=30),
+    hovermode="x unified",
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    showlegend=False,
+)
+fig.update_xaxes(title_text="Ano", dtick=1, showgrid=False, title_font=dict(size=14), tickfont=dict(size=12))
+fig.update_yaxes(
+    title_text="Taxa de recuperação da carteira (%)",
+    range=[0, max(0.5, ymax * 1.35)],
+    ticksuffix="%",
+    showgrid=True,
+    gridcolor="#E6E6E6",
+    title_font=dict(size=14),
+    tickfont=dict(size=12),
+)
+fig.show()
+fig.write_html(str(out / "fig_painel_taxa_media_ano.html"))
+try:
+    fig.write_image(str(figs / "fig_painel_taxa_media_ano.png"), width=1000, height=560, scale=2)
+    print("PNG →", figs / "fig_painel_taxa_media_ano.png")
+except Exception as e:
+    print("PNG skip:", e)
+print("DoD etapa 4:", "PASS" if ("painel_path" in globals() and Path(str(painel_path)).is_file() and n > 0) or csv_agg.is_file() else "FAIL")
+```
+
+## 5. Correlações e memória da taxa (painel ICMS)
+
+A partir do parquet da etapa 4: idade da CDA, taxa do **ano anterior** e de **dois / três anos antes** (dentro de cada `ID_DEBITO`), correlação linear e monótona (Spearman), e um heatmap.
+
+Memória: DuckDB no parquet (sem carregar 23M linhas no Python), temp Meedi, `threads=2` / `3GB`.
+
+### O que são correlação linear, Spearman e “anos antes” (como usamos aqui)
+
+**Correlação linear (Pearson)** mede associação *linear* entre duas variáveis contínuas (valores de −1 a +1). Aqui: relação linear entre `taxa`, estoque, idade e a própria taxa em anos anteriores.
+
+**Spearman** é a correlação linear dos *postos* (ranks): captura associação monótona (não só linear). Útil se outliers de taxa distorcem a correlação linear.
+
+**Taxa de k anos antes** no painel: valor da mesma CDA *k* anos atrás. Com partição por `ID_DEBITO` e ordem por `ano`, olhamos a taxa do mesmo débito 1, 2 ou 3 anos antes.
+
+Isso testa persistência da arrecadação relativa ao estoque (a taxa de recuperação do ano anterior ajuda a prever a de hoje?).
+
+Referências clássicas: Spearman (1904); definição de autocorrelação em painéis em Wooldridge, *Econometric Analysis of Cross Section and Panel Data*.
+
+```{python}
+import duckdb
+from pathlib import Path
+import polars as pl
+import plotly.express as px
+
+assert fonte_ok
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+painel_path = out / "painel_icms_completo.parquet"
+assert painel_path.is_file(), "rode a etapa 4 antes"
+lags_path = out / "painel_icms_com_lags.parquet"
+corr_path = out / "corr_lags_icms.csv"
+tmp = DATA_ROOT / "_duckdb_tmp_eda"
+tmp.mkdir(exist_ok=True)
+
+con = duckdb.connect()
+con.execute(f"SET temp_directory='{tmp}'")
+con.execute("SET max_temp_directory_size='100GiB'")
+con.execute("SET memory_limit='3GB'")
+con.execute("SET threads=2")
+con.execute("SET preserve_insertion_order=false")
+
+if lags_path.is_file() and lags_path.stat().st_size > 0:
+    print("SKIP lags COPY — já existe:", lags_path)
+else:
+    print("… COPY painel + idade + lags 1–3 …")
+    sql = f"""
+    COPY (
+      SELECT
+        ID_DEBITO,
+        ano,
+        estoque_medio,
+        data_inscricao,
+        arrecadado,
+        taxa,
+        CASE
+          WHEN data_inscricao IS NULL THEN NULL
+          ELSE ano - EXTRACT(YEAR FROM data_inscricao)
+        END AS idade_anos,
+        LAG(taxa, 1) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS taxa_l1,
+        LAG(taxa, 2) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS taxa_l2,
+        LAG(taxa, 3) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS taxa_l3,
+        LAG(estoque_medio, 1) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS estoque_l1
+      FROM read_parquet('{painel_path}')
+    ) TO '{lags_path}' (FORMAT PARQUET)
+    """
+    con.execute(sql)
+    print("lags →", lags_path)
+
+vars_ = ["taxa", "taxa_l1", "taxa_l2", "taxa_l3", "estoque_medio", "estoque_l1", "idade_anos", "arrecadado"]
+pares = [(a, b) for i, a in enumerate(vars_) for b in vars_[i:]]
+rows = []
+for a, b in pares:
+    if a == b:
+        rows.append({"var_a": a, "var_b": b, "pearson": 1.0, "spearman": 1.0, "n_obs": None})
+        continue
+    pear = con.execute(f"""
+        SELECT corr({a}, {b}) AS r,
+               count(*) FILTER (WHERE {a} IS NOT NULL AND {b} IS NOT NULL) AS n
+        FROM read_parquet('{lags_path}')
+    """).fetchone()
+    # Spearman em amostra de 2M — evita OOM no rank global de 23M
+    spe = con.execute(f"""
+        WITH s AS (
+          SELECT {a} AS x, {b} AS y
+          FROM read_parquet('{lags_path}')
+          WHERE {a} IS NOT NULL AND {b} IS NOT NULL
+          USING SAMPLE 2000000
+        ),
+        r AS (
+          SELECT
+            rank() OVER (ORDER BY x) AS rx,
+            rank() OVER (ORDER BY y) AS ry
+          FROM s
+        )
+        SELECT corr(rx, ry) FROM r
+    """).fetchone()
+    rows.append({
+        "var_a": a, "var_b": b,
+        "pearson": float(pear[0]) if pear[0] is not None else None,
+        "spearman": float(spe[0]) if spe[0] is not None else None,
+        "n_obs": int(pear[1]),
+    })
+    print(f"  {a} × {b}: r={rows[-1]['pearson']!s}  ρ≈{rows[-1]['spearman']!s}  n={rows[-1]['n_obs']}")
+
+corr_df = pl.DataFrame(rows)
+corr_df.write_csv(corr_path)
+print("corr →", corr_path)
+con.close()
+
+```
+
+### Como ler o heatmap
+
+Células próximas de **+1**: as duas séries sobem/descem juntas (Pearson linear; Spearman monótono). Próximas de **0**: pouca associação linear/monótona. Valores altos em `taxa × taxa_l1` (e `l2`/`l3`) indicam **persistência** da taxa de arrecadação no mesmo débito — sinal útil para os modelos da etapa 6.
+
+`idade_anos × taxa`: se negativo, CDAs mais velhas tendem a arrecadar menos relativo ao estoque (leitura descritiva, não causal).
+
+```{python}
+import polars as pl
+import plotly.express as px
+from pathlib import Path
+
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+corr_path = out / "corr_lags_icms.csv"
+cdf = pl.read_csv(corr_path)
+both = pl.concat([
+    cdf.select("var_a", "var_b", "pearson"),
+    cdf.filter(pl.col("var_a") != pl.col("var_b")).select(
+        pl.col("var_b").alias("var_a"), pl.col("var_a").alias("var_b"), "pearson"
+    ),
+])
+vars_order = ["taxa", "taxa_l1", "taxa_l2", "taxa_l3", "estoque_medio", "estoque_l1", "idade_anos", "arrecadado"]
+Z = []
+for va in vars_order:
+    row = []
+    for vb in vars_order:
+        hit = both.filter((pl.col("var_a") == va) & (pl.col("var_b") == vb))
+        row.append(None if hit.height == 0 else hit["pearson"][0])
+    Z.append(row)
+
+fig = px.imshow(
+    Z, x=vars_order, y=vars_order, color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
+    title="Pearson — painel ICMS (taxa de recuperação, lags, estoque, idade)",
+    text_auto=".2f",
+)
+fig.update_layout(width=720, height=640)
+fig.show()
+fig.write_html(str(out / "fig_corr_pearson_lags.html"))
+
+auto = cdf.filter(
+    (pl.col("var_a") == "taxa") & pl.col("var_b").is_in(["taxa_l1", "taxa_l2", "taxa_l3"])
+).select("var_b", "pearson", "spearman")
+fig2 = px.bar(
+    auto.to_dicts(), x="var_b", y=["pearson", "spearman"], barmode="group",
+    title="Persistência da taxa de recuperação: corr(taxa de recuperação, lag k)",
+    labels={"var_b": "lag", "value": "correlação"},
+)
+fig2.show()
+fig2.write_html(str(out / "fig_autocorr_taxa_lags.html"))
+print("figs salvos")
+
+```
+
+```{python}
+from pathlib import Path
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+lags_path = out / "painel_icms_com_lags.parquet"
+corr_path = out / "corr_lags_icms.csv"
+ok = lags_path.is_file() and corr_path.is_file() and corr_path.stat().st_size > 0
+print("DoD etapa 5:", "PASS" if ok else "FAIL")
+print("lags parquet:", lags_path)
+print("corr csv:", corr_path)
+```
+
+## 6. Três modelos no painel ICMS (nível anual)
+
+Com base na seção 5 (persistência na taxa do **ano anterior**), ajustamos três leituras simples — **ainda descritivas**, não causais — no painel `ID_DEBITO × ano`:
+
+1. **Logit** — probabilidade de arrecadar alguma coisa no ano (`arrecadado > 0`).
+2. **Regressão da taxa** — quanto se arrecada relativo ao estoque.
+3. **Séries agregadas** — estoque, arrecadação e taxa de recuperação da carteira no ano (visão “caixa” da PGE), **cada uma em gráfico próprio** (sem eixo duplo).
+
+O painel atual é **anual** (não há trimestre na etapa 4). Se for preciso calendário trimestral, fazemos um recorte depois a partir de `ARRECADACAO` com mês.
+
+Ajuste micro: amostra aleatória de **1 milhão** de linhas com a taxa do ano anterior preenchida (semente fixa), para caber na RAM do Mac. A série agregada usa **todos** os anos do parquet.
+
+### O que cada modelo estima (definição)
+
+**Logit.** Indicador Y = 1 se o débito arrecadou no ano e 0 caso contrário. O modelo estima a probabilidade de pagamento em função das covariáveis (curva logística).
+
+Covariáveis: lag da taxa (`taxa_l1`), log(1 + estoque), idade da CDA em anos, e dummies de ano.
+
+**Taxa (MQO).** Regressão linear da `taxa` nas mesmas covariáveis (sem a taxa contemporânea no lado direito).
+
+**Agregado.** Em cada ano: soma do estoque, soma da arrecadação e taxa da carteira = arrecadação total / estoque total. Mostra a trajetória da carteira ICMS como um todo.
+
+Interpretação para procuradores: coeficientes dizem **associação** (controle de ano e estoque), não efeito de política.
+
+```{python}
+import duckdb
+from pathlib import Path
+import numpy as np
+import polars as pl
+import plotly.express as px
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+assert fonte_ok
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+lags_path = out / "painel_icms_com_lags.parquet"
+assert lags_path.is_file(), "rode a etapa 5 antes (lags)"
+tmp = DATA_ROOT / "_duckdb_tmp_eda"
+tmp.mkdir(exist_ok=True)
+amostra_path = out / "amostra_modelos_1m.parquet"
+
+con = duckdb.connect()
+con.execute(f"SET temp_directory='{tmp}'")
+con.execute("SET max_temp_directory_size='100GiB'")
+con.execute("SET memory_limit='3GB'")
+con.execute("SET threads=2")
+con.execute("SET preserve_insertion_order=false")
+
+if amostra_path.is_file() and amostra_path.stat().st_size > 0:
+    print("SKIP amostra —", amostra_path)
+else:
+    print("… sorteando 1M linhas com taxa_l1 …")
+    con.execute(f"""
+    COPY (
+      SELECT
+        ID_DEBITO, ano, estoque_medio, arrecadado, taxa,
+        idade_anos, taxa_l1, estoque_l1,
+        (arrecadado > 0)::INTEGER AS y_pago,
+        ln(1 + greatest(estoque_medio, 0)) AS log_estoque
+      FROM read_parquet('{lags_path}')
+      WHERE taxa_l1 IS NOT NULL
+        AND estoque_medio IS NOT NULL
+        AND idade_anos IS NOT NULL
+      USING SAMPLE 1000000
+    ) TO '{amostra_path}' (FORMAT PARQUET)
+    """)
+    print("amostra →", amostra_path)
+
+# agregados anuais na base toda
+agg = con.execute(f"""
+  SELECT
+    ano,
+    count(*) AS n,
+    sum(estoque_medio) AS estoque_sum,
+    sum(arrecadado) AS arrec_sum,
+    sum(arrecadado) / nullif(sum(estoque_medio), 0) AS taxa_carteira,
+    avg(taxa) AS taxa_media_id,
+    avg((arrecadado > 0)::DOUBLE) AS share_pago
+  FROM read_parquet('{lags_path}')
+  GROUP BY 1
+  ORDER BY 1
+""").pl()
+agg.write_csv(out / "serie_agregada_icms_ano.csv")
+print(agg)
+con.close()
+
+df = pl.read_parquet(amostra_path).to_pandas()
+df["ano"] = df["ano"].astype(int)
+print("amostra:", len(df), "anos", df["ano"].min(), "→", df["ano"].max(), "share pago", df["y_pago"].mean().round(3))
+
+```
+
+### Como ler os coeficientes (logit e taxa)
+
+No **logit**, um coeficiente positivo em `taxa_l1` significa: débitos que arrecadaram mais no ano anterior têm **maior chance** de arrecadar de novo (tudo o mais constante na amostra). O valor em si não é um “% a mais” direto — olhe também o efeito marginal médio impresso abaixo.
+
+Na **regressão da taxa**, o coeficiente de `taxa_l1` próximo de 0,5 ecoa a correlação da seção 5: cerca de metade da taxa passada “reaparece” na taxa atual, em média linear.
+
+Dummies de `ano` absorvem choques comuns (calendário fiscal, COVID, etc.).
+
+```{python}
+# --- Modelo 1: Logit P(pago) ---
+# C × ano como FE via C(ano); amostra 1M
+m1 = smf.logit(
+    "y_pago ~ taxa_l1 + log_estoque + idade_anos + C(ano)",
+    data=df,
+).fit(disp=False)
+print(m1.summary().tables[1])
+# efeito marginal médio de taxa_l1
+mfx = m1.get_margeff(at="overall")
+print("\nEfeitos marginais médios:")
+print(mfx.summary())
+# salvar coeficientes
+coef1 = (
+    pl.DataFrame({
+        "param": m1.params.index.astype(str),
+        "coef": m1.params.values,
+        "pvalue": m1.pvalues.values,
+    })
+)
+coef1.write_csv(out / "modelo1_logit_coefs.csv")
+print("Pseudo-R²:", round(m1.prsquared, 4))
+
+```
+
+```{python}
+# --- Modelo 2: MQO da taxa ---
+m2 = smf.ols(
+    "taxa ~ taxa_l1 + log_estoque + idade_anos + C(ano)",
+    data=df,
+).fit()
+print(m2.summary().tables[1])
+coef2 = pl.DataFrame({
+    "param": m2.params.index.astype(str),
+    "coef": m2.params.values,
+    "pvalue": m2.pvalues.values,
+})
+coef2.write_csv(out / "modelo2_taxa_ols_coefs.csv")
+print("R²:", round(m2.rsquared, 4), "  N:", int(m2.nobs))
+
+```
+
+### Modelo 1M — Logit com variáveis da CDA e macroeconomia anual
+
+**Pergunta.** Depois de controlar a recuperação anterior, o estoque e a idade da CDA, o ambiente macroeconômico do ano se associa à chance de a CDA de ICMS ter algum pagamento (GARE) naquele ano?
+
+**Variável dependente.** $y_{it}=1$ se a CDA $i$ teve arrecadação $>0$ no ano $t$; $0$ caso contrário.
+
+**Modelo logit** (McFadden, 1974):
+$$\Pr(y_{it}=1)=\Lambda\big(\beta_0+\beta_1\,\text{taxa}_{i,t-1}+\beta_2\ln(1+\text{estoque}_{it})+\beta_3\,\text{idade}_{it}+\gamma'\,\mathbf{m}_t\big),\qquad \Lambda(u)=\frac{1}{1+e^{-u}}$$
+em que $\mathbf{m}_t$ são médias anuais das séries macro (BCB SGS), padronizadas no período ($z=(x-\bar x)/s$): cada $\gamma$ é a variação no log-chance para +1 desvio-padrão da macro. Ajuste: Pseudo-$R^2$ de McFadden $=1-\ln L_{\text{modelo}}/\ln L_{\text{só intercepto}}$.
+
+**Por que as dummies de ano saem quando as macros entram.** Uma macro anual é igual para todas as CDAs do mesmo ano, logo é combinação linear exata das dummies de ano (o código verifica o posto da matriz no grão anual). Com 9 anos (2017–2025) cabem no máximo 8 regressores de nível-ano; as 11 séries juntas não são identificáveis. Por isso há duas especificações: (i) **principal** — 4 séries, uma por dimensão (juros, inflação, atividade, emprego); (ii) **completa** — as 11 séries resumidas em 3 componentes principais (Jolliffe, 2002). O modelo com dummies de ano é a referência; os modelos macro estão aninhados nele, e o teste de razão de verossimilhança diz se as macros reproduzem toda a variação entre anos.
+
+**Inferência.** Erros-padrão robustos agrupados por CDA (Cameron & Miller, 2015). Como a variação macro vem de só 9 anos, os p-valores micro das macros são otimistas (Moulton, 1990). Coluna conservadora: regressão em **duas etapas** dos 9 efeitos de ano do modelo de referência sobre as macros (MQO; Donald & Lang, 2007).
+
+**Recorte.** 2026 excluído (ano incompleto na arrecadação e nas macros). Associação condicional, não efeito causal.
+
+```{python}
+# --- Modelo 1M: Logit P(pagamento no ano) com variáveis da CDA + macroeconomia anual ---
+# Leve: lê a amostra já gravada (amostra_modelos_1m.parquet) e as macros mensais (macro_mensal_wide.parquet).
+# Não varre DEBITO. Grava livia_logit_macro_*.csv para o relatório.
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import polars as pl
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from scipy import stats
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+ANO_INI, ANO_FIM = 2017, 2025  # 2026 fica fora: ano incompleto na arrecadação e nas macros
+
+# 1) Macros: média anual das séries mensais do BCB/IBGE (mesmo grão do painel CDA × ano)
+mw = pl.read_parquet(out / "macro_mensal_wide.parquet").with_columns(pl.col("mes").cast(pl.Date))
+xs_all = [c for c in mw.columns if c != "mes"]
+macro_ano = (
+    mw.with_columns(pl.col("mes").dt.year().alias("ano"))
+    .group_by("ano")
+    .agg([pl.col(c).mean().alias(c) for c in xs_all] + [pl.col(c).count().alias(f"n_meses_{c}") for c in xs_all])
+    .filter(pl.col("ano").is_between(ANO_INI, ANO_FIM))
+    .sort("ano")
+    .to_pandas()
+)
+assert len(macro_ano) == ANO_FIM - ANO_INI + 1, macro_ano["ano"].tolist()
+assert all((macro_ano[f"n_meses_{c}"] == 12).all() for c in xs_all), "macro com mês faltante no período"
+# Séries em R$ nominais entram em log (escala multiplicativa); taxas/índices em nível.
+macro_ano["log_pib"] = np.log(macro_ano["pib_mensal"])
+macro_ano["log_credito_pj"] = np.log(macro_ano["credito_pj"])
+
+MACRO_DEF = {
+    # var: (rótulo PT, código SGS, transformação)
+    "selic": ("Selic (% a.a., média do ano)", "432", "nível, padronizado"),
+    "ipca": ("IPCA (variação % mensal, média do ano)", "433", "nível, padronizado"),
+    "ipca15": ("IPCA-15 (variação % mensal, média do ano)", "7478", "nível, padronizado"),
+    "igpm": ("IGP-M (variação % mensal, média do ano)", "189", "nível, padronizado"),
+    "ptax": ("Câmbio PTAX (R$/US$, média do ano)", "1", "nível, padronizado"),
+    "log_pib": ("PIB mensal (log, média do ano)", "4380", "log, padronizado"),
+    "log_credito_pj": ("Crédito a pessoas jurídicas (log do saldo)", "20540", "log, padronizado"),
+    "desocupacao": ("Taxa de desocupação (%)", "24369", "nível, padronizado"),
+    "ocupados": ("Pessoas ocupadas", "24379", "nível, padronizado"),
+    "endividamento": ("Endividamento das famílias (% da renda)", "29037", "nível, padronizado"),
+    "comprometimento": ("Comprometimento de renda das famílias (%)", "29034", "nível, padronizado"),
+}
+MACROS_TODAS = list(MACRO_DEF)
+# Especificação principal: uma série por dimensão (juros, inflação, atividade, emprego) → sobram graus de liberdade anuais.
+MACROS_PRINC = ["selic", "ipca", "log_pib", "desocupacao"]
+
+# Padronização (z) entre os anos do período: coeficiente = efeito de +1 desvio-padrão da macro.
+Z = macro_ano[["ano"]].copy()
+for v in MACROS_TODAS:
+    s = macro_ano[v]
+    Z[f"z_{v}"] = (s - s.mean()) / s.std(ddof=1)
+
+# Componentes principais das 11 macros (todas), no grão anual.
+Xz = Z[[f"z_{v}" for v in MACROS_TODAS]].to_numpy()
+U, S, Vt = np.linalg.svd(Xz - Xz.mean(0), full_matrices=False)
+var_exp = S**2 / np.sum(S**2)
+N_PC = 3
+pcs = (Xz - Xz.mean(0)) @ Vt[:N_PC].T
+for k in range(N_PC):
+    # sinal: componente cresce com o PIB (só convenção de leitura)
+    sgn = np.sign(Vt[k, MACROS_TODAS.index("log_pib")]) or 1.0
+    Vt[k] *= sgn
+    pcs[:, k] *= sgn
+    Z[f"cp{k+1}"] = pcs[:, k] / pcs[:, k].std(ddof=1)
+
+# 2) Amostra micro (mesma do Modelo 1), recortada para 2017–2025 e unida às macros do ano
+df = pl.read_parquet(out / "amostra_modelos_1m.parquet").to_pandas()
+df["ano"] = df["ano"].astype(int)
+df = df[df["ano"].between(ANO_INI, ANO_FIM)].merge(Z, on="ano", how="left", validate="m:1")
+assert df[[c for c in Z.columns if c != "ano"]].notna().all().all()
+print(f"amostra 2017–2025: N={len(df):,} | CDAs distintas={df['ID_DEBITO'].nunique():,} | share pago={df['y_pago'].mean():.4f}")
+
+MICRO = "taxa_l1 + log_estoque + idade_anos"
+cl = {"cov_type": "cluster", "cov_kwds": {"groups": df["ID_DEBITO"].to_numpy()}}
+
+
+def fit(formula: str):
+    return smf.logit(formula, data=df).fit(disp=False, maxiter=200, **cl)
+
+
+m_ref = fit(f"y_pago ~ {MICRO} + C(ano)")
+m_princ = fit(f"y_pago ~ {MICRO} + " + " + ".join(f"z_{v}" for v in MACROS_PRINC))
+m_cp = fit(f"y_pago ~ {MICRO} + " + " + ".join(f"cp{k+1}" for k in range(N_PC)))
+
+# 3) Por que não dá para pôr dummies de ano + macros juntas: posto da matriz no grão anual.
+anos = macro_ano["ano"].to_numpy()
+D = np.column_stack([np.ones(len(anos))] + [(anos == a).astype(float) for a in anos[1:]])
+M_all = Z[[f"z_{v}" for v in MACROS_TODAS]].to_numpy()
+posto_ano = np.linalg.matrix_rank(D)
+posto_ano_macro = np.linalg.matrix_rank(np.column_stack([D, M_all]))
+posto_so_macros = np.linalg.matrix_rank(np.column_stack([np.ones(len(anos)), M_all]))
+print(f"posto [const + dummies de ano] = {posto_ano}; + 11 macros = {posto_ano_macro} (não aumenta → colinear)")
+print(f"posto [const + 11 macros] = {posto_so_macros} com {len(anos)} anos → no máximo {len(anos)-1} macros identificáveis")
+
+ROT = {
+    "Intercept": "Intercepto",
+    "taxa_l1": "Taxa de recuperação da CDA no ano anterior",
+    "log_estoque": "Estoque da CDA (log de 1 + R$)",
+    "idade_anos": "Idade da CDA (anos)",
+    **{f"z_{v}": MACRO_DEF[v][0] for v in MACROS_TODAS},
+    **{f"cp{k+1}": f"Componente macro {k+1}" for k in range(N_PC)},
+}
+
+
+def estrelas(p):
+    return "**" if p < 0.01 else ("*" if p < 0.05 else "")
+
+
+def tabela(m, nome: str) -> pd.DataFrame:
+    ame = m.get_margeff(at="overall", method="dydx")
+    ame_s = pd.Series(ame.margeff, index=m.params.index.drop("Intercept"))
+    rows = []
+    for p in m.params.index:
+        if p.startswith("C(ano)"):
+            continue
+        rows.append({
+            "modelo": nome,
+            "variavel": ROT.get(p, p),
+            "param_tecnico": p,
+            "coeficiente": m.params[p],
+            "erro_padrao": m.bse[p],
+            "z": m.tvalues[p],
+            "p_valor": m.pvalues[p],
+            "signif": estrelas(m.pvalues[p]),
+            "razao_de_chances": float(np.exp(m.params[p])),
+            "efeito_marginal_medio_pp": (float(ame_s[p]) * 100) if p in ame_s.index else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+tab_princ = tabela(m_princ, "Macro principal (4 séries)")
+tab_cp = tabela(m_cp, "Macro completa (11 séries em 3 componentes)")
+
+# 4) Inferência conservadora para as macros (duas etapas, 9 anos): efeitos de ano do m_ref ~ macros (MQO).
+efeito_ano = np.array([0.0] + [m_ref.params[f"C(ano)[T.{a}]"] for a in anos[1:]])
+
+
+def duas_etapas(cols: list[str], labels: list[str]) -> pd.DataFrame:
+    X = sm.add_constant(Z[cols].to_numpy())
+    r = sm.OLS(efeito_ano, X).fit()
+    return pd.DataFrame({
+        "param_tecnico": cols,
+        "coef_duas_etapas": r.params[1:],
+        "erro_padrao_duas_etapas": r.bse[1:],
+        "p_valor_duas_etapas": r.pvalues[1:],
+        "gl_residuais": int(r.df_resid),
+    })
+
+
+de_princ = duas_etapas([f"z_{v}" for v in MACROS_PRINC], MACROS_PRINC)
+de_cp = duas_etapas([f"cp{k+1}" for k in range(N_PC)], [])
+tab_princ = tab_princ.merge(de_princ, on="param_tecnico", how="left")
+tab_cp = tab_cp.merge(de_cp, on="param_tecnico", how="left")
+for t in (tab_princ, tab_cp):
+    t["signif_duas_etapas"] = t["p_valor_duas_etapas"].map(lambda p: estrelas(p) if pd.notna(p) else "")
+
+# 5) Comparação de ajuste (mesma amostra 2017–2025). Macros são função do ano → modelos macro estão aninhados no de ano.
+def lr_vs_ref(m, k_ano_params: int) -> tuple[float, int, float]:
+    lr = 2 * (m_ref.llf - m.llf)
+    gl = (len(anos)) - (1 + k_ano_params)  # parâmetros de nível-ano: ref = 9 (const+8 dummies); macro = 1 + k
+    return lr, gl, float(stats.chi2.sf(lr, gl))
+
+
+comp = []
+for nome, m, k in [
+    ("Referência: dummies de ano", m_ref, None),
+    ("Macro principal (4 séries)", m_princ, len(MACROS_PRINC)),
+    ("Macro completa (11 séries em 3 componentes)", m_cp, N_PC),
+]:
+    lr, gl, p = (np.nan, np.nan, np.nan) if k is None else lr_vs_ref(m, k)
+    comp.append({
+        "modelo": nome,
+        "N": int(m.nobs),
+        "pseudo_r2_mcfadden": m.prsquared,
+        "log_verossimilhanca": m.llf,
+        "aic": m.aic,
+        "bic": m.bic,
+        "lr_vs_dummies_ano": lr,
+        "gl_lr": gl,
+        "p_valor_lr": p,
+    })
+comp = pd.DataFrame(comp)
+
+# 6) Diagnóstico das macros no grão anual: VIF e cargas dos componentes
+vif_rows = []
+Xv = sm.add_constant(Z[[f"z_{v}" for v in MACROS_PRINC]].to_numpy())
+for i, v in enumerate(MACROS_PRINC, start=1):
+    vif_rows.append({"variavel": MACRO_DEF[v][0], "param_tecnico": f"z_{v}", "vif_anual": variance_inflation_factor(Xv, i)})
+vif = pd.DataFrame(vif_rows)
+cargas = pd.DataFrame({"variavel": [MACRO_DEF[v][0] for v in MACROS_TODAS], "codigo_sgs": [MACRO_DEF[v][1] for v in MACROS_TODAS]})
+for k in range(N_PC):
+    cargas[f"carga_cp{k+1}"] = Vt[k]
+cargas.loc[len(cargas)] = ["Variância explicada (fração)", ""] + [var_exp[k] for k in range(N_PC)]
+
+dic = pd.DataFrame([
+    {"variavel": MACRO_DEF[v][0], "param_tecnico": v, "codigo_sgs": MACRO_DEF[v][1], "transformacao": MACRO_DEF[v][2],
+     "media_2017_2025": float(macro_ano[v].mean()), "min_anual": float(macro_ano[v].min()), "max_anual": float(macro_ano[v].max()),
+     "na_especificacao_principal": "sim" if v in MACROS_PRINC else "não (entra via componentes)"}
+    for v in MACROS_TODAS
+])
+
+meta = pd.DataFrame([{
+    "variavel_dependente": "y_pago = 1 se a CDA de ICMS teve arrecadação (GARE) > 0 no ano; 0 caso contrário",
+    "unidade": "CDA × ano (painel anual ICMS; amostra aleatória com a taxa do ano anterior observada)",
+    "periodo": f"{ANO_INI}–{ANO_FIM} (2026 excluído: ano incompleto)",
+    "N": int(m_princ.nobs),
+    "n_cdas": int(df["ID_DEBITO"].nunique()),
+    "share_pago": float(df["y_pago"].mean()),
+    "erro_padrao": "robusto, agrupado por CDA",
+    "posto_dummies_ano": int(posto_ano),
+    "posto_dummies_ano_mais_11_macros": int(posto_ano_macro),
+    "nota_causal": "Associação condicional; não identifica efeito causal de política ou da macroeconomia.",
+}])
+
+tab_princ.to_csv(out / "livia_logit_macro_principal.csv", index=False)
+tab_cp.to_csv(out / "livia_logit_macro_componentes.csv", index=False)
+comp.to_csv(out / "livia_logit_macro_comparacao.csv", index=False)
+vif.to_csv(out / "livia_logit_macro_vif.csv", index=False)
+cargas.to_csv(out / "livia_logit_macro_cargas_componentes.csv", index=False)
+dic.to_csv(out / "livia_logit_macro_dicionario.csv", index=False)
+meta.to_csv(out / "livia_logit_macro_meta.csv", index=False)
+
+pd.set_option("display.width", 200)
+print(tab_princ[["variavel", "coeficiente", "erro_padrao", "p_valor", "signif", "efeito_marginal_medio_pp", "p_valor_duas_etapas"]].to_string(index=False))
+print(tab_cp[["variavel", "coeficiente", "erro_padrao", "p_valor", "signif", "efeito_marginal_medio_pp", "p_valor_duas_etapas"]].to_string(index=False))
+print(comp.to_string(index=False))
+print(vif.to_string(index=False))
+print(cargas.to_string(index=False))
+print("CSV → logit_macro (7 arquivos) gravados em", out)
+```
+
+### Como ler a série agregada (visão PGE)
+
+Três gráficos simples — **sem eixo duplo**:
+
+1. **Estoque** (`fig_estoque_agregado_ano`): quanto a carteira ICMS deve a cada ano (R$ bilhões).
+2. **Arrecadação** (`fig_serie_agregada_icms`): quanto entrou em GARE no ano (R$ bilhões).
+3. **Taxa de recuperação da carteira** (`fig_painel_taxa_media_ano`, mesma série que `fig_taxa_recuperacao_anual` / `extra_taxa_carteira`): Σ arrecadado ÷ Σ estoque no ano (~0,2%–0,7%/ano típico).
+
+A taxa de recuperação da carteira é a métrica para conversa com a PGE. A média aritmética das razões por CDA (`taxa_media_id` no CSV) explode com estoque residual e **não** deve ser usada como recuperação da carteira.
+
+Se a taxa de recuperação cai enquanto o estoque sobe, a dívida “engorda” mais rápido do que a cobrança — leitura descritiva, sem causalidade. O ano 2026 no recorte costuma estar incompleto.
+
+```{python}
+# --- Modelo 3: trajetórias agregadas (sem eixo dual) + AR(1) na taxa da carteira ---
+from pathlib import Path
+import plotly.graph_objects as go
+import plotly.express as px
+import polars as pl
+
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+figs = out / "_pdf_figs"
+figs.mkdir(exist_ok=True)
+TEAL = "#154C56"
+
+# Preferir `agg` da célula anterior; senão CSV leve
+if "agg" in globals() and agg is not None:
+    agg_pd = agg.to_pandas().sort_values("ano") if hasattr(agg, "to_pandas") else agg.sort_values("ano")
+else:
+    agg_pd = pl.read_csv(out / "serie_agregada_icms_ano.csv").to_pandas().sort_values("ano")
+
+agg_pd = agg_pd.copy()
+agg_pd["estoque_bi"] = agg_pd["estoque_sum"] / 1e9
+agg_pd["arrec_bi"] = agg_pd["arrec_sum"] / 1e9
+agg_pd["taxa_carteira_pct"] = agg_pd["taxa_carteira"] * 100
+
+LAYOUT = dict(
+    font=dict(family="Arial, Helvetica, sans-serif", size=14, color="#222"),
+    title=dict(font=dict(size=20, color=TEAL), x=0.02, xanchor="left"),
+    margin=dict(t=90, b=60, l=70, r=30),
+    hovermode="x unified",
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    showlegend=False,
+)
+
+
+def _style(fig, ylab, y_is_pct=False):
+    fig.update_xaxes(title_text="Ano", dtick=1, showgrid=False, title_font=dict(size=14), tickfont=dict(size=12))
+    kw = dict(
+        title_text=ylab,
+        showgrid=True,
+        gridcolor="#E6E6E6",
+        title_font=dict(size=14),
+        tickfont=dict(size=12),
+        separatethousands=True,
+    )
+    if y_is_pct:
+        kw["ticksuffix"] = "%"
+    fig.update_yaxes(**kw)
+    fig.update_layout(**LAYOUT)
+
+
+# 1) Arrecadação anual — fig_serie_agregada_icms (antes: eixo dual proibido)
+fig = go.Figure(
+    go.Scatter(
+        x=agg_pd["ano"],
+        y=agg_pd["arrec_bi"],
+        mode="lines+markers",
+        line=dict(color=TEAL, width=3),
+        marker=dict(size=9, color=TEAL),
+        hovertemplate="Ano %{x}<br>Arrecadação: R$ %{y:.2f} bi<extra></extra>",
+    )
+)
+fig.update_layout(
+    title=dict(
+        text=(
+            "Quanto a PGE arrecadou de ICMS inscrito a cada ano?"
+            "<br><sup>Valor em GARE no ano (R$ bilhões). 2026 é recorte incompleto.</sup>"
+        )
+    )
+)
+_style(fig, "Arrecadação (R$ bilhões)")
+fig.show()
+fig.write_html(str(out / "fig_serie_agregada_icms.html"))
+try:
+    fig.write_image(str(figs / "fig_serie_agregada_icms.png"), width=1000, height=560, scale=2)
+    print("PNG →", figs / "fig_serie_agregada_icms.png")
+except Exception as e:
+    print("PNG skip serie:", e)
+
+# 2) Estoque anual — fig_estoque_agregado_ano
+fig_e = go.Figure(
+    go.Bar(
+        x=agg_pd["ano"],
+        y=agg_pd["estoque_bi"],
+        marker_color=TEAL,
+        hovertemplate="Ano %{x}<br>Estoque: R$ %{y:.1f} bi<extra></extra>",
+    )
+)
+row26 = agg_pd.loc[agg_pd["ano"] == 2026]
+if not row26.empty:
+    v = float(row26["estoque_bi"].iloc[0])
+    fig_e.add_annotation(
+        x=2026,
+        y=v,
+        text=f"2026 ≈ R$ {v:.0f} bi",
+        showarrow=True,
+        arrowhead=2,
+        ax=40,
+        ay=-40,
+        font=dict(size=13, color=TEAL),
+        bgcolor="rgba(255,255,255,0.85)",
+        bordercolor=TEAL,
+        borderwidth=1,
+    )
+fig_e.update_layout(
+    title=dict(
+        text=(
+            "Quanto a carteira ICMS deve a cada ano?"
+            "<br><sup>Estoque somado no painel anual (uma linha por CDA × ano).</sup>"
+        )
+    )
+)
+_style(fig_e, "Estoque ICMS (R$ bilhões)")
+fig_e.show()
+fig_e.write_html(str(out / "fig_estoque_agregado_ano.html"))
+try:
+    fig_e.write_image(str(figs / "fig_estoque_agregado_ano.png"), width=1000, height=560, scale=2)
+    print("PNG →", figs / "fig_estoque_agregado_ano.png")
+except Exception as e:
+    print("PNG skip estoque:", e)
+
+# AR(1) simples na taxa da carteira (poucos anos — só descritivo)
+agg_pd["taxa_l1"] = agg_pd["taxa_carteira"].shift(1)
+m3 = smf.ols("taxa_carteira ~ taxa_l1", data=agg_pd.dropna()).fit()
+print(m3.summary())
+pl.DataFrame({
+    "param": m3.params.index.astype(str),
+    "coef": m3.params.values,
+    "pvalue": m3.pvalues.values,
+}).write_csv(out / "modelo3_ar1_taxa_carteira.csv")
+print("DoD parcial modelo 3: anos=", len(agg_pd))
+print("NOTA: taxa_media_id no CSV é mean-of-ratios (diagnóstico); stakeholder = taxa_carteira.")
+```
+
+```{python}
+from pathlib import Path
+out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
+need = [
+    "amostra_modelos_1m.parquet",
+    "serie_agregada_icms_ano.csv",
+    "modelo1_logit_coefs.csv",
+    "modelo2_taxa_ols_coefs.csv",
+    "modelo3_ar1_taxa_carteira.csv",
+    "fig_serie_agregada_icms.html",
+]
+ok = all((out / f).is_file() for f in need)
+print("DoD etapa 6:", "PASS" if ok else "FAIL")
+for f in need:
+    print(" ", "OK" if (out / f).is_file() else "MISS", f)
+```
+
+## 7. Domínio, GARE na vida da dívida e macros
+
+Pedido dela, nesta ordem: (1) **correlação com macros** (Selic, IPCA, desemprego, PIB e o resto da cesta); (2) estoque **sem somar a mesma CDA duas vezes**; (3) perguntas de domínio (idade, tipo de momento do pagamento, calendário de inscrição).
+
+**Caminho rápido — rode da 7A até a síntese.** O `painel_icms_completo.parquet` já é uma linha por `ID_DEBITO` × `ano`. Estoque, idade e sanidade saem dele (Polars). O Y mensal das macros é `VALOR_RECEITA` da `ARRECADACAO` restrito aos IDs desse painel, não um estoque mês a mês no `DEBITO`.
+
+Tempo honesto desta corrida: **cerca de 45–75 min**. O grosso é o semi-join da arrecadação (7C) e o join do GARE com a data de inscrição (7C2). O probe de um mês no `DEBITO` (célula seguinte à 7A) pode ir a ~15–40 min se o filtro de ano/mês não podar o scan; pode desligar com `RODAR_PROBE_RAW = False`.
+
+**Não ligue** `RODAR_7A_SLOW` / `RODAR_7C_SLOW` no final se o prazo é ~1 hora. Essas células varrem `DEBITO` mês a mês (horas, máquina folgada / Pontal). Nascem desligadas: Run all não dispara o scan. Não entram no DoD.
+
+DuckDB, quando aparece: `temp_directory` em `DATA_ROOT/_duckdb_tmp_eda`, `max_temp_directory_size=80GiB`, `memory_limit=1500MB`, `threads=1`, `preserve_insertion_order=false`. Artefato já gravado é pulado.
+
+Se esta aba do Jupyter foi aberta antes da edição, recarregue o arquivo do disco e não salve a versão velha por cima.
+
+### 7A — Sanidade de estoque (rápido, grão anual do painel)
+
+O `DEBITO` repete a CDA a cada extração. O painel **já** ficou com 1 linha por `ID_DEBITO` × `ano` (média do valor naquele ano). Aqui só conferimos, por `ano`: `n_rows`, `n_unique(ID_DEBITO)` e a soma de `estoque_medio`. Esperado: `n_rows` ≈ `n_unique`.
+
+Não há scan mês a mês. Isso é de propósito: a sanidade do estoque usada nas análises é a deste grão anual.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import polars as pl
+
+painel = EDA_ARTIFACTS / "painel_icms_completo.parquet"
+assert painel.is_file() and painel.stat().st_size > 0, painel
+ARTIFACTS = painel.parent
+ARTIFACTS.mkdir(exist_ok=True)
+out_san = ARTIFACTS / "sanidade_painel_anual.parquet"
+
+schema = set(pl.scan_parquet(str(painel)).collect_schema().names())
+need = {"ID_DEBITO", "ano", "estoque_medio", "data_inscricao", "arrecadado", "taxa"}
+assert need <= schema, sorted(need - schema)
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+if out_san.is_file() and out_san.stat().st_size > 50:
+    have = set(pl.read_parquet_schema(str(out_san)))
+    if {"ano", "n_rows", "n_unique", "estoque", "arrecadado", "taxa_media"} <= have:
+        print(f"skip — já existe {out_san}")
+        san = pl.read_parquet(out_san)
+    else:
+        print(f"parquet antigo sem as colunas do caminho rápido — regravando {out_san.name}")
+        san = None
+else:
+    san = None
+
+if san is None:
+    san = collect_lf(
+        pl.scan_parquet(str(painel))
+        .group_by("ano")
+        .agg(
+            pl.len().alias("n_rows"),
+            pl.col("ID_DEBITO").n_unique().alias("n_unique"),
+            pl.col("estoque_medio").sum().alias("estoque"),
+            pl.col("arrecadado").sum().alias("arrecadado"),
+            pl.col("taxa").mean().alias("taxa_media"),
+        )
+        .with_columns(
+            pl.when(pl.col("n_unique") > 0)
+            .then(pl.col("n_rows") / pl.col("n_unique"))
+            .otherwise(None)
+            .alias("linhas_por_id")
+        )
+        .sort("ano")
+    )
+    san.write_parquet(out_san)
+    print(f"gravou {out_san} rows={san.height}")
+
+if "linhas_por_id" not in san.columns:
+    san = san.with_columns(
+        pl.when(pl.col("n_unique") > 0)
+        .then(pl.col("n_rows") / pl.col("n_unique"))
+        .otherwise(None)
+        .alias("linhas_por_id")
+    )
+
+print(san)
+mx = float(san["linhas_por_id"].max())
+mn = float(san["linhas_por_id"].min())
+print(f"linhas/id no painel: min={mn:.4f} max={mx:.4f} (esperado ≈ 1)")
+print(
+    "NOTA: grão anual, a partir do painel, por velocidade. "
+    "n_rows ≈ n_unique confirma que o estoque deste arquivo não duplica ID×ano. "
+    "Duplicata de extração no DEBITO cru, se quiser ver, é o probe de um mês na célula seguinte — ilustrativo, não é a série de estoque."
+)
+```
+
+### 7A-probe — um mês no `DEBITO` cru (ilustrativo)
+
+Um único corte (`ANO_EXTRACAO` e `MES_EXTRACAO` e tipo ICMS): `n_linhas` vs `n_id`. Serve para mostrar que a extração repete CDA. **Não** entra na soma do estoque.
+
+Se esta célula passar de ~15 min, interrompa e siga: a sanidade anual já está gravada. Para não tentar de novo, deixe `RODAR_PROBE_RAW = False`.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import duckdb
+import polars as pl
+
+# False = não toca no DEBITO. A sanidade usada na etapa é a do painel (célula anterior).
+RODAR_PROBE_RAW = True
+PROBE_Y, PROBE_M = 2024, 6
+
+ARTIFACTS = EDA_ARTIFACTS
+ARTIFACTS.mkdir(exist_ok=True)
+probe_path = ARTIFACTS / "sanidade_probe_raw_um_mes.parquet"
+
+if not RODAR_PROBE_RAW:
+    print("skip probe — RODAR_PROBE_RAW=False. Estoque continua o do painel anual.")
+elif "fonte_ok" not in globals() or not fonte_ok:
+    print("probe pulado — rode a etapa 0 com o Meedi montado. A sanidade anual não depende disto.")
+elif probe_path.is_file() and probe_path.stat().st_size > 20:
+    print(f"skip — já existe {probe_path}")
+    print(pl.read_parquet(probe_path))
+else:
+    tmp = DATA_ROOT / "_duckdb_tmp_eda"
+    tmp.mkdir(exist_ok=True)
+    con = duckdb.connect()
+    try:
+        con.execute(f"SET temp_directory='{tmp}'")
+        con.execute("SET max_temp_directory_size='80GiB'")
+        con.execute("SET memory_limit='1500MB'")
+        con.execute("SET threads=1")
+        con.execute("SET preserve_insertion_order=false")
+        con.execute(f"ATTACH '{DATA_ROOT / 'cemepi.duckdb'}' AS cem (READ_ONLY)")
+        print(f"probe cru: só {PROBE_Y}-{PROBE_M:02d}, filtro ICMS…", flush=True)
+        probe = con.execute(
+            "SELECT COUNT(*) AS n_linhas, COUNT(DISTINCT ID_DEBITO) AS n_id "
+            "FROM cem.DEBITO "
+            f"WHERE ANO_EXTRACAO = {int(PROBE_Y)} AND MES_EXTRACAO = {int(PROBE_M)} "
+            "AND UPPER(CAST(TIPO_DEBITO AS VARCHAR)) LIKE '%ICMS%'"
+        ).pl()
+    finally:
+        con.close()
+    probe = probe.with_columns(
+        pl.lit(int(PROBE_Y)).alias("ano_extracao"),
+        pl.lit(int(PROBE_M)).alias("mes_extracao"),
+    ).with_columns(
+        pl.when(pl.col("n_id") > 0)
+        .then(pl.col("n_linhas") / pl.col("n_id"))
+        .otherwise(None)
+        .alias("linhas_por_id_raw")
+    ).select(["ano_extracao", "mes_extracao", "n_linhas", "n_id", "linhas_por_id_raw"])
+    probe.write_parquet(probe_path)
+    print(probe)
+    print(f"gravou {probe_path}")
+    print(
+        "NOTA: um mês, ilustrativo. Se linhas/id ≫ 1, a extração repete a CDA nesse corte. "
+        "O estoque da etapa não usa essa contagem; usa o painel (1 linha por ID×ano)."
+    )
+```
+
+### Como ler a sanidade
+
+No painel, `linhas_por_id` ≈ 1 em cada ano: somar `estoque` **não** conta a mesma CDA duas vezes naquele ano. A CDA pode aparecer em vários anos (é outra pergunta: idade e permanência, não double-count dentro do ano).
+
+O probe de um mês, se rodou, é a tabela crua. `linhas_por_id_raw` ≫ 1 significa extração repetida. Não use `n_linhas` do `DEBITO` como número de dívidas.
+
+### 7B — Domínio no painel ICMS (rápido)
+
+O painel é só ICMS (o de-para ICMS | IPVA | TAXAS continua nas etapas 2–3; aqui não há coluna de tipo e não se varre `DEBITO`).
+
+Corte = **último `ano` do painel**, já 1 linha por CDA. Idade = 31/12 desse ano − `data_inscricao`. `pago_no_ano`: `arrecadado` > 0 naquele ano. `ja_arrecadou`: algum ano do painel com `arrecadado` > 0 (não é o histórico completo anterior ao painel). O gráfico principal de domínio é o **atraso até o 1º GARE**: primeiro ano observado com arrecadação menos o ano de inscrição. Sazonalidade = mês de `data_inscricao`, uma vez por CDA.
+
+Não interpretar inscrição × GARE no mesmo ano como qualidade dos dados: o pagamento frequentemente acontece em anos posteriores.
+
+```{python}
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+
+import duckdb
+import plotly.express as px
+import plotly.graph_objects as go
+import polars as pl
+
+ARTIFACTS = EDA_ARTIFACTS
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+assert painel.is_file() and painel.stat().st_size > 0, painel
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+lf = pl.scan_parquet(str(painel))
+anos_painel = collect_lf(
+    lf.select("ano").drop_nulls().unique().sort("ano")
+).get_column("ano").to_list()
+assert anos_painel, "O painel não tem anos disponíveis."
+ano_ref = int(anos_painel[-1])
+print(
+    f"corte de domínio: ano={ano_ref} (anos disponíveis={anos_painel}; "
+    "1 linha/ID no painel; sem scan de DEBITO)"
+)
+
+idade = (
+    (pl.lit(date(int(ano_ref), 12, 1)) - pl.col("data_inscricao").cast(pl.Date)).dt.total_days()
+    / 365.25
+)
+ref = lf.filter(pl.col("ano") == ano_ref).with_columns(
+    idade.alias("idade"),
+    (pl.col("arrecadado").fill_null(0) > 0).alias("pago_no_ano"),
+    pl.col("data_inscricao").cast(pl.Date).dt.year().alias("ano_inscricao"),
+)
+faixa = (
+    pl.when(pl.col("idade").is_null() | (pl.col("idade") < 0))
+    .then(pl.lit("sem_data"))
+    .when(pl.col("idade") < 1)
+    .then(pl.lit("0-1a"))
+    .when(pl.col("idade") < 3)
+    .then(pl.lit("1-3a"))
+    .when(pl.col("idade") < 5)
+    .then(pl.lit("3-5a"))
+    .otherwise(pl.lit("5a+"))
+    .alias("faixa")
+)
+faixas = collect_lf(
+    ref.with_columns(faixa)
+    .group_by("faixa")
+    .agg(
+        pl.len().alias("n_id"),
+        pl.col("estoque_medio").sum().alias("estoque"),
+        pl.col("pago_no_ano").sum().alias("n_pago_no_ano"),
+        pl.col("arrecadado").sum().alias("arrecadado"),
+    )
+)
+order = {"sem_data": 0, "0-1a": 1, "1-3a": 2, "3-5a": 3, "5a+": 4}
+faixas = (
+    faixas.with_columns(pl.col("faixa").replace_strict(order, default=99).alias("_o"))
+    .sort("_o")
+    .drop("_o")
+)
+faixas.write_csv(ARTIFACTS / "dominio_faixa_etaria.csv")
+print(faixas)
+fig = px.bar(
+    faixas.to_pandas(),
+    x="faixa",
+    y="estoque",
+    color_discrete_sequence=["#154C56"],
+    labels={"faixa": "Idade da CDA", "estoque": "Estoque (R$)"},
+    title=(
+        f"ICMS — estoque por idade da CDA em {ano_ref}"
+        "<br><sup>Uma linha por CDA.</sup>"
+    ),
+)
+fig.update_traces(hovertemplate="Faixa: %{x}<br>Estoque: R$ %{y:,.2f}<extra></extra>")
+fig.update_yaxes(title="Estoque (R$)", separatethousands=True)
+fig.show()
+
+cross = collect_lf(
+    ref.select(["ID_DEBITO", "estoque_medio", "pago_no_ano"]).join(
+        lf.group_by("ID_DEBITO").agg(
+            (pl.col("arrecadado").fill_null(0).max() > 0).alias("ja_arrecadou")
+        ),
+        on="ID_DEBITO",
+        how="left",
+    )
+    .group_by(["pago_no_ano", "ja_arrecadou"])
+    .agg(
+        pl.len().alias("n_id"),
+        pl.col("estoque_medio").sum().alias("estoque"),
+    )
+    .sort(["pago_no_ano", "ja_arrecadou"])
+)
+cross.write_csv(ARTIFACTS / "dominio_aberto_pago.csv")
+print("aberto vs pago (corte) × já arrecadou em algum ano do painel:")
+print(cross)
+
+insc = collect_lf(
+    ref.filter(
+        pl.col("ano_inscricao").is_null()
+        | pl.col("ano_inscricao").is_between(1990, ano_ref)
+    )
+    .group_by("ano_inscricao")
+    .agg(
+        pl.len().alias("n_id"),
+        pl.col("estoque_medio").sum().alias("estoque_no_corte"),
+        pl.col("pago_no_ano").sum().alias("n_pago_no_ano"),
+    )
+    .with_columns((pl.col("n_id") - pl.col("n_pago_no_ano")).alias("n_sem_gare_no_ano"))
+    .sort("ano_inscricao")
+)
+insc.write_csv(ARTIFACTS / "dominio_inscricao_aberto_pago.csv")
+print(insc.tail(12))
+
+# Não usar como leitura principal: inscrição × GARE no mesmo ano é uma
+# coincidência de calendário. Muitas CDAs arrecadam em anos posteriores.
+# A leitura abaixo mede o atraso até o primeiro ano observado com GARE.
+first_gare = collect_lf(
+    lf.group_by("ID_DEBITO")
+    .agg(
+        pl.col("ano")
+        .filter(pl.col("arrecadado").fill_null(0) > 0)
+        .min()
+        .alias("ano_primeiro_gare"),
+        # Inscrição vem de qualquer linha do painel, não só da linha paga.
+        pl.col("data_inscricao").min().alias("data_inscricao"),
+    )
+    .filter(pl.col("ano_primeiro_gare").is_not_null())
+    .with_columns(
+        pl.col("data_inscricao").cast(pl.Date).dt.year().alias("ano_inscricao")
+    )
+    .with_columns(
+        (pl.col("ano_primeiro_gare") - pl.col("ano_inscricao")).alias("atraso_anos")
+    )
+)
+
+# O painel é anual: o atraso é em anos-calendário (não meses). Incluímos
+# apenas atrasos não negativos e explicitamos quantos registros ficaram fora.
+lag_valid = first_gare.filter(
+    pl.col("atraso_anos").is_not_null() & (pl.col("atraso_anos") >= 0)
+).with_columns(
+    pl.when(pl.col("atraso_anos") >= 5)
+    .then(pl.lit("5+"))
+    .otherwise(pl.col("atraso_anos").cast(pl.String))
+    .alias("atraso")
+)
+lag_bins = pl.DataFrame(
+    {"atraso": ["0", "1", "2", "3", "4", "5+"], "_ord": [0, 1, 2, 3, 4, 5]}
+)
+lag_counts = (
+    lag_bins.join(
+        lag_valid.group_by("atraso").agg(pl.len().alias("n_cdas")),
+        on="atraso",
+        how="left",
+    )
+    .with_columns(pl.col("n_cdas").fill_null(0).cast(pl.Int64))
+    .sort("_ord")
+    .drop("_ord")
+)
+lag_counts.write_csv(ARTIFACTS / "dominio_atraso_primeiro_gare.csv")
+print(
+    "Atraso até o 1º GARE (CDAs com arrecadado > 0 em algum ano do painel):"
+)
+print(lag_counts)
+print(
+    f"válidos no gráfico={lag_valid.height}; "
+    f"sem data/atraso negativo={first_gare.height - lag_valid.height}"
+)
+lag_total = int(lag_counts["n_cdas"].sum() or 0)
+lag_cdf = lag_counts.with_columns(
+    pl.col("n_cdas").cum_sum().alias("n_cdas_acumuladas")
+).with_columns(
+    (
+        pl.col("n_cdas_acumuladas") * 100.0 / lag_total
+        if lag_total
+        else pl.lit(0.0)
+    ).alias("pct_acumulado")
+)
+fig = go.Figure(
+    go.Scatter(
+        x=lag_cdf["atraso"].to_list(),
+        y=lag_cdf["pct_acumulado"].to_list(),
+        mode="lines+markers",
+        fill="tozeroy",
+        line={"color": "#154C56", "width": 3},
+        marker={"color": "#154C56", "size": 8},
+        customdata=lag_cdf.select(["n_cdas", "n_cdas_acumuladas"]).to_numpy(),
+        hovertemplate=(
+            "Atraso: %{x} anos<br>"
+            "CDAs na faixa: %{customdata[0]:,}<br>"
+            "CDAs acumuladas: %{customdata[1]:,}<br>"
+            "Até o horizonte: %{y:.1f}%<extra></extra>"
+        ),
+    )
+)
+n_ids_painel = int(collect_lf(lf.select(pl.col("ID_DEBITO").n_unique())).item())
+n_com_gare = int(first_gare.height)
+n_sem_gare = n_ids_painel - n_com_gare
+n_graf_1o = int(lag_valid.height)
+print(
+    "População do 1º GARE — "
+    f"todas as CDAs do painel={n_ids_painel:,}; "
+    f"com ≥1 GARE={n_com_gare:,}; "
+    f"sem GARE observado={n_sem_gare:,}; "
+    f"no gráfico (atraso ≥ 0)={n_graf_1o:,}."
+)
+fig.update_layout(
+    title="Idade até o 1º GARE — CDAs com GARE",
+    xaxis_title="Anos entre a inscrição e o 1º GARE",
+    yaxis_title="Percentual das CDAs no gráfico (atraso ≥ 0)",
+    showlegend=False,
+)
+fig.update_yaxes(range=[0, 100], ticksuffix="%")
+fig.show()
+
+# Quitação: o painel não tem situacao, baixa nem flag. Proxy explícito,
+# só no parquet local — não varre DEBITO.
+# Proxy = 1º ano em que Σ arrecadado (desde o 1º ano da CDA no painel)
+# alcança o estoque_medio desse ano de abertura, se ele for > 0.
+
+
+def _quita_por_id(painel_path: Path) -> pl.DataFrame:
+    con = duckdb.connect()
+    try:
+        con.execute("SET memory_limit='2GB'")
+        con.execute("SET threads=2")
+        con.execute("SET preserve_insertion_order=false")
+        if "DATA_ROOT" in globals():
+            tmp = DATA_ROOT / "_duckdb_tmp_eda"
+            tmp.mkdir(exist_ok=True)
+            con.execute(f"SET temp_directory='{tmp}'")
+            con.execute("SET max_temp_directory_size='80GiB'")
+        q = str(painel_path).replace("'", "''")
+        return con.execute(
+            "WITH ord AS ( "
+            "  SELECT ID_DEBITO, ano, "
+            "         COALESCE(arrecadado, 0) AS arrecadado, "
+            "         estoque_medio, "
+            "         CAST(data_inscricao AS DATE) AS data_inscricao, "
+            "         SUM(COALESCE(arrecadado, 0)) OVER ( "
+            "           PARTITION BY ID_DEBITO ORDER BY ano "
+            "           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW "
+            "         ) AS arrec_acum, "
+            "         FIRST_VALUE(estoque_medio) OVER ( "
+            "           PARTITION BY ID_DEBITO ORDER BY ano "
+            "         ) AS estoque_abertura "
+            "  FROM read_parquet('" + q + "') "
+            ") "
+            "SELECT ID_DEBITO, "
+            "       MIN(data_inscricao) AS data_inscricao, "
+            "       ANY_VALUE(estoque_abertura) AS estoque_abertura, "
+            "       MIN(ano) FILTER ( "
+            "         WHERE estoque_abertura > 0 AND arrec_acum >= estoque_abertura "
+            "       ) AS ano_quita "
+            "FROM ord GROUP BY ID_DEBITO"
+        ).pl()
+    finally:
+        con.close()
+
+
+quita = _quita_por_id(painel).with_columns(
+    pl.col("data_inscricao").cast(pl.Date).dt.year().alias("ano_inscricao"),
+).with_columns(
+    (pl.col("ano_quita") - pl.col("ano_inscricao")).alias("idade_quita")
+)
+n_proxy_ok = int(quita.filter(pl.col("estoque_abertura") > 0).height)
+n_proxy_indef = int(quita.height - n_proxy_ok)
+n_quita = int(quita.filter(pl.col("ano_quita").is_not_null()).height)
+n_aberto_proxy = n_proxy_ok - n_quita
+quita_ok = quita.filter(
+    pl.col("idade_quita").is_not_null() & (pl.col("idade_quita") >= 0)
+).with_columns(
+    pl.when(pl.col("idade_quita") >= 5)
+    .then(pl.lit("5+"))
+    .otherwise(pl.col("idade_quita").cast(pl.Utf8))
+    .alias("atraso")
+)
+n_quita_neg = n_quita - int(quita_ok.height)
+quita_counts = (
+    lag_bins.join(
+        quita_ok.group_by("atraso").agg(pl.len().alias("n_cdas")),
+        on="atraso",
+        how="left",
+    )
+    .with_columns(pl.col("n_cdas").fill_null(0).cast(pl.Int64))
+    .sort("_ord")
+    .drop("_ord")
+)
+quita_counts.write_csv(ARTIFACTS / "dominio_idade_quitacao_proxy.csv")
+quita_total = int(quita_counts["n_cdas"].sum() or 0)
+quita_cdf = quita_counts.with_columns(
+    pl.col("n_cdas").cum_sum().alias("n_cdas_acumuladas")
+).with_columns(
+    (
+        pl.col("n_cdas_acumuladas") * 100.0 / quita_total
+        if quita_total
+        else pl.lit(0.0)
+    ).alias("pct_acumulado")
+)
+print(
+    "Proxy de quitação — "
+    f"definível (estoque de abertura > 0)={n_proxy_ok:,}; "
+    f"indefinido={n_proxy_indef:,}; "
+    f"proxy disparou={n_quita:,}; "
+    f"ainda em aberto no proxy={n_aberto_proxy:,}; "
+    f"no gráfico={quita_total:,}; "
+    f"fora do gráfico por idade negativa ou sem ano de inscrição={n_quita_neg:,}."
+)
+print(quita_counts)
+fig = go.Figure(
+    go.Scatter(
+        x=quita_cdf["atraso"].to_list(),
+        y=quita_cdf["pct_acumulado"].to_list(),
+        mode="lines+markers",
+        fill="tozeroy",
+        line={"color": "#8C4A3A", "width": 3},
+        marker={"color": "#8C4A3A", "size": 8},
+        customdata=quita_cdf.select(["n_cdas", "n_cdas_acumuladas"]).to_numpy(),
+        hovertemplate=(
+            "Idade: %{x} anos<br>"
+            "CDAs na faixa: %{customdata[0]:,}<br>"
+            "CDAs acumuladas: %{customdata[1]:,}<br>"
+            "Até o horizonte: %{y:.1f}%<extra></extra>"
+        ),
+    )
+)
+fig.update_layout(
+    title="Idade até a quitação (proxy)",
+    xaxis_title="Anos entre a inscrição e o ano em que o proxy dispara",
+    yaxis_title="Percentual das CDAs no gráfico (proxy disparou, idade ≥ 0)",
+    showlegend=False,
+)
+fig.update_yaxes(range=[0, 100], ticksuffix="%")
+fig.show()
+
+pop_pag = pl.DataFrame(
+    {
+        "populacao": [
+            "todas_as_cdas_do_painel",
+            "com_pelo_menos_1_gare",
+            "sem_gare_observado",
+            "no_grafico_1o_gare",
+            "proxy_quitacao_definivel",
+            "proxy_quitacao_indefinido",
+            "proxy_disparou",
+            "ainda_em_aberto_no_proxy",
+            "no_grafico_quitacao",
+        ],
+        "n": [
+            n_ids_painel,
+            n_com_gare,
+            n_sem_gare,
+            n_graf_1o,
+            n_proxy_ok,
+            n_proxy_indef,
+            n_quita,
+            n_aberto_proxy,
+            quita_total,
+        ],
+    }
+)
+pop_pag.write_csv(ARTIFACTS / "dominio_pop_pagamento_idade.csv")
+print(pop_pag)
+
+# Incidência cumulativa por turma (ano inscrição) × anos após inscrição.
+# Denominador = todas as CDAs da turma no painel, não só quem pagou.
+# Turma começa no 1º ano do painel. Horizonte não observável omitido
+# no gráfico de linhas (não é zero). PNG: extra_coorte_horizonte.png.
+H_MAX = 10
+ano_min_painel = int(anos_painel[0])
+coorte_base = collect_lf(
+    lf.group_by("ID_DEBITO")
+    .agg(
+        pl.col("data_inscricao").min().alias("data_inscricao"),
+        pl.col("ano")
+        .filter(pl.col("arrecadado").fill_null(0) > 0)
+        .min()
+        .alias("ano_primeiro_gare"),
+    )
+    .with_columns(pl.col("data_inscricao").cast(pl.Date).dt.year().alias("ano_inscricao"))
+    .filter(
+        pl.col("ano_inscricao").is_not_null()
+        & pl.col("ano_inscricao").is_between(ano_min_painel, ano_ref)
+    )
+    .with_columns((pl.col("ano_primeiro_gare") - pl.col("ano_inscricao")).alias("atraso"))
+)
+if coorte_base.height == 0:
+    print("Sem turmas dentro da cobertura do painel; gráfico de coorte omitido.")
+else:
+    n_por = (
+        coorte_base.group_by("ano_inscricao")
+        .agg(pl.len().alias("n_coorte"))
+        .sort("ano_inscricao")
+    )
+    hits = (
+        coorte_base.filter(
+            pl.col("atraso").is_not_null()
+            & (pl.col("atraso") >= 0)
+            & (pl.col("atraso") <= H_MAX)
+        )
+        .group_by(["ano_inscricao", "atraso"])
+        .agg(pl.len().alias("n_exato"))
+    )
+    hit_map = {
+        (int(a), int(d)): int(n)
+        for a, d, n in hits.iter_rows()
+    }
+    long_rows = []
+    for ai, n_coorte in n_por.iter_rows():
+        ai = int(ai)
+        n_coorte = int(n_coorte)
+        csum = 0
+        for h in range(H_MAX + 1):
+            observavel = ai + h <= ano_ref
+            if observavel:
+                csum += hit_map.get((ai, h), 0)
+                pct = 100.0 * csum / n_coorte if n_coorte else None
+            else:
+                pct = None
+            long_rows.append(
+                {
+                    "ano_inscricao": ai,
+                    "horizonte_anos": h,
+                    "n_coorte": n_coorte,
+                    "observavel": observavel,
+                    "pct_com_algum_gare": pct,
+                }
+            )
+    coorte_long = pl.DataFrame(long_rows)
+    coorte_long.write_csv(ARTIFACTS / "dominio_coorte_horizonte_gare.csv")
+
+    # Linhas por turma (procuradores): % acumulado com algum pagamento.
+    # Horizontes não observáveis omitidos (não são zero). PNG em _pdf_figs.
+    TEAL = "#154C56"
+    obs = coorte_long.filter(
+        pl.col("observavel") & pl.col("pct_com_algum_gare").is_not_null()
+    ).sort(["ano_inscricao", "horizonte_anos"])
+    anos_c = obs["ano_inscricao"].unique().sort().to_list()
+    palette = px.colors.sample_colorscale(
+        [[0, "#154C56"], [0.5, "#2A7F8F"], [1, "#C47B3A"]],
+        [i / max(1, len(anos_c) - 1) for i in range(len(anos_c))],
+    )
+    fig = go.Figure()
+    for i, ano in enumerate(anos_c):
+        sub = obs.filter(pl.col("ano_inscricao") == ano)
+        n = int(sub["n_coorte"][0])
+        fig.add_trace(
+            go.Scatter(
+                x=sub["horizonte_anos"].to_list(),
+                y=sub["pct_com_algum_gare"].to_list(),
+                mode="lines+markers",
+                name=str(ano),
+                line={"color": palette[i], "width": 2.5},
+                marker={"size": 7, "color": palette[i]},
+                hovertemplate=(
+                    f"Inscrição {ano}<br>"
+                    "Após %{x} ano(s): %{y:.1f}% com algum pagamento"
+                    f"<br>Turma: {n:,} CDAs"
+                    "<extra></extra>"
+                ),
+            )
+        )
+    for h, lab in [(1, "1 ano"), (3, "3 anos"), (5, "5 anos")]:
+        fig.add_vline(
+            x=h,
+            line_dash="dot",
+            line_color="#AAAAAA",
+            line_width=1,
+            annotation_text=lab,
+            annotation_position="top",
+            annotation_font_size=11,
+            annotation_font_color="#666",
+        )
+    fig.update_layout(
+        title={
+            "text": (
+                "Das dívidas inscritas em cada ano, quantas já tiveram algum pagamento?"
+                "<br><sup>Percentual acumulado da turma com pelo menos um pagamento. "
+                "Linha mais curta = turma recente (ainda não deu tempo de observar).</sup>"
+            ),
+            "font": {"size": 18, "color": TEAL},
+            "x": 0.02,
+            "xanchor": "left",
+        },
+        font={"family": "Arial, Helvetica, sans-serif", "size": 13, "color": "#222"},
+        margin={"t": 90, "b": 60, "l": 70, "r": 140},
+        hovermode="closest",
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend={
+            "title": {"text": "Ano de inscrição"},
+            "orientation": "v",
+            "yanchor": "top",
+            "y": 1,
+            "xanchor": "left",
+            "x": 1.02,
+            "font": {"size": 11},
+            "bgcolor": "rgba(255,255,255,0.9)",
+        },
+        width=1000,
+        height=560,
+    )
+    fig.update_xaxes(
+        title_text="Anos após a inscrição",
+        dtick=1,
+        range=[-0.3, 10.3],
+        showgrid=False,
+    )
+    fig.update_yaxes(
+        title_text="% da turma com algum pagamento",
+        range=[0, 45],
+        ticksuffix="%",
+        showgrid=True,
+        gridcolor="#E6E6E6",
+    )
+    fig.show()
+    figs = ARTIFACTS / "_pdf_figs"
+    figs.mkdir(exist_ok=True)
+    try:
+        fig.write_image(str(figs / "extra_coorte_horizonte.png"), width=1000, height=560, scale=2)
+        print("PNG →", figs / "extra_coorte_horizonte.png")
+    except Exception as e:
+        print("PNG skip extra_coorte_horizonte:", e)
+    fig.write_html(str(ARTIFACTS / "extra_coorte_horizonte.html"))
+    print(coorte_long.filter(pl.col("horizonte_anos").is_in([0, 1, 2, 5, 10])).tail(24))
+
+
+pos = (
+    collect_lf(
+        ref.filter(pl.col("estoque_medio").is_not_null() & (pl.col("estoque_medio") > 0)).select(
+            "estoque_medio"
+        )
+    )
+    .get_column("estoque_medio")
+    .sort(descending=True)
+)
+n = int(pos.len())
+tot = float(pos.sum()) if n else 0.0
+row = {"ano_ref": [int(ano_ref)], "n_id_positivo": [n], "estoque": [tot]}
+if n and tot > 0:
+    csum = pos.cum_sum()
+    for nome, p in (("p50", 0.50), ("p80", 0.80), ("p90", 0.90)):
+        hit = (csum / tot >= p).arg_true()
+        row[f"share_ids_{nome}"] = [float(hit[0] + 1) / n if hit.len() else None]
+else:
+    for nome in ("p50", "p80", "p90"):
+        row[f"share_ids_{nome}"] = [None]
+pareto = pl.DataFrame(row)
+pareto.write_csv(ARTIFACTS / "pareto_icms.csv")
+print("Pareto: fração de CDAs (maiores primeiro) que carregam 50/80/90% do estoque no corte:")
+print(pareto)
+
+saz = collect_lf(
+    lf.filter(pl.col("data_inscricao").is_not_null())
+    .group_by("ID_DEBITO")
+    .agg(pl.col("data_inscricao").min().alias("data_inscricao"))
+    .with_columns(pl.col("data_inscricao").cast(pl.Date).dt.month().alias("mes"))
+    .group_by("mes")
+    .agg(pl.len().alias("n_id"))
+    .sort("mes")
+)
+saz.write_csv(ARTIFACTS / "sazonalidade_inscricao_icms.csv")
+
+# Complete the calendar so months 1–12 are always visible, including zeros.
+meses_pt = {
+    1: "Jan", 2: "Fev", 3: "Mar", 4: "Abr", 5: "Mai", 6: "Jun",
+    7: "Jul", 8: "Ago", 9: "Set", 10: "Out", 11: "Nov", 12: "Dez",
+}
+saz_plot = (
+    pl.DataFrame({"mes": list(meses_pt)})
+    .join(saz, on="mes", how="left")
+    .with_columns(
+        pl.col("n_id").fill_null(0).cast(pl.Int64),
+        pl.col("mes").replace_strict(meses_pt).alias("mes_nome"),
+    )
+)
+total_cdas_saz = int(saz_plot["n_id"].sum() or 0)
+saz_plot = saz_plot.with_columns(
+    (
+        pl.col("n_id") * 100.0 / total_cdas_saz
+        if total_cdas_saz
+        else pl.lit(0.0)
+    ).alias("pct")
+)
+print(saz_plot)
+fig = px.bar(
+    saz_plot.to_pandas(),
+    x="mes_nome",
+    y="n_id",
+    text="n_id",
+    custom_data=["pct"],
+    category_orders={"mes_nome": list(meses_pt.values())},
+    color_discrete_sequence=["#154C56"],
+    labels={"mes_nome": "Mês de inscrição", "n_id": "CDAs únicas"},
+    title="Sazonalidade das inscrições de ICMS",
+)
+fig.update_traces(
+    texttemplate="%{text:,}",
+    textposition="outside",
+    hovertemplate="Mês: %{x}<br>CDAs: %{y:,}<br>Participação: %{customdata[0]:.1f}%<extra></extra>",
+)
+fig.update_layout(uniformtext_minsize=9, uniformtext_mode="hide")
+fig.update_yaxes(title="Número de CDAs", separatethousands=True)
+fig.show()
+```
+
+### Como ler idade, aberto/pago, atraso e Pareto
+
+Compare `n_id` com `estoque`. Faixa `5a+` grande em valor e pequena em GARE no ano corrente é carteira velha, não prova de que “não se recupera cedo” — a janela de valor do GARE está na 7C2.
+
+### 1º GARE (idade até o primeiro pagamento)
+
+O gráfico de idade até o 1º GARE usa **somente CDAs com pelo menos um ano de `arrecadado > 0`** e atraso não negativo. O percentual é dentro desse grupo, não dentro de todas as CDAs. Quem não tem GARE observado fica fora da curva: não entra como “pagou no ano 0”. O subtítulo separa três populações: todas as CDAs do painel, as com ≥1 GARE, e as sem GARE observado. Isso não é o recorte de quem ainda está em aberto no estoque do ano de corte.
+
+O grão é **anual** (ano do primeiro `arrecadado > 0` menos o ano de `data_inscricao`). Não é a data do documento de GARE — essa data entra na 7C2. Pagamento anterior ao primeiro ano do painel não é visto.
+
+### Quitação (proxy — não há situação cadastral)
+
+O painel não traz `situacao`, data de baixa nem flag de quitação. Esses campos não foram imputados.
+
+**Proxy usado:** o primeiro ano em que a soma de `arrecadado` da CDA, acumulada a partir do primeiro ano em que ela aparece no painel, alcança o `estoque_medio` desse ano de abertura (`estoque_abertura > 0`). A idade é o ano desse cruzamento menos o ano da inscrição.
+
+O gráfico mostra **apenas as CDAs em que o proxy dispara**. Quem tem estoque de abertura válido e não cruza até o último ano observado fica como **ainda em aberto no proxy**, fora da curva. Estoque de abertura nulo ou ≤ 0 deixa o proxy indefinido (também fora). Não é baixa administrativa: o estoque de abertura não é o valor na data da inscrição quando a CDA já existia antes do painel; juros posteriores podem elevar o estoque acima do que o proxy trata como coberto; uma redução de estoque sem arrecadação correspondente não dispara o proxy.
+
+### Turma de inscrição × anos após a inscrição
+
+O gráfico de **linhas por turma** (ano de inscrição) substitui o heatmap. Cada linha é o percentual acumulado da turma com **algum** GARE até aquele número de anos após a inscrição. O denominador é **todas as CDAs da turma no painel**, não só as que pagaram e não só as que seguem em aberto. Turmas anteriores ao primeiro ano do painel ficam de fora, para não contar como atraso um GARE que a base não vê. Horizontes ainda não observáveis **não entram na linha** (não são zero). Guias em 1, 3 e 5 anos ajudam a comparação entre turmas. PNG: `extra_coorte_horizonte.png` (regenerável só do CSV `dominio_coorte_horizonte_gare.csv`).
+
+`ja_arrecadou` olha os anos que estão no painel. Pareto: se poucos por cento dos IDs carregam a maior parte do estoque, a média não descreve a CDA típica.
+
+Sazonalidade é calendário de inscrição (mês), contando cada CDA uma vez. Não é fluxo de extração.
+
+### 7C — Fluxos: novas, estoque anual, Y mensal da arrecadação
+
+Estoque **mensal** no `DEBITO` fica de fora (célula 7C-slow, desligada). Estoque desta etapa = soma anual do painel.
+
+Y mensal para as macros = `n_pagadores` e `VALOR_RECEITA` na `ARRECADACAO`, só IDs do painel (`SEMI JOIN`), com spill no Meedi.
+
+`n_novas` no caminho rápido é o mês de `data_inscricao` **já gravado no painel** (uma vez por CDA). Recontar isso no `DEBITO` é scan da tabela cheia: `SKIP_NOVAS_DEBITO` nasce `True`. O proxy anual (primeiro `ano` em que o id aparece no painel) vai para `novas_proxy_anual_painel.parquet` de qualquer forma. Lags 1–3 são da série mensal, em mês civil (buraco vira zero de fluxo).
+
+**Cobertura GARE:** a arrecadação mensal só tem fluxo a partir de **2016-01**. O spine 2010–2015 preenche meses com `arrec_receita=0` / `n_pagadores=0` por inscrição precoce — **não** é “zero arrecadado observado”. Gráficos e o join macro×Y (7E) recortam `mes >= 2016-01`. O parquet completo pode ainda guardar o spine longo para inspeção.
+
+```{python}
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import duckdb
+import plotly.express as px
+import polars as pl
+
+assert "DATA_ROOT" in globals() and "fonte_ok" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+
+# True = não varre DATA_INSCRICAO no DEBITO (pode passar de 1h). Novas mensais saem do painel.
+SKIP_NOVAS_DEBITO = True
+
+ARTIFACTS = EDA_ARTIFACTS
+ARTIFACTS.mkdir(exist_ok=True)
+DUCK_TMP = DATA_ROOT / "_duckdb_tmp_eda"
+DUCK_TMP.mkdir(exist_ok=True)
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+assert painel.is_file() and painel.stat().st_size > 0, painel
+
+t0 = time.perf_counter()
+
+
+def tick(msg: str) -> None:
+    print(f"[{time.perf_counter() - t0:.0f}s] {msg}", flush=True)
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+def qpath(p: Path) -> str:
+    return str(p).replace("'", "''")
+
+
+san_path = ARTIFACTS / "sanidade_painel_anual.parquet"
+est_path = ARTIFACTS / "estoque_anual_painel.parquet"
+serie_path = ARTIFACTS / "serie_mensal_icms.parquet"
+proxy_path = ARTIFACTS / "novas_proxy_anual_painel.parquet"
+ids_path = ARTIFACTS / "ids_icms_painel.parquet"
+
+if (
+    san_path.is_file()
+    and san_path.stat().st_size > 50
+    and {"ano", "n_rows", "n_unique", "estoque", "arrecadado"}
+    <= set(pl.read_parquet_schema(str(san_path)))
+):
+    tick("estoque anual reaproveitado da sanidade do painel")
+    anual = pl.read_parquet(san_path).select(
+        "ano",
+        "n_rows",
+        pl.col("n_unique").alias("n_id"),
+        "estoque",
+        "arrecadado",
+    )
+else:
+    tick("agregando estoque anual no painel…")
+    anual = collect_lf(
+        pl.scan_parquet(str(painel))
+        .group_by("ano")
+        .agg(
+            pl.len().alias("n_rows"),
+            pl.col("ID_DEBITO").n_unique().alias("n_id"),
+            pl.col("estoque_medio").sum().alias("estoque"),
+            pl.col("arrecadado").sum().alias("arrecadado"),
+        )
+        .sort("ano")
+    )
+anual.write_parquet(est_path)
+tick(f"gravou {est_path.name} anos={anual.height}")
+print(anual.tail(8))
+print("NOTA: sem estoque mensal de DEBITO. Y das macros = arrecadação mensal abaixo.")
+
+
+def duck():
+    con = duckdb.connect()
+    con.execute(f"SET temp_directory='{DUCK_TMP}'")
+    con.execute("SET max_temp_directory_size='80GiB'")
+    con.execute("SET memory_limit='1500MB'")
+    con.execute("SET threads=1")
+    con.execute("SET preserve_insertion_order=false")
+    con.execute(f"ATTACH '{qpath(DATA_ROOT / 'cemepi.duckdb')}' AS cem (READ_ONLY)")
+    return con
+
+
+BASE_Y = ["n_novas", "n_pagadores", "arrec_receita", "n_novas_debito"]
+
+
+def add_lags(serie: pl.DataFrame) -> pl.DataFrame:
+    serie = serie.sort("mes")
+    cols = [c for c in BASE_Y if c in serie.columns]
+    serie = serie.with_columns([pl.col(c).fill_null(0) for c in cols])
+    for c in cols:
+        for k in (1, 2, 3):
+            serie = serie.with_columns(pl.col(c).shift(k).alias(f"{c}_l{k}"))
+    return serie
+
+
+reuse = False
+if serie_path.is_file() and serie_path.stat().st_size > 100:
+    cols = set(pl.read_parquet_schema(str(serie_path)))
+    if "n_estoque" in cols:
+        legado_path = ARTIFACTS / "serie_mensal_icms_legado.parquet"
+        serie_path.rename(legado_path)
+        tick(f"série antiga com estoque mensal → {legado_path.name} (não é o Y rápido)")
+    elif {"mes", "n_novas", "n_pagadores", "arrec_receita"} <= cols:
+        reuse = True
+        tick(f"skip — {serie_path}")
+
+if reuse:
+    serie = pl.read_parquet(serie_path)
+else:
+    if not (ids_path.is_file() and ids_path.stat().st_size > 100):
+        tick("gravando IDs distintos do painel…")
+        collect_lf(
+            pl.scan_parquet(str(painel)).select("ID_DEBITO").unique(maintain_order=False)
+        ).write_parquet(ids_path)
+    else:
+        tick(f"skip ids — {ids_path.name}")
+
+    tick("arrecadação mensal (SEMI JOIN nos IDs do painel)…")
+    con = duck()
+    try:
+        pag = con.execute(
+            "SELECT "
+            "date_trunc('month', TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP))::DATE AS mes, "
+            "COUNT(DISTINCT a.ID_DEBITO) AS n_pagadores, "
+            "SUM(TRY_CAST(a.VALOR_RECEITA AS DOUBLE)) AS arrec_receita "
+            "FROM cem.ARRECADACAO a "
+            f"SEMI JOIN read_parquet('{qpath(ids_path)}') i ON a.ID_DEBITO = i.ID_DEBITO "
+            "WHERE TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP) IS NOT NULL "
+            "AND YEAR(TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP)) BETWEEN 2010 AND 2026 "
+            "GROUP BY 1 ORDER BY 1"
+        ).pl()
+    finally:
+        con.close()
+    pag = pag.with_columns(pl.col("mes").cast(pl.Date))
+    tick(f"meses com GARE: {pag.height}")
+
+    tick("novas/mês pela data_inscricao do painel…")
+    novas_m = collect_lf(
+        pl.scan_parquet(str(painel))
+        .group_by("ID_DEBITO")
+        .agg(pl.col("data_inscricao").min().alias("data_inscricao"))
+        .with_columns(pl.col("data_inscricao").cast(pl.Date))
+        .filter(pl.col("data_inscricao").is_not_null())
+        .filter(pl.col("data_inscricao").dt.year().is_between(2010, 2026))
+        .with_columns(pl.col("data_inscricao").dt.truncate("1mo").alias("mes"))
+        .group_by("mes")
+        .agg(pl.len().alias("n_novas"))
+        .with_columns(pl.col("mes").cast(pl.Date))
+        .sort("mes")
+    )
+    proxy = collect_lf(
+        pl.scan_parquet(str(painel))
+        .group_by("ID_DEBITO")
+        .agg(pl.col("ano").min().alias("ano_primeira"))
+        .group_by("ano_primeira")
+        .agg(pl.len().alias("n_novas_proxy_anual"))
+        .sort("ano_primeira")
+    )
+    proxy.write_parquet(proxy_path)
+    tick(f"gravou {proxy_path.name}")
+    if novas_m.height == 0:
+        print(
+            "NOTA: sem data_inscricao utilizável entre 2010 e 2026. "
+            "n_novas mensal fica vazio; o proxy anual (1º ano do id no painel) está gravado."
+        )
+    else:
+        print(
+            "NOTA: n_novas = mês de inscrição no painel (1 CDA). "
+            "Proxy anual separado = primeiro ano em que o id aparece no painel, não o mês."
+        )
+
+    novas_deb = None
+    if SKIP_NOVAS_DEBITO:
+        print(
+            "SKIP_NOVAS_DEBITO=True — não varro DATA_INSCRICAO no DEBITO. "
+            "Mude para False só se sobrar tempo (um scan da tabela, pode passar de 1h)."
+        )
+    else:
+        tick("novas/mês no DEBITO (ID + DATA_INSCRICAO, ICMS)…")
+        con = duck()
+        try:
+            novas_deb = con.execute(
+                "SELECT date_trunc('month', TRY_CAST(DATA_INSCRICAO AS TIMESTAMP))::DATE AS mes, "
+                "COUNT(DISTINCT ID_DEBITO) AS n_novas_debito "
+                "FROM cem.DEBITO "
+                "WHERE UPPER(CAST(TIPO_DEBITO AS VARCHAR)) LIKE '%ICMS%' "
+                "AND TRY_CAST(DATA_INSCRICAO AS TIMESTAMP) IS NOT NULL "
+                "AND YEAR(TRY_CAST(DATA_INSCRICAO AS TIMESTAMP)) BETWEEN 2010 AND 2026 "
+                "GROUP BY 1 ORDER BY 1"
+            ).pl()
+        except Exception as e:
+            print(f"FALLBACK: scan de novas no DEBITO falhou ({type(e).__name__}: {e}).")
+            print("NOTA: mensal permanece o do painel; proxy anual já está gravado.")
+            novas_deb = None
+        finally:
+            con.close()
+        if novas_deb is not None:
+            novas_deb = novas_deb.with_columns(pl.col("mes").cast(pl.Date))
+
+    serie = pag.join(novas_m, on="mes", how="full", coalesce=True)
+    if novas_deb is not None:
+        serie = serie.join(novas_deb, on="mes", how="full", coalesce=True)
+    serie = serie.filter(pl.col("mes").is_not_null()).with_columns(pl.col("mes").cast(pl.Date))
+    if serie.height:
+        spine = pl.DataFrame(
+            {"mes": pl.date_range(serie["mes"].min(), serie["mes"].max(), interval="1mo", eager=True)}
+        )
+        serie = spine.join(serie, on="mes", how="left")
+    serie = add_lags(serie)
+    serie.write_parquet(serie_path)
+    tick(f"gravou {serie_path} rows={serie.height}")
+
+if any(f"arrec_receita_l{k}" not in serie.columns for k in (1, 2, 3)):
+    serie = add_lags(serie)
+    serie.write_parquet(serie_path)
+    tick("lags 1–3 regravados")
+
+print(serie.tail(8))
+# GARE / pagadores só existem com fluxo a partir de 2016; spine 2010–15 zera arrec e distorce visual/corr.
+MES_GARE_INI = pl.date(2016, 1, 1)
+serie_plot = serie.filter(pl.col("mes") >= MES_GARE_INI)
+n_zero_pre = serie.filter((pl.col("mes") < MES_GARE_INI) & (pl.col("arrec_receita").fill_null(0) == 0)).height
+print(
+    f"NOTA spine: {n_zero_pre} meses pré-2016 com arrec_receita=0 (sem cobertura GARE). "
+    "Plots e 7E usam mes >= 2016-01; parquet completo permanece para inspeção."
+)
+pdf = serie_plot.to_pandas()
+y_line = [c for c in ("n_novas", "n_pagadores") if c in serie_plot.columns]
+figs = ARTIFACTS / "_pdf_figs"
+figs.mkdir(exist_ok=True)
+if y_line:
+    flow_pdf = pdf.rename(
+        columns={
+            "n_novas": "Novas (inscrição)",
+            "n_pagadores": "Pagadoras (GARE)",
+        }
+    )
+    y_line_plot = [
+        name for name in ("Novas (inscrição)", "Pagadoras (GARE)")
+        if name in flow_pdf.columns
+    ]
+    fig = px.line(
+        flow_pdf,
+        x="mes",
+        y=y_line_plot,
+        markers=True,
+        color_discrete_sequence=["#154C56", "#8A9A9B"],
+        labels={"mes": "Mês", "value": "CDAs", "variable": "Fluxo"},
+        title="Fluxos mensais de ICMS: novas e pagadoras (mes ≥ 2016-01)",
+    )
+    fig.update_layout(legend_title="Fluxo", hovermode="x unified", legend=dict(orientation="h", y=-0.22, x=0, font=dict(size=10)))
+    fig.update_xaxes(title="Mês", dtick="M3", tickformat="%b/%Y")
+    fig.update_yaxes(title="Número de CDAs", separatethousands=True)
+    fig.show()
+if "arrec_receita" in serie_plot.columns:
+    receita_pdf = pdf.rename(columns={"arrec_receita": "VALOR_RECEITA"})
+    fig2 = px.line(
+        receita_pdf,
+        x="mes",
+        y="VALOR_RECEITA",
+        markers=True,
+        color_discrete_sequence=["#154C56"],
+        labels={"mes": "Mês", "VALOR_RECEITA": "Arrecadação (R$)"},
+        title="Arrecadação mensal de ICMS (mes ≥ 2016-01; sem zeros espúrios 2010–15)",
+    )
+    fig2.update_traces(hovertemplate="Mês: %{x|%b/%Y}<br>Arrecadação: R$ %{y:,.2f}<extra></extra>")
+    fig2.update_xaxes(title="Mês", dtick="M3", tickformat="%b/%Y")
+    fig2.update_yaxes(title="Arrecadação (R$)", separatethousands=True)
+    fig2.show()
+    try:
+        fig2.write_image(str(figs / "extra_serie_mensal.png"), width=1000, height=560, scale=2)
+        print("PNG →", figs / "extra_serie_mensal.png")
+    except Exception as e:
+        print("PNG skip extra_serie_mensal:", e)
+```
+
+### 7C2 — Em que janela da vida da dívida o GARE ocorre?
+
+**Amostra, dita no gráfico:** GARE da `ARRECADACAO` com data válida, restrito às CDAs de ICMS que estão no painel e têm `data_inscricao`. Entram todos esses pagamentos. **Não** é um recorte de CDAs em aberto, **nem** de quem pagou só no ano do corte, **nem** de “só pagas”. Quem nunca teve GARE não contribui valor, mas entra no denominador da proporção por janela se a idade observada alcança o início da janela.
+
+Idade no pagamento = data do GARE − `data_inscricao` do **painel** (mapa `ID_DEBITO`, menor data), não um `GROUP BY` no `DEBITO`. Janelas: 0–3m, 3–12m, 1–3a, 3–5a, 5+.
+
+`pct_valor` reparte o `VALOR_RECEITA` **entre os GARE desse join**. O denominador é a soma desses pagamentos, não o estoque.
+
+A segunda figura é uma proporção de CDAs: IDs com pelo menos um GARE na janela, dividido pelos IDs cuja idade até o último ano do painel chega ao **início** da janela (abertas ou não). Não é Kaplan–Meier e **não é taxa de recuperação** (`arrecadado / estoque`). Dívida antiga, inscrita antes da cobertura do painel, entra no denominador das janelas curtas mesmo sem a gente ter visto o começo da vida dela — a proporção de 0–3m fica subestimada. Leia junto com `pct_valor`, que não depende desse denominador.
+
+```{python}
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import duckdb
+import plotly.express as px
+import polars as pl
+
+assert "DATA_ROOT" in globals() and "fonte_ok" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+
+ARTIFACTS = EDA_ARTIFACTS
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+assert painel.is_file(), painel
+DUCK_TMP = DATA_ROOT / "_duckdb_tmp_eda"
+DUCK_TMP.mkdir(exist_ok=True)
+out = ARTIFACTS / "gare_janela_vida_icms.csv"
+insc_path = ARTIFACTS / "inscricao_icms_painel.parquet"
+expo_path = ARTIFACTS / "exposicao_idade_icms.parquet"
+t0 = time.perf_counter()
+
+LIMITES = (
+    ("0-3m", 0.0),
+    ("3-12m", 0.25),
+    ("1-3a", 1.0),
+    ("3-5a", 3.0),
+    ("5a+", 5.0),
+)
+
+
+def tick(msg: str) -> None:
+    print(f"[{time.perf_counter() - t0:.0f}s] {msg}", flush=True)
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+def sink_or_collect(lf: pl.LazyFrame, path: Path) -> None:
+    try:
+        lf.sink_parquet(path)
+    except Exception as e:
+        if "stream" in str(e).lower() or "sink" in str(e).lower() or isinstance(e, TypeError):
+            collect_lf(lf).write_parquet(path)
+        else:
+            raise
+
+
+dist = None
+if out.is_file() and out.stat().st_size > 50:
+    dist = pl.read_csv(out)
+    if "hazard_id" not in dist.columns or "pct_valor" not in dist.columns:
+        print("csv antigo sem hazard — recalculando")
+        dist = None
+    else:
+        print(f"skip — {out}")
+
+if dist is None:
+    if not (insc_path.is_file() and insc_path.stat().st_size > 100):
+        tick("mapa de inscrição a partir do painel…")
+        sink_or_collect(
+            pl.scan_parquet(str(painel))
+            .group_by("ID_DEBITO")
+            .agg(pl.col("data_inscricao").min().alias("data_inscricao"))
+            .filter(pl.col("data_inscricao").is_not_null()),
+            insc_path,
+        )
+    else:
+        tick(f"skip mapa — {insc_path.name}")
+
+    if not (expo_path.is_file() and expo_path.stat().st_size > 100):
+        tick("idade máxima observada no painel…")
+        sink_or_collect(
+            pl.scan_parquet(str(painel))
+            .group_by("ID_DEBITO")
+            .agg(
+                pl.col("data_inscricao").min().alias("data_inscricao"),
+                pl.col("ano").max().alias("ano_fim"),
+            )
+            .filter(pl.col("data_inscricao").is_not_null())
+            .with_columns(
+                (
+                    (pl.date(pl.col("ano_fim"), 12, 1) - pl.col("data_inscricao").cast(pl.Date)).dt.total_days()
+                    / 365.25
+                ).alias("idade_max")
+            )
+            .select(["ID_DEBITO", "idade_max"]),
+            expo_path,
+        )
+    else:
+        tick(f"skip exposição — {expo_path.name}")
+
+    tick("GARE × inscrição (ARRECADACAO semi-join no mapa; spill no Meedi)…")
+    con = duckdb.connect()
+    try:
+        con.execute(f"SET temp_directory='{DUCK_TMP}'")
+        con.execute("SET max_temp_directory_size='80GiB'")
+        con.execute("SET memory_limit='1500MB'")
+        con.execute("SET threads=1")
+        con.execute("SET preserve_insertion_order=false")
+        con.execute(f"ATTACH '{DATA_ROOT / 'cemepi.duckdb'}' AS cem (READ_ONLY)")
+        insc_sql = str(insc_path).replace("'", "''")
+        dist = con.execute(
+            "WITH insc AS ( "
+            f"  SELECT ID_DEBITO, CAST(data_inscricao AS DATE) AS data_inscricao "
+            f"  FROM read_parquet('{insc_sql}') "
+            "), g AS ( "
+            "  SELECT a.ID_DEBITO, "
+            "         TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP) AS data_gare, "
+            "         TRY_CAST(a.VALOR_RECEITA AS DOUBLE) AS valor_receita "
+            "  FROM cem.ARRECADACAO a "
+            "  SEMI JOIN insc i ON a.ID_DEBITO = i.ID_DEBITO "
+            "  WHERE TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP) IS NOT NULL "
+            "), j AS ( "
+            "  SELECT g.ID_DEBITO, "
+            "         date_diff('day', i.data_inscricao, CAST(g.data_gare AS DATE)) / 365.25 AS idade_anos, "
+            "         g.valor_receita "
+            "  FROM g JOIN insc i USING (ID_DEBITO) "
+            "  WHERE g.valor_receita IS NOT NULL "
+            ") "
+            "SELECT CASE "
+            "         WHEN idade_anos < 0 THEN 'negativa/erro' "
+            "         WHEN idade_anos < 0.25 THEN '0-3m' "
+            "         WHEN idade_anos < 1 THEN '3-12m' "
+            "         WHEN idade_anos < 3 THEN '1-3a' "
+            "         WHEN idade_anos < 5 THEN '3-5a' "
+            "         ELSE '5a+' "
+            "       END AS janela, "
+            "       COUNT(*) AS n_linhas_gare, "
+            "       COUNT(DISTINCT ID_DEBITO) AS n_ids_com_gare, "
+            "       SUM(valor_receita) AS valor_receita "
+            "FROM j GROUP BY 1"
+        ).pl()
+    finally:
+        con.close()
+
+    tot_l = float(dist["n_linhas_gare"].sum() or 0)
+    tot_v = float(dist["valor_receita"].sum() or 0)
+    dist = dist.with_columns(
+        pl.when(tot_l > 0).then(pl.col("n_linhas_gare") / tot_l).otherwise(None).alias("pct_linhas"),
+        pl.when(tot_v > 0).then(pl.col("valor_receita") / tot_v).otherwise(None).alias("pct_valor"),
+    )
+    expo = pl.scan_parquet(str(expo_path))
+    expo_n = collect_lf(
+        expo.select(
+            [(pl.col("idade_max") >= lim).sum().alias(jan) for jan, lim in LIMITES]
+        )
+    )
+    den = {jan: int(expo_n[jan][0] or 0) for jan, _ in LIMITES}
+    dist = dist.with_columns(
+        pl.col("janela").replace_strict(den, default=None).alias("n_ids_expostos")
+    ).with_columns(
+        pl.when(pl.col("n_ids_expostos") > 0)
+        .then(pl.col("n_ids_com_gare") / pl.col("n_ids_expostos"))
+        .otherwise(None)
+        .alias("hazard_id")
+    )
+    dist.write_csv(out)
+    tick(f"gravou {out}")
+
+order = {"negativa/erro": 0, "0-3m": 1, "3-12m": 2, "1-3a": 3, "3-5a": 4, "5a+": 5}
+dist = (
+    dist.with_columns(pl.col("janela").replace_strict(order, default=99).alias("_o"))
+    .sort("_o")
+    .drop("_o")
+)
+print(dist)
+print(
+    "NOTA hazard_id: den = IDs cuja idade observada alcança o início da janela "
+    "(dívida antiga left-censored entra no den. das janelas curtas). "
+    "NÃO é taxa de recuperação. PNG do relatório = pct_valor (não n_linhas_gare)."
+)
+figs = ARTIFACTS / "_pdf_figs"
+figs.mkdir(exist_ok=True)
+cat_order = ["0-3m", "3-12m", "1-3a", "3-5a", "5a+"]
+valor_plot = dist.filter(pl.col("janela").is_in(cat_order))
+fig = px.bar(
+    valor_plot.to_pandas(),
+    x="janela",
+    y="pct_valor",
+    color_discrete_sequence=["#154C56"],
+    category_orders={"janela": cat_order},
+    labels={"janela": "Idade no pagamento", "pct_valor": "Participação do valor GARE"},
+    title="Valor do GARE de ICMS por idade da dívida (pct_valor)",
+)
+fig.update_traces(hovertemplate="Janela: %{x}<br>Valor GARE: %{y:.1%} do total<extra></extra>")
+ymax_v = float(valor_plot["pct_valor"].max() or 0)
+fig.update_yaxes(
+    title="Participação do valor arrecadado",
+    tickformat=".0%",
+    range=[0, max(0.2, ymax_v * 1.25)],
+)
+fig.show()
+try:
+    fig.write_image(str(figs / "extra_gare_janelas.png"), width=1000, height=560, scale=2)
+    print("PNG →", figs / "extra_gare_janelas.png", "(pct_valor)")
+except Exception as e:
+    print("PNG skip extra_gare_janelas:", e)
+if "hazard_id" in dist.columns:
+    hazard_plot = dist.filter(pl.col("janela").is_in(cat_order))
+    fig2 = px.bar(
+        hazard_plot.to_pandas(),
+        x="janela",
+        y="hazard_id",
+        color_discrete_sequence=["#7C9A9E"],
+        category_orders={"janela": cat_order},
+        labels={"janela": "Janela de idade", "hazard_id": "Proporção de CDAs com GARE"},
+        title="CDAs com GARE por janela de idade (hazard_id; não é taxa de recuperação)",
+    )
+    fig2.update_traces(
+        hovertemplate="Janela: %{x}<br>Proporção de CDAs com GARE: %{y:.1%}<extra></extra>"
+    )
+    ymax_h = float(hazard_plot["hazard_id"].max() or 0)
+    fig2.update_yaxes(
+        title="Proporção de CDAs com GARE",
+        tickformat=".0%",
+        range=[0, max(0.1, ymax_h * 1.35)],
+    )
+    fig2.show()
+```
+
+### Como ler as janelas de GARE
+
+Os dois gráficos usam o mesmo join: **painel de ICMS × GARE** (`ARRECADACAO`), CDAs com data de inscrição. A amostra não está restrita a CDAs em aberto, nem a quem pagou no ano do corte. Quem nunca teve GARE fica fora de `pct_valor` (não há valor a repartir) e dentro do denominador da proporção, se a idade observada alcança a janela.
+
+`pct_valor` diz onde está o dinheiro arrecadado nesse join: cedo (0–12 meses) ou em dívida velha (5a+). Isso não é efeito causal de política de cobrança.
+
+A segunda barra é uma **proporção de CDAs com GARE**, não uma taxa de recuperação. É discreta por janela, com o viés das janelas curtas citado acima (dívida inscrita antes da cobertura entra no denominador sem o começo da vida observado). Se `pct_valor` e essa proporção contarem histórias diferentes, descreva as duas; não escolha a que fecha melhor.
+
+### 7D — Idade da CDA × recuperação / estoque
+
+Idade em 31/12 do ano da linha. Correlações Pearson/Spearman no micro; o gráfico usa **taxa de recuperação da carteira por faixa** (Σarrec/Σestoque). A mediana das razões CDA fica ~0 e não entra no plot.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import plotly.express as px
+import polars as pl
+
+ARTIFACTS = EDA_ARTIFACTS
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+assert painel.is_file(), painel
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+idade = (
+    (pl.date(pl.col("ano"), 12, 1) - pl.col("data_inscricao").cast(pl.Date)).dt.total_days()
+    / 365.25
+)
+base = (
+    pl.scan_parquet(str(painel))
+    .with_columns(idade.alias("idade"))
+    .filter(pl.col("data_inscricao").is_not_null() & pl.col("idade").is_between(0, 40))
+    .filter(pl.col("taxa").is_not_null() & pl.col("estoque_medio").is_not_null())
+)
+pear = collect_lf(
+    base.select(
+        pl.len().alias("n"),
+        pl.corr("idade", "taxa").alias("pearson_idade_taxa"),
+        pl.corr("idade", "estoque_medio").alias("pearson_idade_estoque"),
+        pl.corr("idade", "arrecadado").alias("pearson_idade_arrecadado"),
+    )
+)
+print(pear)
+pear.write_csv(ARTIFACTS / "corr_idade_pearson.csv")
+
+sample = collect_lf(
+    base.filter((pl.col("ID_DEBITO").hash(seed=0) % 20) == 0).select(
+        ["idade", "taxa", "estoque_medio", "arrecadado"]
+    )
+)
+print(f"amostra Spearman n={sample.height}")
+
+
+def _spear(df: pl.DataFrame, a: str, b: str):
+    sub = df.select([a, b]).drop_nulls()
+    if sub.height < 100:
+        return None
+    val = sub.select(pl.corr(pl.col(a).rank(), pl.col(b).rank())).item()
+    return None if val is None else float(val)
+
+
+spear = pl.DataFrame(
+    {
+        "n_amostra": [sample.height],
+        "spearman_idade_taxa": [_spear(sample, "idade", "taxa")],
+        "spearman_idade_estoque": [_spear(sample, "idade", "estoque_medio")],
+        "spearman_idade_arrecadado": [_spear(sample, "idade", "arrecadado")],
+    }
+)
+print(spear)
+spear.write_csv(ARTIFACTS / "corr_idade_spearman.csv")
+
+# Recuperação por faixa = carteira (Σarrec/Σestoque). Mediana micro ≈ 0 — não plotar.
+bins = collect_lf(
+    base.with_columns(
+        pl.when(pl.col("idade") < 1)
+        .then(pl.lit("0-1a"))
+        .when(pl.col("idade") < 3)
+        .then(pl.lit("1-3a"))
+        .when(pl.col("idade") < 5)
+        .then(pl.lit("3-5a"))
+        .otherwise(pl.lit("5-40a"))
+        .alias("faixa")
+    )
+    .group_by("faixa")
+    .agg(
+        pl.col("arrecadado").sum().alias("arrec"),
+        pl.col("estoque_medio").sum().alias("estoque"),
+        pl.len().alias("n"),
+    )
+    .with_columns(
+        pl.when(pl.col("estoque") > 0)
+        .then(pl.col("arrec") / pl.col("estoque"))
+        .otherwise(None)
+        .alias("taxa_carteira")
+    )
+)
+order = {"0-1a": 0, "1-3a": 1, "3-5a": 2, "5-40a": 3}
+bins = bins.with_columns(pl.col("faixa").replace_strict(order, default=99).alias("_o")).sort("_o")
+bins = bins.with_columns((pl.col("taxa_carteira") * 100).alias("pct"))
+print(bins.select(["faixa", "taxa_carteira", "pct", "n"]))
+
+fig = px.bar(
+    bins.to_pandas(),
+    x="faixa",
+    y="pct",
+    color_discrete_sequence=["#154C56"],
+    category_orders={"faixa": ["0-1a", "1-3a", "3-5a", "5-40a"]},
+    labels={"faixa": "Idade da CDA", "pct": "% recuperado (carteira)"},
+    title="Taxa de recuperação da carteira por idade da CDA",
+)
+fig.update_traces(hovertemplate="%{x}<br>%{y:.2f}% do estoque<extra></extra>")
+fig.update_layout(margin=dict(t=60, b=40), showlegend=False)
+ymax = float(bins["pct"].max() or 0)
+fig.update_yaxes(title="% do estoque recuperado", range=[0, max(0.5, ymax * 1.25)], ticksuffix="%")
+fig.show()
+```
+
+### 7E — Macros
+
+`MACRO` em `macro.duckdb`, média no mês (Selic e PTAX vêm diários). Códigos: Selic 432, IPCA 433, IGP-M 189, PIB 4380, desocupação 24369, ocupados 24379, PTAX 1, crédito PJ 20540, endividamento 29037, comprometimento 29034, IPCA-15 7478.
+
+Join no mês com o Y da 7C (`arrec_receita`, `n_pagadores`, `n_novas`). Para cada par: nível, diferença mensal, e o Y defasado 1, 2 e 3 meses. A checagem anual usa a média do ano e o dezembro da macro contra os agregados do painel (uma linha por CDA×ano — estoque somado não duplica ID dentro do ano).
+
+Painel micro de **taxa de recuperação por CDA × ano** (zeros = sem GARE) e correlações all/pagadoras/carteira × macros: ver **7F**.
+
+Os quatro heatmaps mensais leem outra defasagem: para cada k = 0, 1, 2 e 3, Pearson entre o fluxo no mês t (`arrec_receita`, `n_pagadores`, `n_novas`, se existirem) e a macro em t−k. A macro antecipa o Y. A série mensal **não tem taxa de recuperação média**; esse Y está só no bloco anual da 7F, em outros quatro heatmaps, com a mesma convenção, a partir de `taxa_recuperacao_anual_agg`.
+
+**Recorte:** o join mensal macro×Y usa `mes >= 2016-01` (GARE coberto; evita zeros do spine 2010–15).
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import duckdb
+import numpy as np
+import plotly.express as px
+import polars as pl
+
+assert "DATA_ROOT" in globals() and "fonte_ok" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+ARTIFACTS = EDA_ARTIFACTS
+serie_path = ARTIFACTS / "serie_mensal_icms.parquet"
+assert serie_path.is_file(), "Rode a 7C antes (serie_mensal_icms.parquet)."
+
+CODES = {
+    1: "ptax",
+    189: "igpm",
+    432: "selic",
+    433: "ipca",
+    4380: "pib_mensal",
+    7478: "ipca15",
+    20540: "credito_pj",
+    24369: "desocupacao",
+    24379: "ocupados",
+    29034: "comprometimento",
+    29037: "endividamento",
+}
+
+DUCK_TMP = DATA_ROOT / "_duckdb_tmp_eda"
+DUCK_TMP.mkdir(exist_ok=True)
+con = duckdb.connect()
+try:
+    con.execute(f"SET temp_directory='{DUCK_TMP}'")
+    con.execute("SET max_temp_directory_size='80GiB'")
+    con.execute("SET memory_limit='1500MB'")
+    con.execute("SET threads=1")
+    con.execute("SET preserve_insertion_order=false")
+    con.execute(f"ATTACH '{DATA_ROOT / 'macro.duckdb'}' AS mac (READ_ONLY)")
+    macro_m = con.execute(
+        "SELECT date_trunc('month', data)::DATE AS mes, codigo_serie, AVG(valor) AS valor "
+        "FROM mac.MACRO "
+        f"WHERE codigo_serie IN ({','.join(str(k) for k in CODES)}) "
+        "GROUP BY 1, 2"
+    ).pl()
+finally:
+    con.close()
+
+wide = macro_m.pivot(index="mes", on="codigo_serie", values="valor")
+rename = {}
+for k, v in CODES.items():
+    if k in wide.columns:
+        rename[k] = v
+    elif str(k) in wide.columns:
+        rename[str(k)] = v
+wide = wide.rename(rename).with_columns(pl.col("mes").cast(pl.Date)).sort("mes")
+wide.write_parquet(ARTIFACTS / "macro_mensal_wide.parquet")
+print("macros:", [c for c in wide.columns if c != "mes"], "meses", wide.height)
+
+y = pl.read_parquet(serie_path).with_columns(pl.col("mes").cast(pl.Date)).sort("mes")
+ys = [c for c in ("arrec_receita", "n_pagadores", "n_novas", "n_novas_debito") if c in y.columns]
+for c in ys:
+    for k in (1, 2, 3):
+        if f"{c}_l{k}" not in y.columns:
+            y = y.with_columns(pl.col(c).shift(k).alias(f"{c}_l{k}"))
+
+xs = [c for c in CODES.values() if c in wide.columns]
+# Lag da macro no calendário, antes do join: macro_{t-k} alinhada ao mês t
+# mesmo se o Y tiver buraco. k=0 permanece o nível contemporâneo.
+wide_l = wide.sort("mes")
+for k in (1, 2, 3):
+    lagged = wide.select(
+        pl.col("mes").dt.offset_by(f"{k}mo").alias("mes"),
+        *[pl.col(c).alias(f"{c}_l{k}") for c in xs],
+    )
+    wide_l = wide_l.join(lagged, on="mes", how="left")
+j = y.join(wide_l, on="mes", how="inner").sort("mes")
+# Evita zeros espúrios 2010–2015 (sem cobertura GARE) nas corrs/heatmaps mensais.
+j = j.filter(pl.col("mes") >= pl.date(2016, 1, 1))
+print(f"filtro mes>=2016-01 → {j.height} meses no join macro×Y")
+for c in ys + xs:
+    if c in j.columns:
+        j = j.with_columns(pl.col(c).diff().alias(f"d_{c}"))
+print(f"meses no join macro×Y: {j.height}")
+
+y_terms = []
+for c in ys:
+    y_terms.append(c)
+    y_terms.extend(f"{c}_l{k}" for k in (1, 2, 3))
+    y_terms.append(f"d_{c}")
+x_terms = xs + [f"d_{x}" for x in xs]
+
+rows = []
+for yc in y_terms:
+    if yc not in j.columns:
+        continue
+    for xc in x_terms:
+        if xc not in j.columns:
+            continue
+        sub = j.select([yc, xc]).drop_nulls()
+        if sub.height < 24:
+            continue
+        a = sub[yc].to_numpy()
+        b = sub[xc].to_numpy()
+        if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+            continue
+        pr = float(np.corrcoef(a, b)[0, 1])
+        sr = float(np.corrcoef(sub[yc].rank().to_numpy(), sub[xc].rank().to_numpy())[0, 1])
+        rows.append({"y": yc, "x": xc, "pearson": pr, "spearman": sr, "n": sub.height})
+
+corr = pl.DataFrame(rows)
+if corr.height:
+    corr = corr.with_columns(pl.col("pearson").abs().alias("abs_p")).sort("abs_p", descending=True)
+corr.write_csv(ARTIFACTS / "corr_macro_mensal.csv")
+print("maiores |Pearson| (nível, Δ e lags do Y):")
+print(corr.head(25))
+
+print(
+    "NOTA mensal: heatmaps Pearson(Y_t, macro_{t-k}), k=0..3, com mes>=2016-01 "
+    "(exclui spine 2010–15 com arrec=0). "
+    "Y = fluxos (arrecadação, n_pagadores, n_novas). "
+    "Não há taxa de recuperação mensal; Y anual de carteira está na 7F."
+)
+y_flow = [
+    ("arrec_receita", "arrecadação (VALOR_RECEITA)"),
+    ("n_pagadores", "n_pagadores"),
+    ("n_novas", "n_novas"),
+    ("n_novas_debito", "n_novas (DEBITO)"),
+]
+y_flow = [(c, lab) for c, lab in y_flow if c in j.columns]
+x_flow = [c for c in xs if c in j.columns]
+
+
+def _pearson_mat(frame: pl.DataFrame, y_map, x_base, k: int, min_n: int) -> pl.DataFrame:
+    xcols = x_base if k == 0 else [f"{c}_l{k}" for c in x_base]
+    data = {"y": [lab for _, lab in y_map]}
+    for name, xc in zip(x_base, xcols):
+        col = []
+        for yc, _lab in y_map:
+            if xc not in frame.columns:
+                col.append(None)
+                continue
+            sub = frame.select([yc, xc]).drop_nulls()
+            if sub.height < min_n:
+                col.append(None)
+                continue
+            a = sub[yc].to_numpy()
+            b = sub[xc].to_numpy()
+            if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+                col.append(None)
+                continue
+            col.append(float(np.corrcoef(a, b)[0, 1]))
+        data[name] = col
+    return pl.DataFrame(data).with_columns([pl.col(c).cast(pl.Float64) for c in x_base])
+
+
+if y_flow and x_flow:
+    for k in (0, 1, 2, 3):
+        mat = _pearson_mat(j, y_flow, x_flow, k, min_n=24)
+        fig = px.imshow(
+            mat.to_pandas().set_index("y"),
+            aspect="auto",
+            text_auto=".2f",
+            title=f"Lag {k} do macro — correlação com fluxos mensais",
+            color_continuous_scale="RdBu_r",
+            zmin=-1,
+            zmax=1,
+            labels={"x": "Macro em t−k", "y": "Y no mês t", "color": "Pearson"},
+        )
+        fig.update_coloraxes(colorbar_title="Pearson")
+        fig.show()
+        fig.write_html(str(ARTIFACTS / f"fig_corr_macro_lag{k}_mensal.html"))
+        try:
+            figs = ARTIFACTS / "_pdf_figs"
+            figs.mkdir(exist_ok=True)
+            fig.write_image(str(figs / f"fig_corr_macro_lag{k}_mensal.png"), width=1000, height=560, scale=2)
+        except Exception as e:
+            print(f"PNG skip lag{k} mensal:", e)
+else:
+    print("Heatmaps mensais omitidos: faltam Y de fluxo ou macros no join.")
+
+top4 = corr.head(4) if corr.height else corr
+for r in top4.iter_rows(named=True):
+    sub = j.select(["mes", r["y"], r["x"]]).drop_nulls()
+    if sub.height == 0:
+        continue
+    fig = px.scatter(
+        sub.to_pandas(),
+        x=r["x"],
+        y=r["y"],
+        hover_data={"mes": "|%b/%Y"},
+        color_discrete_sequence=["#154C56"],
+        labels={r["x"]: r["x"], r["y"]: r["y"], "mes": "Mês"},
+        title=f"{r['y']} × {r['x']} (Pearson {r['pearson']:.2f})",
+    )
+    fig.update_layout(showlegend=False)
+    fig.show()
+
+j.write_parquet(ARTIFACTS / "serie_mensal_icms_com_macro.parquet")
+```
+
+### Como ler macro × dívida
+
+Correlação não é efeito. Série em nível mistura tendência comum (preço, escala da carteira, PIB nominal). O que importa para a conversa é se o sinal **continua no Δ** e se o Y defasado (a própria arrecadação atrasada) não come a associação.
+
+Leitura possível, ainda descritiva: Selic ou desocupação mais altas junto com arrecadação menor é compatível com crédito caro e pior capacidade de pagar — não identifica a Selic como causa. IPCA ou IGP-M junto com estoque maior pode ser correção monetária do crédito, não “mais sonegação”. PTAX e crédito PJ entram como contexto de custo e de folga financeira da firma, não como alavanca.
+
+Mensal e anual não precisam concordar. Frequência diferente, composição diferente. Se discordarem, registre a discordância.
+
+No heatmap mensal, k é a defasagem da **macro**: Y no mês t contra a macro em t−k. k = 0 é o contemporâneo. Um sinal que aparece em k > 0 e enfraquece em k = 0 é compatível com a macro liderando o fluxo — continua sendo associação. A tabela longa deste trecho ainda traz o Y defasado e a diferença mensal; essa convenção não é a dos heatmaps. A taxa de recuperação média não entra aqui porque a série mensal não a tem.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import polars as pl
+
+ARTIFACTS = EDA_ARTIFACTS
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+macro_w = ARTIFACTS / "macro_mensal_wide.parquet"
+san_path = ARTIFACTS / "sanidade_painel_anual.parquet"
+assert painel.is_file() and macro_w.is_file()
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+need = {"ano", "taxa_media", "estoque", "arrecadado", "n_rows", "n_unique"}
+if san_path.is_file() and need <= set(pl.read_parquet_schema(str(san_path))):
+    print("agregado anual reaproveitado de sanidade_painel_anual.parquet")
+    agg = pl.read_parquet(san_path).select(
+        "ano",
+        "taxa_media",
+        pl.col("estoque").alias("estoque_sum"),
+        pl.col("arrecadado").alias("arrec_sum"),
+        pl.col("n_rows").alias("n_linhas"),
+        pl.col("n_unique").alias("n_id"),
+    )
+else:
+    print("sanidade anual sem taxa_media — agregando o painel de novo")
+    agg = collect_lf(
+        pl.scan_parquet(str(painel))
+        .group_by("ano")
+        .agg(
+            pl.col("taxa").mean().alias("taxa_media"),
+            pl.col("estoque_medio").sum().alias("estoque_sum"),
+            pl.col("arrecadado").sum().alias("arrec_sum"),
+            pl.len().alias("n_linhas"),
+            pl.col("ID_DEBITO").n_unique().alias("n_id"),
+        )
+        .sort("ano")
+    )
+
+mw = pl.read_parquet(macro_w).with_columns(pl.col("mes").cast(pl.Date))
+mw = mw.with_columns(pl.col("mes").dt.year().alias("ano"))
+xs = [c for c in mw.columns if c not in ("mes", "ano")]
+media = mw.group_by("ano").agg([pl.col(c).mean().alias(c) for c in xs])
+dez = (
+    mw.filter(pl.col("mes").dt.month() == 12)
+    .select(["ano"] + xs)
+    .rename({c: f"{c}__dez" for c in xs})
+)
+# Stakeholder Y: taxa_carteira = Σarrec/Σestoque (não confundir com taxa_media = mean micro).
+if "taxa_carteira" not in agg.columns:
+    agg = agg.with_columns(
+        pl.when(pl.col("estoque_sum") > 0)
+        .then(pl.col("arrec_sum") / pl.col("estoque_sum"))
+        .otherwise(None)
+        .alias("taxa_carteira")
+    )
+print("Y anuais: taxa_carteira (stakeholder) + taxa_media (diagnóstico mean-of-ratios)")
+ann = agg.join(media, on="ano", how="inner").join(dez, on="ano", how="left").sort("ano")
+print(f"anos no join: {ann.height}")
+
+
+def _corr_block(frame: pl.DataFrame, spec: str, xcols: list[str]) -> list[dict]:
+    out = []
+    for yc in ("taxa_carteira", "taxa_media", "estoque_sum", "arrec_sum", "n_id"):
+        if yc not in frame.columns:
+            continue
+        for xc in xcols:
+            if xc not in frame.columns:
+                continue
+            sub = frame.select([yc, xc]).drop_nulls()
+            if sub.height < 6:
+                continue
+            a = sub[yc].to_numpy()
+            b = sub[xc].to_numpy()
+            if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+                continue
+            out.append(
+                {
+                    "y": yc,
+                    "x": xc.removesuffix("__dez"),
+                    "spec": spec,
+                    "pearson": float(np.corrcoef(a, b)[0, 1]),
+                    "n": sub.height,
+                }
+            )
+    return out
+
+
+rows = _corr_block(ann, "media_anual", xs) + _corr_block(ann, "dezembro", [f"{c}__dez" for c in xs])
+corr_a = pl.DataFrame(rows)
+if corr_a.height:
+    corr_a = corr_a.with_columns(pl.col("pearson").abs().alias("abs_p")).sort("abs_p", descending=True)
+corr_a.write_csv(ARTIFACTS / "corr_macro_anual_painel.csv")
+print(corr_a.head(20))
+
+print(
+    "NOTA: em corr_macro_anual_painel.csv, priorize y=taxa_carteira. "
+    "taxa_media = média das razões CDA (diagnóstico; não é recuperação da carteira)."
+)
+```
+
+### 7F — Painel de taxa de recuperação por CDA × ano
+
+O `painel_icms_completo.parquet` é o painel micro de recuperação: uma linha por `ID_DEBITO` × `ano`, com `taxa = arrecadado / estoque_medio`. Sem GARE naquele ano → `arrecadado = 0` → **`taxa = 0`** (a CDA não some da base).
+
+**Leitura principal para a carteira:** use a **taxa de recuperação da carteira** = Σ arrecadado / Σ estoque_medio. Ela pondera cada CDA pelo estoque e responde “quanto da carteira foi recuperado?”. No gráfico stakeholder (`fig_painel_taxa_media_ano`), essa é a **única** série — eixo automático.
+
+A média aritmética de `taxa` não é a recuperação da carteira. Cerca de 0,5% das linhas tem estoque residual minúsculo (aprox. R$ 1–4) e GARE alto, gerando razões de `10^4–10^5`; poucos outliers fazem a média simples passar de 100%. Em outras palavras, **média aritmética de razões ≠ recuperação da carteira**. Nesta base, Σ arrecadado / Σ estoque fica aproximadamente em 0,2–0,7% e é a medida adequada para a conversa com stakeholders.
+
+As métricas `taxa_media_all` e `taxa_media_pagadores` ficam no agregado/CSV só para diagnóstico; **não** entram no gráfico para a PGE.
+
+Unidade de análise = **CDA × ano** (não mês × CDA). O Y mensal da 7E continua sendo carteira (`n_pagadores`, `arrec_receita`). Aqui salvamos um parquet slim para Stata/depois e correlacionamos séries anuais agregadas × macros, inclusive com a taxa de recuperação da carteira no ano anterior e em anos anteriores.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import plotly.express as px
+import polars as pl
+
+ARTIFACTS = EDA_ARTIFACTS
+painel = ARTIFACTS / "painel_icms_completo.parquet"
+lags_path = ARTIFACTS / "painel_icms_com_lags.parquet"
+macro_w = ARTIFACTS / "macro_mensal_wide.parquet"
+slim_path = ARTIFACTS / "painel_taxa_recuperacao_cda_ano.parquet"
+agg_path = ARTIFACTS / "taxa_recuperacao_anual_agg.parquet"
+corr_path = ARTIFACTS / "corr_taxa_recuperacao_macro_anual.csv"
+
+assert painel.is_file(), "rode a etapa 4 (painel_icms_completo.parquet)"
+assert macro_w.is_file(), "rode a 7E antes (macro_mensal_wide.parquet)"
+
+NEED_SLIM = {
+    "ID_DEBITO",
+    "ano",
+    "estoque_medio",
+    "arrecadado",
+    "taxa",
+    "data_inscricao",
+    "idade_anos",
+    "flag_pagou",
+}
+
+
+def collect_lf(lf: pl.LazyFrame) -> pl.DataFrame:
+    try:
+        return lf.collect(engine="streaming")
+    except Exception as e:
+        if "stream" in str(e).lower() or "engine" in str(e).lower():
+            return lf.collect()
+        raise
+
+
+# --- A. Slim CDA × ano (streaming a partir do painel; sem scan DEBITO) ---
+skip_slim = False
+if slim_path.is_file() and slim_path.stat().st_size > 0:
+    try:
+        schema_names = set(pl.read_parquet_schema(str(slim_path)))
+    except Exception:
+        schema_names = set()
+    if NEED_SLIM <= schema_names:
+        skip_slim = True
+        print("SKIP slim — já existe com cols esperadas:", slim_path, f"({slim_path.stat().st_size/1e6:.0f} MB)")
+    else:
+        print("slim existe mas schema incompleto — regrava")
+
+if not skip_slim:
+    print("… gravando painel_taxa_recuperacao_cda_ano.parquet (scan Polars do painel) …")
+    # Preferir lags parquet se já tiver idade_anos (evita recalcular)
+    src = lags_path if lags_path.is_file() and lags_path.stat().st_size > 0 else painel
+    lf = pl.scan_parquet(str(src))
+    cols = lf.collect_schema().names()
+    if "idade_anos" not in cols:
+        lf = lf.with_columns(
+            pl.when(pl.col("data_inscricao").is_null())
+            .then(None)
+            .otherwise(pl.col("ano") - pl.col("data_inscricao").dt.year())
+            .alias("idade_anos")
+        )
+    lf = lf.with_columns((pl.col("arrecadado") > 0).alias("flag_pagou")).select(
+        "ID_DEBITO",
+        "ano",
+        "estoque_medio",
+        "arrecadado",
+        "taxa",
+        "data_inscricao",
+        "idade_anos",
+        "flag_pagou",
+    )
+    # sink_parquet streaming quando disponível; fallback collect+write
+    try:
+        lf.sink_parquet(str(slim_path))
+    except Exception as e:
+        print("sink_parquet indisponível/falhou (%s) — collect streaming + write" % type(e).__name__)
+        collect_lf(lf).write_parquet(str(slim_path))
+    print("slim →", slim_path, f"({slim_path.stat().st_size/1e6:.0f} MB)")
+
+# sanidade leve no slim
+n_linhas = collect_lf(pl.scan_parquet(str(slim_path)).select(pl.len())).item()
+share0 = collect_lf(pl.scan_parquet(str(slim_path)).select((pl.col("taxa") == 0).mean())).item()
+share_pag = collect_lf(pl.scan_parquet(str(slim_path)).select(pl.col("flag_pagou").mean())).item()
+print(f"slim linhas={n_linhas:,}  share taxa==0={share0:.3f}  share pagou={share_pag:.3f}")
+print("Nota: lags micro taxa_l1..l3 →", lags_path.name if lags_path.is_file() else "(rode etapa 5)")
+
+# --- B. Agregado anual: carteira (principal), mediana e métricas micro diagnósticas ---
+agg = collect_lf(
+    pl.scan_parquet(str(slim_path))
+    .group_by("ano")
+    .agg(
+        pl.col("taxa").mean().alias("taxa_media_all"),
+        pl.col("taxa").filter(pl.col("flag_pagou")).mean().alias("taxa_media_pagadores"),
+        pl.col("taxa").median().alias("taxa_mediana_all"),
+        pl.col("taxa").filter(pl.col("flag_pagou")).median().alias("taxa_mediana_pagadores"),
+        pl.col("arrecadado").sum().alias("arrec_sum"),
+        pl.col("estoque_medio").sum().alias("estoque_sum"),
+        pl.col("flag_pagou").sum().alias("n_pagadoras"),
+        pl.len().alias("n_cda"),
+    )
+    .with_columns(
+        pl.when(pl.col("estoque_sum") > 0)
+        .then(pl.col("arrec_sum") / pl.col("estoque_sum"))
+        .otherwise(None)
+        .alias("taxa_carteira"),
+        (pl.col("n_pagadoras") / pl.col("n_cda")).alias("share_pagadoras"),
+    )
+    .sort("ano")
+)
+# lags 1–3 nos Y anuais (como 7E)
+# A carteira é o Y principal. As médias simples ficam só para sensibilidade,
+# pois são médias das razões CDA e podem explodir com estoque residual.
+y_base = [
+    "taxa_carteira",
+    "taxa_mediana_all",
+    "taxa_mediana_pagadores",
+    "taxa_media_all",
+    "taxa_media_pagadores",
+    "share_pagadoras",
+    "arrec_sum",
+]
+for c in y_base:
+    for k in (1, 2, 3):
+        agg = agg.with_columns(pl.col(c).shift(k).alias(f"{c}_l{k}"))
+agg.write_parquet(agg_path)
+print("agg anual →", agg_path)
+print(agg.select(["ano"] + y_base[:5] + ["share_pagadoras", "n_cda", "n_pagadoras"]))
+
+# Mediana micro ≈ 0 em todo ano — não entra no gráfico (só print diagnóstico).
+print(
+    "Diagnóstico mediana das razões CDA (quase sempre 0; não usar como taxa de recuperação):"
+)
+print(agg.select(["ano", "taxa_mediana_all", "taxa_mediana_pagadores", "taxa_carteira"]))
+
+agg_plot = agg.with_columns((pl.col("taxa_carteira") * 100).alias("pct_carteira"))
+fig = px.line(
+    agg_plot.to_pandas(),
+    x="ano",
+    y="pct_carteira",
+    markers=True,
+    color_discrete_sequence=["#154C56"],
+    labels={"ano": "Ano", "pct_carteira": "Taxa de recuperação da carteira (%)"},
+    title=(
+        "Taxa de recuperação da carteira ICMS a cada ano"
+        "<br><sup>Σ arrecadado ÷ Σ estoque (mesma série que fig_painel_taxa_media_ano / extra_taxa_carteira). "
+        "Faixa típica ~0,2%–0,7%/ano — recuperação pequena frente ao estoque.</sup>"
+    ),
+)
+fig.update_traces(hovertemplate="Ano %{x}<br>%{y:.2f}%<extra></extra>", name="carteira")
+fig.update_layout(showlegend=False, margin=dict(t=60, b=40), hovermode="x")
+fig.update_xaxes(title="Ano", dtick=1)
+ymax = float(agg_plot["pct_carteira"].max() or 0)
+fig.update_yaxes(
+    title="Taxa de recuperação da carteira (%)",
+    range=[0, max(0.5, ymax * 1.3)],
+    ticksuffix="%",
+)
+fig.show()
+fig.write_html(str(ARTIFACTS / "fig_taxa_recuperacao_anual.html"))
+try:
+    figs = ARTIFACTS / "_pdf_figs"
+    figs.mkdir(exist_ok=True)
+    # Canonical stakeholder PNG. extra_taxa_carteira = cópia da mesma série (não é outra história).
+    fig.write_image(str(figs / "fig_taxa_recuperacao_anual.png"), width=1000, height=560, scale=2)
+    fig.write_image(str(figs / "extra_taxa_carteira.png"), width=1000, height=560, scale=2)
+    print("PNG → fig_taxa_recuperacao_anual (+ alias extra_taxa_carteira, mesma série)")
+except Exception as e:
+    print("PNG skip taxa_carteira:", e)
+
+# --- C. Correlações anuais × macros (média e dezembro), Y + lags 1–3 ---
+mw = pl.read_parquet(macro_w).with_columns(pl.col("mes").cast(pl.Date))
+mw = mw.with_columns(pl.col("mes").dt.year().alias("ano"))
+xs = [c for c in mw.columns if c not in ("mes", "ano")]
+media = mw.group_by("ano").agg([pl.col(c).mean().alias(c) for c in xs]).sort("ano")
+# macro_{t-k}: média anual da macro deslocada para o ano t (k=0 é o próprio ano).
+media_l = media
+for k in (1, 2, 3):
+    lagged = media.select(
+        (pl.col("ano") + k).alias("ano"),
+        *[pl.col(c).alias(f"{c}_l{k}") for c in xs],
+    )
+    media_l = media_l.join(lagged, on="ano", how="left")
+dez = (
+    mw.filter(pl.col("mes").dt.month() == 12)
+    .select(["ano"] + xs)
+    .rename({c: f"{c}__dez" for c in xs})
+)
+ann = agg.join(media_l, on="ano", how="inner").join(dez, on="ano", how="left").sort("ano")
+print(f"anos no join taxa×macro: {ann.height}")
+
+y_terms = []
+for c in y_base:
+    y_terms.append(c)
+    y_terms.extend(f"{c}_l{k}" for k in (1, 2, 3))
+
+
+def _corr_rows(frame: pl.DataFrame, ycols: list[str], xcols: list[str], spec: str) -> list[dict]:
+    out = []
+    for yc in ycols:
+        if yc not in frame.columns:
+            continue
+        for xc in xcols:
+            if xc not in frame.columns:
+                continue
+            sub = frame.select([yc, xc]).drop_nulls()
+            if sub.height < 6:
+                continue
+            a = sub[yc].to_numpy()
+            b = sub[xc].to_numpy()
+            if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+                continue
+            out.append(
+                {
+                    "y": yc,
+                    "x": xc.removesuffix("__dez"),
+                    "spec": spec,
+                    "pearson": float(np.corrcoef(a, b)[0, 1]),
+                    "n": sub.height,
+                }
+            )
+    return out
+
+
+rows = _corr_rows(ann, y_terms, xs, "media_anual") + _corr_rows(
+    ann, y_terms, [f"{c}__dez" for c in xs], "dezembro"
+)
+corr = pl.DataFrame(rows)
+if corr.height:
+    corr = corr.with_columns(pl.col("pearson").abs().alias("abs_p")).sort("abs_p", descending=True)
+corr.write_csv(corr_path)
+print("corr →", corr_path)
+print("top |Pearson| (carteira/mediana e métricas micro diagnósticas × macros, com lags do Y):")
+print(corr.head(25) if corr.height else corr)
+
+# Quatro heatmaps anuais: Y_t × macro_{t-k}. Para recuperação, o Y é
+# a taxa da carteira; a mediana é um diagnóstico complementar.
+print(
+    "NOTA anual: Pearson(Y_t, macro média de t−k), k=0..3. "
+    "Y de recuperação = taxa_carteira (Σ arrecadado / Σ estoque); "
+    "mediana das razões CDA é diagnóstico. Não é o lag do Y guardado no CSV acima."
+)
+y_ann = [
+    ("taxa_carteira", "taxa de recuperação (carteira)"),
+    ("arrec_sum", "arrecadação"),
+    ("estoque_sum", "estoque"),
+]
+y_ann = [(c, lab) for c, lab in y_ann if c in ann.columns]
+x_ann = [c for c in xs if c in ann.columns]
+
+
+def _pearson_mat_anual(frame: pl.DataFrame, y_map, x_base, k: int, min_n: int) -> pl.DataFrame:
+    xcols = x_base if k == 0 else [f"{c}_l{k}" for c in x_base]
+    data = {"y": [lab for _, lab in y_map]}
+    for name, xc in zip(x_base, xcols):
+        col = []
+        for yc, _lab in y_map:
+            if xc not in frame.columns:
+                col.append(None)
+                continue
+            sub = frame.select([yc, xc]).drop_nulls()
+            if sub.height < min_n:
+                col.append(None)
+                continue
+            a = sub[yc].to_numpy()
+            b = sub[xc].to_numpy()
+            if np.nanstd(a) == 0 or np.nanstd(b) == 0:
+                col.append(None)
+                continue
+            col.append(float(np.corrcoef(a, b)[0, 1]))
+        data[name] = col
+    return pl.DataFrame(data).with_columns([pl.col(c).cast(pl.Float64) for c in x_base])
+
+
+if y_ann and x_ann:
+    for k in (0, 1, 2, 3):
+        mat = _pearson_mat_anual(ann, y_ann, x_ann, k, min_n=6)
+        fig2 = px.imshow(
+            mat.to_pandas().set_index("y"),
+            aspect="auto",
+            text_auto=".2f",
+            title=(
+            "Macro no mesmo ano — correlação com o resultado anual"
+            if k == 0
+            else f"Macro de {k} ano(s) antes — correlação com o resultado anual"
+        ),
+            color_continuous_scale="RdBu_r",
+            zmin=-1,
+            zmax=1,
+            labels={"x": "Macro", "y": "Resultado no ano", "color": "Correlação linear"},
+        )
+        fig2.update_coloraxes(colorbar_title="Correlação linear")
+        fig2.show()
+        fig2.write_html(str(ARTIFACTS / f"fig_corr_macro_lag{k}_anual.html"))
+        try:
+            figs = ARTIFACTS / "_pdf_figs"
+            figs.mkdir(exist_ok=True)
+            fig2.write_image(str(figs / f"fig_corr_macro_lag{k}_anual.png"), width=1000, height=560, scale=2)
+        except Exception as e:
+            print(f"PNG skip lag{k} anual:", e)
+else:
+    print("Heatmaps anuais omitidos: faltam Y ou macros no join.")
+
+# Mensal: sem estoque_mensal → não dá taxa_carteira mensal; 7E já correlaciona n_pagadores / arrec
+estoque_m = ARTIFACTS / "estoque_mensal_debito_opcional.parquet"
+print(
+    "Mensal: taxa_carteira micro/mês NÃO construída (evita DEBITO). "
+    + (
+        f"estoque_mensal existe ({estoque_m.name}) — dá para derivar taxa_mes depois."
+        if estoque_m.is_file()
+        else "Use 7E: n_pagadores / arrec_receita × macros; taxa anual vem deste painel."
+    )
+)
+
+# --- D. Heatmap consolidado p/ relatório: carteira primeiro; micro rotulado como diagnóstico ---
+# Nível contemporâneo (média anual das macros), sem lags — visão única.
+y_heat = [
+    ("taxa_carteira", "taxa_carteira (stakeholder Σ/Σ)"),
+    ("share_pagadoras", "share_pagadoras"),
+    ("taxa_media_all", "taxa_media_all (diagnóstico — NÃO carteira)"),
+    ("taxa_media_pagadores", "taxa_media_pagadores (diagnóstico)"),
+]
+y_heat = [(c, lab) for c, lab in y_heat if c in ann.columns]
+if y_heat and x_ann:
+    mat_c = _pearson_mat_anual(ann, y_heat, x_ann, k=0, min_n=6)
+    fig_c = px.imshow(
+        mat_c.to_pandas().set_index("y"),
+        aspect="auto",
+        text_auto=".2f",
+        title=(
+            "Correlação anual de Pearson: recuperação × macros"
+            "<br><sup>Priorize taxa_carteira. Médias micro são diagnóstico (mean-of-ratios).</sup>"
+        ),
+        color_continuous_scale="RdBu_r",
+        zmin=-1,
+        zmax=1,
+        labels={"x": "Macro", "y": "Métrica de recuperação", "color": "Pearson"},
+    )
+    fig_c.update_coloraxes(colorbar_title="Pearson")
+    fig_c.show()
+    fig_c.write_html(str(ARTIFACTS / "fig_corr_taxa_recuperacao_macro.html"))
+    try:
+        figs = ARTIFACTS / "_pdf_figs"
+        figs.mkdir(exist_ok=True)
+        fig_c.write_image(str(figs / "fig_corr_taxa_recuperacao_macro.png"), width=1000, height=560, scale=2)
+        print("PNG → fig_corr_taxa_recuperacao_macro.png")
+    except Exception as e:
+        print("PNG skip consolidado:", e)
+else:
+    print("Heatmap consolidado omitido: faltam Y/macros.")
+
+print("DoD 7F:", "PASS" if slim_path.is_file() and corr_path.is_file() and n_linhas > 0 else "FAIL")
+```
+
+### Como ler a taxa de recuperação (painel CDA × ano)
+
+- **`taxa = 0`**: não houve GARE naquele ano para a CDA.
+- **Taxa de recuperação da carteira** = Σ arrecadado / Σ estoque no ano — é o número do gráfico (~décimos de %).
+- Média das razões CDA pode passar de 100% com estoque residual miúdo; **não** use isso como recuperação.
+- Mediana das razões CDA ≈ 0 (maioria sem pagamento) — só no print de diagnóstico, fora do gráfico stakeholder.
+
+### Síntese (preencher depois de rodar — caminho rápido)
+
+Texto descritivo. Sem recomendação de gestão e sem causalidade.
+
+1. Sanidade: `linhas_por_id` no painel = ?. Se ≈ 1, o estoque anual não duplica ID dentro do ano. Probe de um mês no `DEBITO`, se houve: `linhas_por_id_raw` = ? (extração repetida; não entra na soma).
+2. Estoque ICMS no último ano do painel e Pareto (fração de CDAs para 50/80/90% do valor) = ?.
+3. Aberto vs com GARE naquele ano (`arrecadado` > 0), e o que muda quando o critério é “já arrecadou em algum ano do painel”.
+4. Janela que concentra `pct_valor` do GARE = ?. `hazard_id` nas janelas curtas = ? — lembrar o viés de exposição das dívidas antigas.
+5. Idade × taxa: Pearson = ?, Spearman (amostra) = ?.
+6. Macros: maiores |Pearson| mensais em nível e quais sobrevivem no Δ e com Y lag 1–3 = ?. Média anual e dezembro concordam com o mensal? Onde discordam, deixar as duas leituras.
+7. **Taxa de recuperação (7F):** painel CDA×ano = `painel_taxa_recuperacao_cda_ano.parquet` (zeros = sem GARE). `taxa_carteira` no último ano = ?; mediana e médias das razões CDA ficam como diagnósticos (sensíveis a estoque residual). Maiores |Pearson| anuais carteira/mediana × macro (e se o lag do Y come o sinal) = ?.
+
+Modelos novos ficam fora desta etapa.
+
+### DoD — etapa 7 (caminho rápido)
+
+Obrigatório nesta corrida (meta ~1 h, sem varrer `DEBITO` mês a mês):
+
+- [ ] 7A: `sanidade_painel_anual.parquet` com `n_rows` ≈ `n_unique` por ano
+- [ ] 7A-probe: `sanidade_probe_raw_um_mes.parquet` **ou** a célula pulada de propósito (`RODAR_PROBE_RAW=False` / interrompida) — não trava o resto
+- [ ] 7B: `dominio_faixa_etaria.csv`, `dominio_aberto_pago.csv`, `dominio_inscricao_aberto_pago.csv`, `pareto_icms.csv`, `sazonalidade_inscricao_icms.csv`
+- [ ] 7C: `estoque_anual_painel.parquet`, `serie_mensal_icms.parquet` (Y = arrecadação, lags 1–3), `novas_proxy_anual_painel.parquet`. Scan de novas no `DEBITO` só se `SKIP_NOVAS_DEBITO=False`
+- [ ] 7C2: `gare_janela_vida_icms.csv` (janelas + `hazard_id`)
+- [ ] 7D: `corr_idade_pearson.csv`, `corr_idade_spearman.csv`
+- [ ] 7E: `corr_macro_mensal.csv`, `corr_macro_anual_painel.csv` (média e dezembro), síntese preenchida
+- [ ] 7F: `painel_taxa_recuperacao_cda_ano.parquet` (slim CDA×ano), `taxa_recuperacao_anual_agg.parquet`, `corr_taxa_recuperacao_macro_anual.csv` (all / pagadoras / carteira × macros, lags Y 1–3)
+
+Fora do DoD (flags nascem `False`; Pontal / overnight):
+
+- 7A-slow → `sanidade_estoque_mensal.parquet`
+- 7C-slow → `estoque_mensal_debito_opcional.parquet`
+
+## 7-slow — opcional, fora da hora
+
+As células abaixo **não** fazem parte do DoD. `RODAR_7A_SLOW` e `RODAR_7C_SLOW` nascem `False`: pode executar a célula, ela só avisa e sai. O scan mês a mês do `DEBITO` é para uma máquina folgada (Pontal), com `threads=1`, `memory_limit=1500MB`, temporários no Meedi, parts e skip-se-já-existe.
+
+Não ligue as duas na mesma noite sem necessidade: as duas releem `DEBITO` por ano-mês. A 7A-slow já traz contagem e estoque deduplicado; a 7C-slow só regrava a série de estoque noutro parquet.
+
+### 7A-slow — estoque mensal no DEBITO (rodar depois em Pontal)
+
+Mesma sanidade da versão antiga: para cada ano-mês de extração, `n_linhas` vs `n_id` e estoque depois de 1 linha por `ID_DEBITO`. Parts em `eda_completo_artifacts/_sanidade_parts/`. Não rode se ainda falta o caminho rápido.
+
+```{python}
+from __future__ import annotations
+
+# Opcional / Pontal. Deixe False se precisa do resto da etapa 7 em ~1 hora.
+RODAR_7A_SLOW = False
+
+print(
+    "NÃO RODE AGORA se precisa do resto da etapa 7 em cerca de 1 hora. "
+    "Isto varre DEBITO mês a mês (threads=1, memory_limit=1500MB, "
+    "max_temp=80GiB, parts com skip-if-exists). Deixe para Pontal. "
+    "Com RODAR_7A_SLOW=False a célula não consulta o DEBITO."
+)
+if not RODAR_7A_SLOW:
+    print("skip 7A-slow.")
+else:
+
+    import duckdb
+    import polars as pl
+    from pathlib import Path
+
+    assert "DATA_ROOT" in globals() and "fonte_ok" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+    ARTIFACTS = EDA_ARTIFACTS
+    ARTIFACTS.mkdir(exist_ok=True)
+    DUCK_TMP = DATA_ROOT / "_duckdb_tmp_eda"
+    DUCK_TMP.mkdir(exist_ok=True)
+
+    def duck():
+        con = duckdb.connect()
+        con.execute(f"SET temp_directory='{DUCK_TMP}'")
+        con.execute("SET max_temp_directory_size='80GiB'")
+        con.execute("SET memory_limit='1500MB'")
+        con.execute("SET threads=1")
+        con.execute("SET preserve_insertion_order=false")
+        con.execute(f"ATTACH '{DATA_ROOT / 'cemepi.duckdb'}' AS cem (READ_ONLY)")
+        return con
+
+    out_san = ARTIFACTS / "sanidade_estoque_mensal.parquet"
+    part_dir = ARTIFACTS / "_sanidade_parts"
+    part_dir.mkdir(exist_ok=True)
+
+    # grades fixas — evita DISTINCT no DEBITO inteiro (isso também estoura RAM)
+    meses = [(y, m) for y in range(2016, 2027) for m in range(1, 13)]
+
+    if out_san.is_file() and out_san.stat().st_size > 100:
+        print(f"skip — já existe {out_san}")
+        san = pl.read_parquet(out_san)
+    else:
+        parts: list[pl.DataFrame] = []
+        con = duck()
+        for i, (y, m) in enumerate(meses):
+            part = part_dir / f"san_{y}_{m:02d}.parquet"
+            if part.is_file() and part.stat().st_size > 50:
+                print(f"skip {y}-{m:02d}", flush=True)
+                parts.append(pl.read_parquet(part))
+                continue
+            print(f"7A {y}-{m:02d}…", flush=True)
+            try:
+                df = con.execute(f"""
+                  WITH base AS (
+                    SELECT
+                      ID_DEBITO,
+                      UPPER(CAST(TIPO_DEBITO AS VARCHAR)) AS tipo_u,
+                      TRY_CAST(VALOR_COM_VH AS DOUBLE) AS valor
+                    FROM cem.DEBITO
+                    WHERE ANO_EXTRACAO = {y} AND MES_EXTRACAO = {m}
+                  ),
+                  raw AS (
+                    SELECT
+                      COUNT(*) AS n_linhas,
+                      COUNT(DISTINCT ID_DEBITO) AS n_id,
+                      COUNT(*) FILTER (WHERE tipo_u LIKE '%ICMS%') AS n_linhas_icms,
+                      COUNT(DISTINCT ID_DEBITO) FILTER (WHERE tipo_u LIKE '%ICMS%') AS n_id_icms
+                    FROM base
+                  ),
+                  ded AS (
+                    SELECT ID_DEBITO,
+                           any_value(tipo_u) AS tipo_u,
+                           MAX(valor) AS valor
+                    FROM base
+                    GROUP BY ID_DEBITO
+                  ),
+                  stock AS (
+                    SELECT
+                      SUM(valor) FILTER (WHERE tipo_u LIKE '%ICMS%') AS estoque_icms_dedup,
+                      SUM(valor) AS estoque_total_dedup
+                    FROM ded
+                  )
+                  SELECT
+                    {y}::INTEGER AS ano_extracao,
+                    {m}::INTEGER AS mes_extracao,
+                    r.*, s.*
+                  FROM raw r CROSS JOIN stock s
+                """).pl()
+            except Exception as e:
+                # reconecta e tenta 1x (libera heap DuckDB)
+                print(f"  falhou {y}-{m:02d}: {e!r} — reconectando…", flush=True)
+                try:
+                    con.close()
+                except Exception:
+                    pass
+                con = duck()
+                df = con.execute(f"""
+                  WITH base AS (
+                    SELECT
+                      ID_DEBITO,
+                      UPPER(CAST(TIPO_DEBITO AS VARCHAR)) AS tipo_u,
+                      TRY_CAST(VALOR_COM_VH AS DOUBLE) AS valor
+                    FROM cem.DEBITO
+                    WHERE ANO_EXTRACAO = {y} AND MES_EXTRACAO = {m}
+                  ),
+                  raw AS (
+                    SELECT
+                      COUNT(*) AS n_linhas,
+                      COUNT(DISTINCT ID_DEBITO) AS n_id,
+                      COUNT(*) FILTER (WHERE tipo_u LIKE '%ICMS%') AS n_linhas_icms,
+                      COUNT(DISTINCT ID_DEBITO) FILTER (WHERE tipo_u LIKE '%ICMS%') AS n_id_icms
+                    FROM base
+                  ),
+                  ded AS (
+                    SELECT ID_DEBITO,
+                           any_value(tipo_u) AS tipo_u,
+                           MAX(valor) AS valor
+                    FROM base
+                    GROUP BY ID_DEBITO
+                  ),
+                  stock AS (
+                    SELECT
+                      SUM(valor) FILTER (WHERE tipo_u LIKE '%ICMS%') AS estoque_icms_dedup,
+                      SUM(valor) AS estoque_total_dedup
+                    FROM ded
+                  )
+                  SELECT
+                    {y}::INTEGER AS ano_extracao,
+                    {m}::INTEGER AS mes_extracao,
+                    r.*, s.*
+                  FROM raw r CROSS JOIN stock s
+                """).pl()
+            # mês vazio: ainda grava linha zero pra não reprocessar
+            if df.height == 0 or (df["n_linhas"][0] is None) or int(df["n_linhas"][0] or 0) == 0:
+                df = pl.DataFrame({
+                    "ano_extracao": [y],
+                    "mes_extracao": [m],
+                    "n_linhas": [0],
+                    "n_id": [0],
+                    "n_linhas_icms": [0],
+                    "n_id_icms": [0],
+                    "estoque_icms_dedup": [0.0],
+                    "estoque_total_dedup": [0.0],
+                })
+            df.write_parquet(part)
+            parts.append(df)
+            # reconecta a cada 6 meses pra soltar memória
+            if (i + 1) % 6 == 0:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+                con = duck()
+
+        try:
+            con.close()
+        except Exception:
+            pass
+        san = pl.concat(parts).sort(["ano_extracao", "mes_extracao"])
+        # tira meses sem dado real (n_linhas==0) do relatório final, mas parts ficam
+        san = san.filter(pl.col("n_linhas") > 0)
+        san.write_parquet(out_san)
+        print(f"gravou {out_san} rows={san.height}")
+
+    san = san.with_columns(
+        (pl.col("n_linhas") / pl.col("n_id")).alias("linhas_por_id"),
+        (pl.col("n_linhas_icms") / pl.col("n_id_icms")).alias("linhas_por_id_icms"),
+    )
+    print(san.tail(12))
+    print("média linhas/id (total):", float(san["linhas_por_id"].mean()))
+    print("média linhas/id (ICMS):", float(san["linhas_por_id_icms"].drop_nulls().mean()))
+```
+
+### 7C-slow — estoque mensal no DEBITO (rodar depois em Pontal)
+
+Série `n_estoque` / `estoque` por mês de extração, ICMS, 1 linha por `ID_DEBITO` dentro do mês. Grava `estoque_mensal_debito_opcional.parquet` e **não** mexe em `serie_mensal_icms.parquet` (esse é o Y rápido da arrecadação). Parts em `_estoque_mensal_parts/`.
+
+```{python}
+from __future__ import annotations
+
+from pathlib import Path
+
+import duckdb
+import polars as pl
+
+# Opcional / Pontal. Deixe False se precisa do resto da etapa 7 em ~1 hora.
+RODAR_7C_SLOW = False
+
+print(
+    "NÃO RODE AGORA se precisa do resto da etapa 7 em cerca de 1 hora. "
+    "Estoque mensal varrendo DEBITO mês a mês (threads=1, memory_limit=1500MB, "
+    "max_temp=80GiB, parts com skip-if-exists). Deixe para Pontal. "
+    "Com RODAR_7C_SLOW=False a célula não consulta o DEBITO. "
+    "O estoque do caminho rápido já está em estoque_anual_painel.parquet."
+)
+if not RODAR_7C_SLOW:
+    print("skip 7C-slow.")
+else:
+    assert "DATA_ROOT" in globals() and fonte_ok, "Rode a etapa 0 com o Meedi montado."
+    ARTIFACTS = EDA_ARTIFACTS
+    ARTIFACTS.mkdir(exist_ok=True)
+    DUCK_TMP = DATA_ROOT / "_duckdb_tmp_eda"
+    DUCK_TMP.mkdir(exist_ok=True)
+    out = ARTIFACTS / "estoque_mensal_debito_opcional.parquet"
+    part_dir = ARTIFACTS / "_estoque_mensal_parts"
+    part_dir.mkdir(exist_ok=True)
+
+    def duck():
+        con = duckdb.connect()
+        con.execute(f"SET temp_directory='{DUCK_TMP}'")
+        con.execute("SET max_temp_directory_size='80GiB'")
+        con.execute("SET memory_limit='1500MB'")
+        con.execute("SET threads=1")
+        con.execute("SET preserve_insertion_order=false")
+        con.execute(f"ATTACH '{DATA_ROOT / 'cemepi.duckdb'}' AS cem (READ_ONLY)")
+        return con
+
+    if out.is_file() and out.stat().st_size > 100:
+        print(f"skip — já existe {out}")
+        print(pl.read_parquet(out).tail(12))
+    else:
+        meses = [(y, m) for y in range(2016, 2027) for m in range(1, 13)]
+        parts = []
+        con = duck()
+        try:
+            for i, (y, m) in enumerate(meses):
+                part = part_dir / f"est_{y}_{m:02d}.parquet"
+                if part.is_file() and part.stat().st_size > 50:
+                    print(f"skip {y}-{m:02d}", flush=True)
+                    parts.append(pl.read_parquet(part))
+                    continue
+                print(f"7C-slow estoque {y}-{m:02d}", flush=True)
+                df = con.execute(
+                    "WITH d AS ( "
+                    "  SELECT ID_DEBITO, MAX(TRY_CAST(VALOR_COM_VH AS DOUBLE)) AS valor "
+                    "  FROM cem.DEBITO "
+                    f"  WHERE ANO_EXTRACAO = {y} AND MES_EXTRACAO = {m} "
+                    "    AND UPPER(CAST(TIPO_DEBITO AS VARCHAR)) LIKE '%ICMS%' "
+                    "  GROUP BY ID_DEBITO "
+                    ") "
+                    f"SELECT make_date({y}, {m}, 1) AS mes, "
+                    "COUNT(*) AS n_estoque, SUM(valor) AS estoque FROM d"
+                ).pl()
+                if df.height == 0:
+                    df = pl.DataFrame(
+                        {"mes": [f"{y}-{m:02d}-01"], "n_estoque": [0], "estoque": [0.0]}
+                    ).with_columns(pl.col("mes").str.to_date())
+                df.write_parquet(part)
+                parts.append(df)
+                if (i + 1) % 6 == 0:
+                    con.close()
+                    con = duck()
+        finally:
+            try:
+                con.close()
+            except Exception:
+                pass
+        est = pl.concat(parts, how="diagonal_relaxed").sort("mes")
+        est = est.filter(pl.col("n_estoque") > 0)
+        est.write_parquet(out)
+        print(f"gravou {out} rows={est.height}")
+        print(est.tail(12))
+```
+
