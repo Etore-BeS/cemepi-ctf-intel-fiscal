@@ -62,6 +62,28 @@ Atenção:
   O `freeze: auto` só olha a fonte, não os dados.
 - Suplementos de artigos (`lab/suplementos/`) usam `freeze: true`: nunca são reexecutados.
 
+## EDA do paper (`lab/paper_eda/`): uma página só
+
+`/paper_eda/` é **uma página só**, `lab/paper_eda/index.qmd`, com sumário lateral e quadro de novidades. Ela não
+executa código: é montada por `_pagina_unica.py` a partir do resultado já executado das 8 partes
+(`lab/_freeze/paper_eda/<parte>/`). As partes (`01_dados.qmd` … `08_parte_e.qmd`) continuam no repositório porque
+o freeze delas é a fonte da página única, mas **não são páginas do site**: ficam fora do `render:` de `_quarto.yml`
+(não use `"*.qmd"` lá: sem `/`, o padrão casa em subpastas e traz as partes de volta).
+
+Reexecutar uma parte (só quando a fonte dela mudar; o código roda e usa o cache do HD):
+
+```fish
+cd ~/Code/cemepi-lab
+uv run --no-sync python lab/paper_eda/_gerar_paginas.py        # regera as partes a partir do notebook (só leitura)
+uv run --no-sync quarto render lab/paper_eda/04_parte_b2.qmd   # executa a parte e atualiza lab/_freeze/paper_eda/04_parte_b2/
+uv run --no-sync python lab/paper_eda/_pagina_unica.py         # remonta lab/paper_eda/index.qmd (avisa se um freeze estiver velho)
+rm -f lab/_site/paper_eda/0*.html                              # o render solto da parte deixa um HTML que não é página do site
+uv run --no-sync quarto render lab                             # site inteiro, sem reexecutar nada
+uv run --no-sync python scripts/check_freeze.py --project lab
+```
+
+Ver localmente: `uv run --no-sync quarto preview lab --no-render` e abra `http://localhost:<porta>/paper_eda/`.
+
 ## Converter o `EDA_completo.ipynb` atual
 
 **Opção A — recomendada: virar `.qmd`.** Texto puro: diff legível, sem saídas no git, freeze estável.

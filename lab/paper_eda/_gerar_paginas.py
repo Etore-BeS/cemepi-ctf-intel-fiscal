@@ -597,7 +597,8 @@ if __name__ == "__main__":
     print("\n".join(LOG))
     for k, v in inv.items():
         print(k, {a: b for a, b in v.items() if a not in ("fig_labels", "tab_labels")}, len(v["fig_labels"]), "fig labels")
-    # Página única: junta o resultado já executado das partes (lab/_freeze/paper_eda/). Se uma parte mudou,
-    # renderize-a antes (quarto render lab/paper_eda/<parte>.qmd) e rode de novo; _pagina_unica.py avisa.
+    # Página única (lab/paper_eda/index.qmd): junta o resultado já executado das partes (lab/_freeze/paper_eda/).
+    # As partes não são páginas do site (ficam fora do render em _quarto.yml). Se uma parte mudou, renderize-a
+    # antes (quarto render lab/paper_eda/<parte>.qmd, ver lab/README.md) e rode de novo; _pagina_unica.py avisa.
     import subprocess
     subprocess.run([sys.executable, str(HERE / "_pagina_unica.py")], check=False)

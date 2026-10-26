@@ -5,7 +5,7 @@ date: 2026-10-23
 date-format: "DD/MM/YYYY"
 listing:
   id: entradas
-  contents: ["eda/*.{qmd,ipynb}", "dados/*.qmd"]
+  contents: ["eda/*.{qmd,ipynb}", "dados/*.qmd", "!eda/2026-10-23_eda_completo.ipynb"]  # o .ipynb é cópia local não versionada; a entrada é o .qmd
   type: table
   fields: [date, title, description]
   sort: "date desc"
@@ -18,8 +18,8 @@ listing:
 
 ## Entrada principal: o EDA do paper
 
-**[EDA do paper (paper_eda_v1) no laboratório](paper_eda/paper_eda.qmd)** — o EDA inteiro do artigo (0–1 e partes
-A a E) numa página só, com sumário lateral e, no topo, o [quadro de novidades](paper_eda/paper_eda.qmd#novidades) com
+**[EDA do paper (paper_eda_v1) no laboratório](paper_eda/index.qmd)** — o EDA inteiro do artigo (0–1 e partes
+A a E) numa página só, com sumário lateral e, no topo, o [quadro de novidades](paper_eda/index.qmd#novidades) com
 links para cada seção alterada: sem 2026, Selic over, estrelas de significância (p ≤ 0,10), B.8.5 em R$, concentração
 por tributo e devedor, emprego × estoque, figura 5.18, K-means k = 2/3/4, avisos de qualidade do DEBITO, CNPJ × sem
 CNPJ e só agregados. As entradas datadas abaixo detalham cada mudança.
@@ -37,7 +37,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
 ## O que mudou nesta versão
 
-- *(2026-10-26)* **[EDA do paper inteiro numa página](paper_eda/paper_eda.qmd):** `paper_eda_v1` numa página só, gerada do notebook sem rodá-lo, com sumário lateral, quadro de novidades e avisos “Novo no lab” / “Alterado no lab” em cada seção mudada (no lugar dos marcadores `[lab: ...]`). Corte em 2025, Selic over, estrelas de significância e qualidade do DEBITO sinalizada (inclui 2024-12 parcial e linhas repetidas em 2025-06/07). O K-means passa a mostrar perfis de k = 2, 3 e 4.
+- *(2026-10-26)* **[EDA do paper inteiro numa página](paper_eda/index.qmd):** `paper_eda_v1` numa página só, gerada do notebook sem rodá-lo, com sumário lateral, quadro de novidades e avisos “Novo no lab” / “Alterado no lab” em cada seção mudada (no lugar dos marcadores `[lab: ...]`). Corte em 2025, Selic over, estrelas de significância e qualidade do DEBITO sinalizada (inclui 2024-12 parcial e linhas repetidas em 2025-06/07). O K-means passa a mostrar perfis de k = 2, 3 e 4.
 - *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](dados/2026-10-26_cnpj_enrich.qmd):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
 - *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.
 - *(2026-10-23)* **K-means no top 1% das CDAs ICMS:** 100 inicializações por k, de k=2 a k=8, com cotovelo e silhueta; k=2 e k=4 comparados por estabilidade entre sementes, ARI, tamanhos e perfis agregados; a figura da seção 5.18 refeita.

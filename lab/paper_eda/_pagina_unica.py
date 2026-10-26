@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monta lab/paper_eda/paper_eda.qmd: o EDA do paper inteiro numa página só.
+"""Monta lab/paper_eda/index.qmd: o EDA do paper inteiro numa página só (é a página de /paper_eda/).
 
 Não executa código. Junta o markdown já executado das 8 páginas-parte (lab/_freeze/paper_eda/<parte>/),
 que _gerar_paginas.py gera e o Quarto renderiza uma vez cada (com cache em disco). Assim a página única não
@@ -26,7 +26,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 LAB = HERE.parent
 FREEZE = LAB / "_freeze" / "paper_eda"
-OUT = HERE / "paper_eda.qmd"
+OUT = HERE / "index.qmd"  # a página única É a entrada /paper_eda/; as 8 partes ficam fora do site (_quarto.yml)
 FIGS = HERE / "paper_eda_figs"
 PARTS = ["01_dados", "02_parte_a", "03_parte_b1", "04_parte_b2", "05_parte_b3", "06_parte_c", "07_parte_d", "08_parte_e"]
 BIG_FIG = 1_000_000  # bytes de HTML por figura acima dos quais ela vai para arquivo à parte
@@ -277,9 +277,12 @@ description: "Partes 0–1 e A a E do EDA do artigo, com corte em 2025, Selic ov
 date: 2026-10-26
 date-format: "DD/MM/YYYY"
 toc: true
-toc-depth: 3
+toc-depth: 4
+toc-expand: true
 toc-location: left
 toc-title: "Sumário"
+include-after-body:
+  - _toc_colapsavel.html   # sumário fixo na rolagem, com setinha para abrir/fechar cada tópico
 number-sections: false
 code-fold: true
 code-summary: "Código"
@@ -340,7 +343,8 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
 Gerada por `lab/paper_eda/_gerar_paginas.py` (código de cada parte, a partir de `paper_eda_v1.ipynb`, sem rodar nem
 alterar o notebook) e montada por `lab/paper_eda/_pagina_unica.py`, que junta o resultado já executado das 8 partes
 (`lab/_freeze/paper_eda/`). Comentários `# lab:` no código marcam o que foi trocado. Figuras muito pesadas abrem em
-arquivo à parte ({len(state['figs'])} figuras).
+arquivo à parte ({len(state['figs'])} figuras). Figuras e tabelas exportadas (só sob pedido, `LAB_EXPORT_FIGS=1`) vão
+para `interim/paper_eda_lab/` no HD, com os rótulos `fig_*`/`tab_*` do paper.
 :::
 """
 

@@ -1,0 +1,74 @@
+<!-- lab: sumário lateral da página única do EDA do paper (incluído só em paper_eda/index.qmd).
+     Fixo na tela com rolagem própria; cada tópico com subtópicos ganha uma setinha que abre/fecha por clique.
+     A seção atual (destaque do Quarto, a.active) abre sozinha os tópicos que a contêm, salvo os que você fechou à mão. -->
+<style>
+#quarto-sidebar, #quarto-sidebar-toc-left {
+  position: sticky !important;
+  top: calc(var(--lab-navbar-h, 3.5rem) + .5rem);
+  align-self: start;
+  max-height: calc(100vh - var(--lab-navbar-h, 3.5rem) - 1rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#TOC li.lab-has-sub { display: grid; grid-template-columns: 1.1em minmax(0, 1fr); align-items: start; }
+#TOC li.lab-has-sub > .lab-toc-toggle { grid-column: 1; }
+#TOC li.lab-has-sub > a { grid-column: 2; }
+#TOC li.lab-has-sub > ul { grid-column: 2; }
+#TOC li:not(.lab-has-sub) { margin-left: 1.1em; }
+#TOC .lab-toc-toggle {
+  border: 0; background: none; padding: 0; margin-top: .2em; cursor: pointer;
+  color: var(--bs-secondary-color, #6c757d); font-size: 1rem; line-height: 1; width: 1.1em; text-align: left;
+}
+#TOC .lab-toc-toggle::before { content: "▸"; }
+#TOC li.lab-open > .lab-toc-toggle::before { content: "▾"; }
+#TOC .lab-toc-toggle:hover, #TOC .lab-toc-toggle:focus-visible { color: var(--bs-primary, #2780e3); }
+#TOC li.lab-closed > ul { display: none !important; }
+#TOC li.lab-open > ul { display: block !important; }
+#TOC > ul > li > a { font-weight: 600; }
+</style>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var toc = document.querySelector("#TOC");
+  var box = toc.closest(".sidebar") || document.querySelector("#quarto-sidebar");
+  if (!toc) return;
+  var nav = document.querySelector("#quarto-header");
+  if (nav) document.documentElement.style.setProperty("--lab-navbar-h", nav.offsetHeight + "px");
+  var subs = [];
+  toc.querySelectorAll("li").forEach(function (li) {
+    var ul = li.querySelector(":scope > ul");
+    if (!ul) return;
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "lab-toc-toggle";
+    b.title = "Abrir/fechar subtópicos";
+    li.classList.add("lab-has-sub");
+    li.insertBefore(b, li.firstChild);
+    b.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      li.dataset.labUser = "1";
+      setOpen(li, !li.classList.contains("lab-open"));
+    });
+    subs.push(li);
+  });
+  function setOpen(li, open) {
+    li.classList.toggle("lab-open", open);
+    li.classList.toggle("lab-closed", !open);
+    li.querySelector(":scope > .lab-toc-toggle").setAttribute("aria-expanded", String(open));
+  }
+  var last = null;
+  function sync() {
+    var act = toc.querySelector("a.active");
+    subs.forEach(function (li) {
+      if (li.dataset.labUser) return;            // clique manual manda
+      setOpen(li, !!act && li.contains(act));
+    });
+    if (act && act !== last && box) {            // mantém a seção atual visível no sumário
+      var r = act.getBoundingClientRect(), rb = box.getBoundingClientRect();
+      if (r.top < rb.top + 20 || r.bottom > rb.bottom - 20) box.scrollTop += r.top - rb.top - rb.height / 3;
+    }
+    last = act;
+  }
+  sync();
+  new MutationObserver(sync).observe(toc, { subtree: true, attributes: true, attributeFilter: ["class"] });
+});
+</script>

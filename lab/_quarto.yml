@@ -4,11 +4,14 @@ project:
   type: website
   output-dir: _site
   render:
-    - "*.qmd"
+    # Atenção: um padrão sem "/" (ex.: "*.qmd") casa em qualquer subpasta e trazia de volta as 8 partes do paper.
+    - "index.qmd"
     - "eda/*.qmd"
     - "eda/*.ipynb"
+    - "!eda/2026-10-23_eda_completo.ipynb"   # cópia local não versionada; a entrada é o .qmd de mesmo nome
     - "dados/*.qmd"
-    - "paper_eda/paper_eda.qmd"   # página única; as 8 partes (0*.qmd) saem do site, o _freeze delas alimenta esta página
+    - "paper_eda/index.qmd"   # a página única do EDA do paper. As 8 partes (paper_eda/0*.qmd) NÃO são páginas:
+                              # o _freeze delas alimenta esta página (ver lab/README.md, "EDA do paper")
     - "suplementos/**/*.qmd"
     - "!README.md"          # instruções para quem mantém, não é página do site
 
@@ -32,7 +35,7 @@ website:
     left:
       - href: index.qmd
         text: Início
-      - href: paper_eda/paper_eda.qmd
+      - href: paper_eda/index.qmd
         text: EDA do paper (principal)
       - text: Suplementos de artigos
         href: suplementos/index.qmd
