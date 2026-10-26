@@ -8,7 +8,7 @@ project:
     - "eda/*.qmd"
     - "eda/*.ipynb"
     - "dados/*.qmd"
-    - "paper_eda/*.qmd"
+    - "paper_eda/paper_eda.qmd"   # página única; as 8 partes (0*.qmd) saem do site, o _freeze delas alimenta esta página
     - "suplementos/**/*.qmd"
     - "!README.md"          # instruções para quem mantém, não é página do site
 
@@ -32,7 +32,7 @@ website:
     left:
       - href: index.qmd
         text: Início
-      - href: paper_eda/index.qmd
+      - href: paper_eda/paper_eda.qmd
         text: EDA do paper (principal)
       - text: Suplementos de artigos
         href: suplementos/index.qmd
