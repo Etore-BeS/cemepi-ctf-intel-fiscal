@@ -12,6 +12,7 @@ O que faz com o markdown das partes:
 - dá âncoras fixas aos títulos numerados (s-a-4-2, s-b-5-18, ...) e aos avisos do laboratório (lab-...);
 - põe callouts nas seções com estrelas de significância, CNPJ x sem CNPJ e só agregados;
 - escreve no topo o quadro de novidades, com links para as seções;
+- troca traces plotly scattergl (WebGL) por scatter (SVG), para abrir em qualquer navegador;
 - figuras com mais de 1 MB (histogramas com todos os pontos) vão para paper_eda_figs/<célula>.html, abertas em
   iframe com carga preguiçosa, para a página abrir rápido.
 """
@@ -364,7 +365,13 @@ def main() -> int:
         md = transform(strip_part(md), state)
         md = sectionize(md, state)
         bodies.append(f"<!-- parte: {name} -->\n\n{md}")
-    body = externalize_figs("\n\n".join(bodies), state)
+    body = "\n\n".join(bodies)
+    # scattergl (WebGL) -> scatter (SVG): alguns navegadores/máquinas não têm WebGL e o plot some com
+    # "WebGL is not supported". Só o tipo do trace muda; os dados vêm do _freeze, que não é alterado.
+    state["n_gl"] = body.count('"type":"scattergl"')
+    body = body.replace('"type":"scattergl"', '"type":"scatter"')
+    assert "scattergl" not in body, "sobrou scattergl em outra forma"
+    body = externalize_figs(body, state)
     page = header(state, includes) + "\n" + novidades(state) + "\n" + body
     # todo link #âncora interno precisa existir
     targets = set(re.findall(r"\]\(#([\w-]+)\)", page))
@@ -375,7 +382,7 @@ def main() -> int:
     assert "[lab:" not in re.sub(r"```.*?```", "", page, flags=re.S), "sobrou marcador [lab: ...] no texto"
     OUT.write_text(page, encoding="utf-8")
     print(f"{OUT.relative_to(LAB)}: {len(page)/1e6:.1f} MB; marcadores {state['n_markers']} em {state['n_era_sections']} seções; "
-          f"seções com estrelas {len(state['star_secs'])}; figuras à parte {[(c, round(n/1e6, 1)) for c, n in state['figs']]}")
+          f"seções com estrelas {len(state['star_secs'])}; scattergl->scatter {state['n_gl']}; figuras à parte {[(c, round(n/1e6, 1)) for c, n in state['figs']]}")
     return 0
 
 

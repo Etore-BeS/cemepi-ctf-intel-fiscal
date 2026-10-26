@@ -70,6 +70,18 @@ executa código: é montada por `_pagina_unica.py` a partir do resultado já exe
 o freeze delas é a fonte da página única, mas **não são páginas do site**: ficam fora do `render:` de `_quarto.yml`
 (não use `"*.qmd"` lá: sem `/`, o padrão casa em subpastas e traz as partes de volta).
 
+**Abrir sem servidor (um arquivo só).** Para ler o EDA do paper com duplo clique, sem preview nem servidor:
+
+```fish
+cd ~/Code/cemepi-lab; and uv run --no-sync python lab/paper_eda/_html_unico.py
+open ~/Desktop/EDA_paper_CEMEPI.html     # ou lab/_site/paper_eda/EDA_paper_CEMEPI.html
+```
+
+O `_html_unico.py` remonta a página do `_freeze`, renderiza só ela (não tem código, nada é executado) e embute
+CSS, JS, plotly.js, MathJax, fontes e as 4 figuras pesadas num único HTML (cerca de 22 MB) que abre via `file://`
+sem internet. Na primeira vez ele baixa os arquivos da CDN e guarda em `~/.cache/cemepi-lab/cdn/`. Esse arquivo não
+é publicado (o CI não roda este script).
+
 Reexecutar uma parte (só quando a fonte dela mudar; o código roda e usa o cache do HD):
 
 ```fish

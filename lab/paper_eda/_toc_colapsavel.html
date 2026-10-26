@@ -1,14 +1,29 @@
 <!-- lab: sumário lateral da página única do EDA do paper (incluído só em paper_eda/index.qmd).
-     Fixo na tela com rolagem própria; cada tópico com subtópicos ganha uma setinha que abre/fecha por clique.
-     A seção atual (destaque do Quarto, a.active) abre sozinha os tópicos que a contêm, salvo os que você fechou à mão. -->
+     O sumário sai de dentro da coluna do Quarto e fica em position: fixed (nada de sticky, que depende de cada
+     ancestral e some quando o Quarto esconde a coluna abaixo de 992 px). Telas >= 992 px: fixo sobre a coluna da
+     esquerda, logo abaixo da navbar, com rolagem própria. Telas menores: botão "Sumário" que abre o mesmo sumário
+     como painel. A navbar fica sempre visível (o Quarto a escondia ao rolar). Cada tópico com subtópicos tem uma
+     setinha que abre/fecha por clique; a seção atual (a.active) abre sozinha os tópicos que a contêm, salvo os
+     que você fechou à mão. -->
 <style>
-#quarto-sidebar, #quarto-sidebar-toc-left {
-  position: sticky !important;
-  top: calc(var(--lab-navbar-h, 3.5rem) + .5rem);
-  align-self: start;
-  max-height: calc(100vh - var(--lab-navbar-h, 3.5rem) - 1rem);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+#quarto-header, #quarto-header.headroom--unpinned { transform: none !important; }
+#lab-toc-fixo {
+  position: fixed !important; z-index: 1020; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--bs-body-bg, #fff); padding: .25rem .5rem .75rem 0; margin: 0; box-sizing: border-box;
+  height: auto !important; visibility: visible !important;
+  /* o quarto-nav.js mexe no top/max-height de todo .sidebar ao esconder a navbar; aqui manda o valor do lab */
+  top: var(--lab-top, 4.25rem) !important; max-height: var(--lab-maxh, calc(100vh - 5rem)) !important;
+}
+#lab-toc-botao {
+  display: none; position: fixed; left: .75rem; bottom: .75rem; z-index: 1031; padding: .4rem .9rem;
+  border: 1px solid #dee2e6; border-radius: 2rem; background: var(--bs-body-bg, #fff); color: inherit;
+  box-shadow: 0 .25rem .75rem rgba(0, 0, 0, .15); font-size: .9rem; cursor: pointer;
+}
+@media (max-width: 991.98px) {
+  #lab-toc-botao { display: block; }
+  #lab-toc-fixo { display: none; left: .5rem !important; width: min(22rem, 88vw) !important; z-index: 1030;
+    border: 1px solid #dee2e6; border-radius: .5rem; box-shadow: 0 .5rem 1.5rem rgba(0, 0, 0, .18); padding: .75rem; }
+  body.lab-toc-aberto #lab-toc-fixo { display: block; }
 }
 #TOC li.lab-has-sub { display: grid; grid-template-columns: 1.1em minmax(0, 1fr); align-items: start; }
 #TOC li.lab-has-sub > .lab-toc-toggle { grid-column: 1; }
@@ -34,10 +49,40 @@ main iframe { width: 100%; }
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   var toc = document.querySelector("#TOC");
-  var box = toc.closest(".sidebar") || document.querySelector("#quarto-sidebar");
   if (!toc) return;
+  var col = document.querySelector("#quarto-sidebar") || toc.parentElement;   // coluna do Quarto (fica vazia, reserva o espaço)
   var nav = document.querySelector("#quarto-header");
-  if (nav) document.documentElement.style.setProperty("--lab-navbar-h", nav.offsetHeight + "px");
+  // o sumário vai para um contêiner próprio, filho direto do <body> (fora de qualquer ancestral com overflow ou
+  // transform), com a classe "sidebar" para herdar o visual do Quarto
+  var wrap = document.createElement("div");
+  wrap.id = "lab-toc-fixo"; wrap.className = "sidebar";
+  wrap.appendChild(toc);
+  document.body.appendChild(wrap);
+  var box = wrap;
+  var btn = document.createElement("button");
+  btn.id = "lab-toc-botao"; btn.type = "button"; btn.textContent = "☰ Sumário";
+  btn.addEventListener("click", function () { document.body.classList.toggle("lab-toc-aberto"); place(); });
+  document.body.appendChild(btn);
+  toc.addEventListener("click", function (e) {    // no modo painel, escolher uma seção fecha o painel
+    if (e.target.closest("a") && innerWidth < 992) document.body.classList.remove("lab-toc-aberto");
+  });
+  function place() {
+    var top = Math.max(0, nav ? nav.getBoundingClientRect().bottom : 0) + 8;
+    wrap.style.setProperty("--lab-top", top + "px");
+    wrap.style.setProperty("--lab-maxh", (innerHeight - top - 8) + "px");
+    if (innerWidth >= 992) {
+      var r = col.getBoundingClientRect();
+      wrap.style.left = Math.max(0, r.left) + "px";
+      wrap.style.width = Math.max(180, r.width) + "px";
+    } else {
+      wrap.style.left = ""; wrap.style.width = "";
+    }
+  }
+  place();
+  window.addEventListener("scroll", place, { passive: true });
+  window.addEventListener("resize", place);
+  window.addEventListener("load", place);
+  setTimeout(place, 500);
   var subs = [];
   toc.querySelectorAll("li").forEach(function (li) {
     var ul = li.querySelector(":scope > ul");

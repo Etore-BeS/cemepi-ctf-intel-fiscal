@@ -19,3 +19,9 @@ allowed_emails = []
 # rules  = ["cnpj"]            # "cpf" | "cnpj" | "email" | "coluna_proibida" | "*"
 # sha256 = ["<hash do valor>"] # opcional; sem values/sha256 = qualquer valor dessa regra no arquivo
 # reason = "total em R$ com 14 dígitos que passa no DV (falso positivo)"
+
+[[allow]]
+path   = "lab/_site/paper_eda/EDA_paper_CEMEPI.html"
+rules  = ["email"]
+sha256 = ["2985405b5c11775f658898b6945083c6beaf7a151d0c800006cc68072b8dedb5"]
+reason = "e-mail do autor no cabeçalho de licença de uma biblioteca JS embutida (buffer, dentro do plotly.js) no HTML único local; não é dado de pesquisa"
