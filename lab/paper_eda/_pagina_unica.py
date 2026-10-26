@@ -282,7 +282,13 @@ toc-expand: true
 toc-location: left
 toc-title: "Sumário"
 include-after-body:
-  - _toc_colapsavel.html   # sumário fixo na rolagem, com setinha para abrir/fechar cada tópico
+  - _toc_colapsavel.html   # sumário fixo na rolagem, setinha para abrir/fechar cada tópico, figuras na largura do corpo
+format:
+  html:
+    grid:                  # só nesta página: corpo largo em telas grandes (o grid do Quarto encolhe em telas menores)
+      sidebar-width: 270px
+      body-width: 1180px
+      margin-width: 120px
 number-sections: false
 code-fold: true
 code-summary: "Código"

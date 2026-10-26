@@ -25,6 +25,11 @@
 #TOC li.lab-closed > ul { display: none !important; }
 #TOC li.lab-open > ul { display: block !important; }
 #TOC > ul > li > a { font-weight: 600; }
+/* figuras na largura do corpo (a coluna é larga só nesta página, via grid no cabeçalho) */
+main .cell-output-display { max-width: 100%; }
+main .cell-output-display img { max-width: 100%; height: auto; }
+main .cell-output-display .plotly-graph-div { width: 100% !important; }
+main iframe { width: 100%; }
 </style>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -69,6 +74,15 @@ document.addEventListener("DOMContentLoaded", function () {
     last = act;
   }
   sync();
+  // plotly: redimensiona as figuras para a largura do corpo (e de novo quando a janela muda)
+  function fitPlots() {
+    if (!window.Plotly) return;
+    document.querySelectorAll("main .plotly-graph-div").forEach(function (d) {
+      try { window.Plotly.Plots.resize(d); } catch (e) {}
+    });
+  }
+  window.addEventListener("load", function () { setTimeout(fitPlots, 300); });
+  var rt; window.addEventListener("resize", function () { clearTimeout(rt); rt = setTimeout(fitPlots, 200); });
   new MutationObserver(sync).observe(toc, { subtree: true, attributes: true, attributeFilter: ["class"] });
 });
 </script>
