@@ -1266,7 +1266,7 @@ em que $\mathbf{m}_t$ são médias anuais das séries macro (BCB SGS), padroniza
 ```{python}
 # --- Modelo 1M: Logit P(pagamento no ano) com variáveis da CDA + macroeconomia anual ---
 # Leve: lê a amostra já gravada (amostra_modelos_1m.parquet) e as macros mensais (macro_mensal_wide.parquet).
-# Não varre DEBITO. Grava livia_logit_macro_*.csv para o relatório.
+# Não varre DEBITO. Grava logit_macro_*.csv para o relatório.
 from __future__ import annotations
 
 from pathlib import Path
@@ -1485,13 +1485,13 @@ meta = pd.DataFrame([{
     "nota_causal": "Associação condicional; não identifica efeito causal de política ou da macroeconomia.",
 }])
 
-tab_princ.to_csv(out / "livia_logit_macro_principal.csv", index=False)
-tab_cp.to_csv(out / "livia_logit_macro_componentes.csv", index=False)
-comp.to_csv(out / "livia_logit_macro_comparacao.csv", index=False)
-vif.to_csv(out / "livia_logit_macro_vif.csv", index=False)
-cargas.to_csv(out / "livia_logit_macro_cargas_componentes.csv", index=False)
-dic.to_csv(out / "livia_logit_macro_dicionario.csv", index=False)
-meta.to_csv(out / "livia_logit_macro_meta.csv", index=False)
+tab_princ.to_csv(out / "logit_macro_principal.csv", index=False)
+tab_cp.to_csv(out / "logit_macro_componentes.csv", index=False)
+comp.to_csv(out / "logit_macro_comparacao.csv", index=False)
+vif.to_csv(out / "logit_macro_vif.csv", index=False)
+cargas.to_csv(out / "logit_macro_cargas_componentes.csv", index=False)
+dic.to_csv(out / "logit_macro_dicionario.csv", index=False)
+meta.to_csv(out / "logit_macro_meta.csv", index=False)
 
 pd.set_option("display.width", 200)
 print(tab_princ[["variavel", "coeficiente", "erro_padrao", "p_valor", "signif", "efeito_marginal_medio_pp", "p_valor_duas_etapas"]].to_string(index=False))
