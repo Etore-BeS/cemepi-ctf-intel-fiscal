@@ -5,7 +5,7 @@ date: 2026-10-23
 date-format: "DD/MM/YYYY"
 listing:
   id: entradas
-  contents: "eda/*.{qmd,ipynb}"
+  contents: ["eda/*.{qmd,ipynb}", "dados/*.qmd"]
   type: table
   fields: [date, title, description]
   sort: "date desc"
@@ -29,6 +29,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
 ## O que mudou nesta versão
 
+- *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](dados/2026-10-26_cnpj_enrich.qmd):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
 - *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.
 - *(2026-10-23)* **K-means no top 1% das CDAs ICMS:** 100 inicializações por k, de k=2 a k=8, com cotovelo e silhueta; k=2 e k=4 comparados por estabilidade entre sementes, ARI, tamanhos e perfis agregados; a figura da seção 5.18 refeita.
 - *(2026-10-23)* **Selic over e checagem das correlações macro:** a Selic meta (SGS 432) trocada pela Selic over (SGS 4189); fonte, unidade, frequência, defasagem, cobertura e valores atípicos das séries conferidos; a correlação entre emprego e estoque decomposta.

@@ -1,0 +1,230 @@
+---
+title: "Enriquecimento CNPJ (RFB ref. 2026-03): o que o pipeline faz e o que o pacote da API contém"
+description: "Quais atributos da Receita Federal foram ligados aos CNPJs devedores, com que cobertura, como a pessoa física é protegida e o que falta para subir à API?"
+date: 2026-10-26
+jupyter: python3
+---
+
+**Dados:** o pacote anonimizado `cnpj_enriquecido_ref2026-03` (versão API, gerado em 23/10/2026), o `coverage.csv` do build e o manifest versionado `data_manifests/cnpj_enrich/cnpj_enriquecido_2026-03.json`. Todos os números desta página são calculados na hora a partir desses arquivos.
+**O que aparece:** só contagens agregadas. Nenhuma linha por CNPJ, sócio ou hash, e toda contagem abaixo de 5 é suprimida (mostrada como "<5").
+**Status:** o pacote está homologado num DuckDB local. Ver a seção 6.
+
+```{python}
+#| label: setup
+import json, subprocess
+from pathlib import Path
+import duckdb
+import pandas as pd
+from dotenv import dotenv_values
+pd.set_option("display.max_colwidth", None)
+
+def repo_root(p=Path.cwd()):
+    for q in (p, *p.parents):
+        if (q / ".git").exists():
+            return q
+    raise RuntimeError("repo não encontrado")
+REPO = repo_root()
+WORKDIR = Path(dotenv_values(REPO / ".env")["CNPJ_PIPELINE_WORKDIR"])   # só esta chave do .env
+PKG = WORKDIR / "export/cnpj_enriquecido_ref2026-03"
+MAN = json.loads((PKG / "MANIFEST.json").read_text())
+MAN_REPO = json.loads(subprocess.run(
+    ["git", "-C", str(REPO), "show", "78f88cd:data_manifests/cnpj_enrich/cnpj_enriquecido_2026-03.json"],
+    capture_output=True, text=True, check=True).stdout)
+con = duckdb.connect()
+con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{PKG / 'data/cnpj_enriquecido.parquet'}')")
+con.execute(f"CREATE VIEW s AS SELECT * FROM read_parquet('{PKG / 'data/socios_vinculos.parquet'}')")
+N = con.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+
+def sup(df, col="n"):
+    """Suprime contagens < 5 (e o % correspondente)."""
+    df = df.copy()
+    small = df[col] < 5
+    for c in [c for c in df.columns if c.startswith("%")]:
+        df[c] = df[c].round(2).astype(object).where(~small, "—")
+    df[col] = df[col].astype(object).where(~small, "<5")
+    return df
+
+def contagem(sql):
+    d = con.execute(sql).df()
+    d["% das linhas"] = 100 * d["n"] / N
+    return sup(d)
+```
+
+## 1. O que o pipeline faz
+
+| etapa | o que faz | saída |
+|---|---|---|
+| coleta | Lê os CNPJs distintos de `DEBITO` (DuckDB CEMEPI, só leitura), só as colunas CNPJ do devedor, tributo e valor | lista de CNPJs devedores |
+| enrich (RFB 2026-03) | Cruza com os arquivos abertos da Receita (Empresas, Estabelecimentos, Simples, tabelas de domínio), primeiro pelo CNPJ de 14 dígitos e, se não achar, pela raiz | cadastro, CNAE, porte, natureza, situação, município, Simples/MEI |
+| sócios | Lê os arquivos `Socios*` da RFB, só na camada local | vínculos empresa–sócio |
+| regime (ECF) | Junta as listas de regime tributário (lucro real, presumido, arbitrado, imunes e isentas) por raiz e ano | `regime_ultimo`, `regimes_por_ano` |
+| build | Uma linha por CNPJ devedor, particionada em 16 arquivos | `cnpj_enriquecido` (local) |
+| export anonimizado | Política `anonimizar`: CNPJ ligado a pessoa física vira id HMAC-SHA256 com sal fora do pacote; datas truncadas; município generalizado onde k<5; sócios só com década de entrada e faixa etária | pacote para a API |
+
+```{python}
+#| label: tbl-versao
+#| tbl-cap: "Versão do pacote, do manifest MANIFEST.json do pacote e do manifest versionado no repositório."
+pd.DataFrame([
+    {"item": "referência RFB", "valor": MAN["ref_rfb"]},
+    {"item": "linhas de cnpj_enriquecido (pacote)", "valor": f"{MAN['rows']:,}"},
+    {"item": "linhas de cnpj_enriquecido (manifest do repositório)", "valor": f"{MAN_REPO['linhas']:,}"},
+    {"item": "linhas lidas agora do parquet", "valor": f"{N:,}"},
+    {"item": "linhas de socios_vinculos (pacote)", "valor": f"{MAN['socios_rows']:,}"},
+    {"item": "arquivos da RFB com sha256 registrado", "valor": len(MAN["rfb_files_sha256"])},
+    {"item": "política de PF", "valor": MAN["pf_policy"]},
+    {"item": "detalhe dos sócios", "valor": MAN["socios_detail"] + " (entrada só por década)"},
+    {"item": "versão do pipeline", "valor": MAN["pipeline_version"]},
+    {"item": "pacote gerado em", "valor": MAN["created_at"][:10]},
+])
+```
+
+## 2. Cobertura do cruzamento com a RFB
+
+```{python}
+#| label: tbl-cobertura
+#| tbl-cap: "Cobertura por tributo (coverage.csv do build). Um CNPJ que deve mais de um tributo aparece em cada linha, por isso as linhas não somam TODOS. % do estoque casado usa a foto de 2026-03."
+cov = pd.read_csv(WORKDIR / "build/2026-03/coverage.csv")
+cov.rename(columns={"cnpjs_devedores": "CNPJs devedores", "pct_dv_valido": "% DV válido", "pct_casado_cnpj14": "% casado (CNPJ 14)",
+                    "pct_casado_raiz_ou_cnpj14": "% casado (14 ou raiz)", "pct_estoque_ref_casado": "% do estoque casado",
+                    "pct_pessoa_fisica_vinculada": "% ligado a PF", "pct_municipio_ibge": "% com município IBGE"})
+```
+
+```{python}
+#| label: tbl-match
+#| tbl-cap: "Nível do cruzamento, no pacote: estabelecimento (CNPJ de 14 dígitos), só raiz, ou não encontrado na RFB."
+contagem("SELECT match_nivel AS \"nível\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-situacao
+#| tbl-cap: "Situação cadastral na RFB (2026-03)."
+contagem("SELECT COALESCE(situacao_cadastral_descricao, '(sem estabelecimento)') AS \"situação\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+## 3. Preenchimento por coluna
+
+```{python}
+#| label: tbl-preenchimento
+#| tbl-cap: "Percentual de linhas com valor não nulo em cada coluna de cnpj_enriquecido."
+cols = [c["name"] for c in MAN["columns"]]
+row = con.execute("SELECT " + ", ".join(f'COUNT("{c}")' for c in cols) + " FROM t").fetchone()
+pd.DataFrame({"coluna": cols, "tipo (DuckDB)": [c["duckdb"] for c in MAN["columns"]],
+              "% preenchido": [round(100 * v / N, 2) for v in row]})
+```
+
+**Como ler:** colunas com preenchimento baixo nem sempre são falha. As datas de exclusão do Simples só existem para quem saiu do regime, a situação especial é rara e o regime só existe para quem tem ECF ou cadastro do Simples.
+
+## 4. Atributos: Simples/MEI, porte, regime, UF e CNAE
+
+```{python}
+#| label: tbl-simples
+#| tbl-cap: "Opção pelo Simples e pelo MEI (true / false / nulo) por nível do cruzamento. Nulo só onde a empresa não foi encontrada na RFB."
+contagem("""SELECT match_nivel AS "nível", CAST(opcao_simples AS VARCHAR) AS simples, CAST(opcao_mei AS VARCHAR) AS mei, COUNT(*) AS n
+            FROM t GROUP BY ALL ORDER BY 1, 2, 3""")
+```
+
+```{python}
+#| label: tbl-porte
+#| tbl-cap: "Porte da empresa (RFB)."
+contagem("SELECT COALESCE(porte_descricao, '(nulo)') AS porte, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-regime
+#| tbl-cap: "Regime tributário mais recente. 'SIMPLES (cadastro)' vem do cadastro do Simples e não da ECF (regime_derivado = true)."
+contagem("SELECT COALESCE(regime_ultimo, '(sem regime)') AS regime, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-ecf
+#| tbl-cap: "Raízes de CNPJ (empresas) com regime vindo da ECF, contadas por raiz distinta."
+r = con.execute("""SELECT COUNT(DISTINCT cnpj_raiz),
+                          COUNT(DISTINCT cnpj_raiz) FILTER (WHERE regime_ultimo IS NOT NULL AND NOT regime_derivado),
+                          COUNT(DISTINCT cnpj_raiz) FILTER (WHERE regime_derivado)
+                   FROM t""").fetchone()
+pd.DataFrame([{"raízes distintas": r[0], "com regime da ECF": r[1], "% com ECF": round(100 * r[1] / r[0], 2),
+               "só com Simples (cadastro)": r[2]}])
+```
+
+```{python}
+#| label: tbl-uf
+#| tbl-cap: "UF do estabelecimento (contagens abaixo de 5 suprimidas)."
+contagem("SELECT COALESCE(uf, '(nulo)') AS UF, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-cnae
+#| tbl-cap: "Seção CNAE da atividade principal (contagens abaixo de 5 suprimidas)."
+contagem("SELECT COALESCE(cnae_secao, '(nulo)') AS \"seção CNAE\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+## 5. Sócios e proteção da pessoa física
+
+```{python}
+#| label: tbl-socios
+#| tbl-cap: "Vínculos empresa–sócio em socios_vinculos (versão API)."
+r = con.execute("SELECT COUNT(*), COUNT(DISTINCT cnpj_basico), COUNT(DISTINCT socio_id) FROM s").fetchone()
+pd.concat([
+    pd.DataFrame([{"item": "vínculos", "n": r[0]}, {"item": "empresas (raízes) com sócio listado", "n": r[1]},
+                  {"item": "sócios distintos (id)", "n": r[2]}]),
+    con.execute("SELECT 'sócios do tipo ' || socio_tipo AS item, COUNT(*) AS n FROM s GROUP BY 1 ORDER BY n DESC").df(),
+    con.execute("""SELECT CASE WHEN empresa_devedora AND socio_pj_devedor THEN 'empresa devedora com sócio PJ também devedor'
+                               WHEN empresa_devedora THEN 'empresa devedora (sócio não devedor)'
+                               ELSE 'empresa não devedora cujo sócio PJ é devedor' END AS item, COUNT(*) AS n
+                   FROM s GROUP BY 1 ORDER BY n DESC""").df(),
+]).pipe(sup)
+```
+
+```{python}
+#| label: tbl-decada
+#| tbl-cap: "Década de entrada na sociedade (única informação de data dos sócios no pacote da API). Contagens abaixo de 5 suprimidas."
+d = con.execute("SELECT CAST(decada_entrada_sociedade AS VARCHAR) AS \"década\", COUNT(*) AS n FROM s GROUP BY 1 ORDER BY 1").df()
+sup(d)
+```
+
+```{python}
+#| label: tbl-pf
+#| tbl-cap: "Linhas de cnpj_enriquecido ligadas a pessoa física e o que acontece com elas no pacote."
+contagem("""SELECT CAST(pessoa_fisica_vinculada AS VARCHAR) AS "ligada a PF", CAST(cnpj_anonimizado AS VARCHAR) AS "CNPJ vira HMAC",
+                   CAST(municipio_generalizado AS VARCHAR) AS "município → UF", COUNT(*) AS n FROM t GROUP BY ALL ORDER BY 1, 2, 3""")
+```
+
+```{python}
+#| label: tbl-risco
+#| tbl-cap: "Risco de reidentificação medido no export (MANIFEST.json): combinações de quase-identificadores com menos de 5 pessoas (k<5)."
+rows = []
+for r in MAN["pf_reidentification_risk"]:
+    rows.append({"tabela": "cnpj_enriquecido (PF)", "quase-identificadores": r["conjunto"], "combinações": r["combinacoes"],
+                 "com k<5": r["combinacoes_k_lt_5"], "% em k<5": r["pct_linhas_em_k_lt_5"]})
+for r in MAN["socios_reidentification_risk"]:
+    rows.append({"tabela": "socios_vinculos (PF)", "quase-identificadores": r["conjunto"], "combinações": r["combinacoes"],
+                 "com k<5": r["combinacoes_k_lt_5"], "% em k<5": r["pct_pf_em_k_lt_5"]})
+pd.DataFrame(rows)
+```
+
+**Política de pessoa física:**
+
+- **Pseudônimo:** o CNPJ de empresa ligada a pessoa física (MEI, empresário individual) e o sócio PF viram ids HMAC-SHA256. O sal fica fora do pacote, numa variável de ambiente, e não vai para o git nem para a API.
+- **O que não entra:** nome, CPF, representante legal e data exata de entrada na sociedade. Para os sócios, só ficam a década de entrada e a faixa etária.
+- **Acesso:** a API só abre para pesquisadores do grupo, com login e sob o NDA da PGE.
+- **Risco aceito:** na combinação "faixa etária × município × CNAE", que se obtém pelo CNPJ da empresa, cerca de 38% das pessoas físicas ficam em células com k<5. O risco foi aceito pelo Étore porque o acesso é restrito. Nas versões generalizadas (UF × seção CNAE) o percentual cai para menos de 1%. As combinações com mais atributos (natureza, porte, ano de início, situação ou a qualificação dentro da própria empresa) têm k<5 para boa parte das linhas. Por isso o acesso fica restrito a pesquisadores e não há abertura pública.
+
+## 6. Esquema do pacote da API
+
+```{python}
+#| label: tbl-esquema-socios
+#| tbl-cap: "Colunas de socios_vinculos (as de cnpj_enriquecido estão na tabela de preenchimento acima)."
+con.execute("DESCRIBE s").df()[["column_name", "column_type"]].rename(columns={"column_name": "coluna", "column_type": "tipo (DuckDB)"})
+```
+
+O pacote também traz o README, o dicionário de dados, o SHA256SUMS e os scripts de carga (DDL e load para DuckDB e Postgres).
+
+| etapa | status |
+|---|---|
+| pipeline (coleta → enrich → sócios → regime → build → export) | feito e mergeado |
+| Simples/MEI nulo só para empresa não encontrada | feito |
+| homologação da carga num DuckDB local | feita |
+| servidor da API | falta |
+| teste HTTP (consulta autenticada) | falta |
+| sal no servidor (variável de ambiente) | falta |
+| subida do pacote | falta |
