@@ -8,6 +8,7 @@ project:
     - "eda/*.qmd"
     - "eda/*.ipynb"
     - "dados/*.qmd"
+    - "paper_eda/*.qmd"
     - "suplementos/**/*.qmd"
     - "!README.md"          # instruções para quem mantém, não é página do site
 
@@ -31,6 +32,8 @@ website:
     left:
       - href: index.qmd
         text: Início
+      - href: paper_eda/index.qmd
+        text: EDA do paper (principal)
       - text: Suplementos de artigos
         href: suplementos/index.qmd
   page-footer:

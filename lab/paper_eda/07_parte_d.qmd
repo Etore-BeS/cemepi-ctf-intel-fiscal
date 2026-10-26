@@ -1,0 +1,911 @@
+---
+title: "Parte D. Condições macroeconômicas"
+description: "Porte do paper EDA v1 (Parte D) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+:::{.callout-important}
+## Qualidade do DEBITO (só sinalizado, nada corrigido)
+- Faltam as fotos de **2018-12** e de **2020-10 a 2020-12**. O arquivo de 2020 M10–M12 repete o de M04–M06, e o de
+  2018 M10–M12 está truncado (2018-11 parcial). A foto de **2024-03** está parcial.
+- Consequência no painel: o "fim de ano" de 2018 é a última foto em que cada CDA aparece (out. ou nov.), e o de 2020 é setembro.
+- No laboratório, o estoque mensal soma **uma linha por CDA e mês** (o paper somava as linhas repetidas). A tabela de
+  qualidade está na página [Dados](01_dados.qmd#lab-qualidade).
+:::
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+```{python}
+#| label: dep-85
+#| include: false
+annual = collect(panel.group_by("year").agg(
+    pl.len().alias("n_cda"), pl.col("stock").sum().alias("stock"), pl.col("paid").sum().alias("collected"),
+    pl.col("rate").filter(pl.col("stock") > 0).mean().alias("mean_cda_rate"),
+    pl.col("paid_flag").mean().alias("share_paying")).sort("year"))
+annual = annual.with_columns(pl.when(pl.col("stock") > 0).then(pl.col("collected") / pl.col("stock")).alias("portfolio_rate"),
+                             (pl.col("stock") / 1e9).alias("stock_bn"), (pl.col("collected") / 1e9).alias("collected_bn"))
+save_tab(annual.select("year", "n_cda", "stock_bn", "collected_bn",
+                       (100 * pl.col("portfolio_rate")).alias("portfolio_rate_pct"),
+                       (100 * pl.col("mean_cda_rate")).alias("mean_cda_rate_pct"),
+                       (100 * pl.col("share_paying")).alias("share_paying_pct")), "tab_serie_agregada_ano", fmt="{:,.3f}")
+annual
+```
+
+```{python}
+#| label: dep-93
+#| include: false
+new_year = collect(attributes.with_columns(pl.col("DATA_INSCRICAO").dt.year().alias("year"))
+                   .filter(pl.col("year") >= YEARS[0]).group_by("year")
+                   .agg(pl.len().alias("n_new"), (pl.col("max_value").sum() / 1e9).alias("value_bn")).sort("year"))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.15)
+fig.add_trace(go.Bar(x=new_year["year"], y=new_year["n_new"] / 1e3, marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=new_year["year"], y=new_year["value_bn"], marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_yaxes(title_text="New CDAs (thousand)", row=1, col=1)
+fig.update_yaxes(title_text="Value enrolled (R$ bn)", row=1, col=2)
+save_fig(fig, "fig_new_enrolments_year", width="double")
+fig
+```
+
+```{python}
+#| label: dep-259
+#| include: false
+Y_VARS = ["collection", "n_payers", "n_new", "stock"]
+mm = monthly_all.select("month", *Y_VARS).join(macro_m, on="month", how="left").sort("month")
+def moments(x: np.ndarray, name: str, level: str) -> dict:
+    x = x[~np.isnan(x)]
+    return {"variable": name, "level": level, "n": x.size, "mean": x.mean(), "median": np.median(x), "sd": x.std(ddof=1),
+            "skewness": stats.skew(x), "kurtosis": stats.kurtosis(x), "share_zero": float((x == 0).mean())}
+cda_sample = collect(panel.filter(pl.col("stock") > 0).select("rate", "paid", "stock")).sample(n=1_000_000, seed=SEED)
+moments_tab = pl.DataFrame([moments(mm[c].to_numpy().astype(float), c, "monthly") for c in Y_VARS] +
+                           [moments(cda_sample[c].to_numpy().astype(float), c, "CDA-year") for c in ("rate", "paid", "stock")])
+save_tab(moments_tab, "tab_moments", fmt="{:,.4g}")
+moments_tab
+```
+
+```{python}
+#| label: dep-261
+#| include: false
+TRANSFORMS = {"level": lambda x: x, "log": lambda x: np.log(x[x > 0]), "asinh": np.arcsinh}
+rows = []
+for c in Y_VARS:
+    x = mm[c].drop_nulls().to_numpy().astype(float)
+    for t, f in TRANSFORMS.items():
+        v = f(x)
+        sw, jb = stats.shapiro(v), stats.jarque_bera(v)
+        rows.append({"variable": c, "transform": t, "shapiro_W": sw.statistic, "shapiro_p": sw.pvalue,
+                     "jb_stat": jb.statistic, "jb_p": jb.pvalue})
+normality = pl.DataFrame(rows)
+fig = make_subplots(rows=2, cols=len(Y_VARS), horizontal_spacing=0.06, vertical_spacing=0.12,
+                    subplot_titles=[f"{c} ({t})" for t in ("level", "log") for c in Y_VARS])
+for j, c in enumerate(Y_VARS, start=1):
+    for i, t in enumerate(("level", "log"), start=1):
+        v = np.sort(TRANSFORMS[t](mm[c].drop_nulls().to_numpy().astype(float)))
+        q = stats.norm.ppf((np.arange(1, v.size + 1) - 0.5) / v.size)
+        z = (v - v.mean()) / v.std()
+        fig.add_trace(go.Scatter(x=q, y=z, mode="markers", marker=dict(size=3, color=CEMEPI["deep_teal"])), i, j)
+        fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines", line=dict(color=CEMEPI["sand"], dash="dot")), i, j)
+fig.update_annotations(font_size=9)
+save_fig(fig, "fig_qq", width="double", ratio=0.6)
+save_tab(normality, "tab_normality", fmt="{:.4g}")
+fig
+```
+
+```{python}
+#| label: dep-263
+#| include: false
+from scipy.stats import boxcox
+rows = []
+for c in Y_VARS:
+    x = mm[c].drop_nulls().to_numpy().astype(float)
+    best = min(normality.filter(pl.col("variable") == c).iter_rows(named=True), key=lambda r: -r["shapiro_p"])
+    lam = boxcox(x[x > 0])[1] if (x > 0).all() else float("nan")
+    rows.append({"variable": c, "boxcox_lambda": lam, "has_zeros": bool((x == 0).any()),
+                 "selected": "asinh" if (x == 0).any() else best["transform"]})
+transforms = pl.DataFrame(rows)
+SELECTED = dict(zip(transforms["variable"], transforms["selected"]))
+save_tab(transforms, "tab_transforms", fmt="{:.3f}")
+transforms
+```
+
+```{python}
+#| label: dep-266
+#| include: false
+import statsmodels.api as sm
+lowess = sm.nonparametric.lowess
+X_SHOW = ["selic", "gdp_monthly", "credit_firms", "unemployment", "ipca", "hh_indebtedness"]
+fig = make_subplots(rows=len(Y_VARS), cols=len(X_SHOW), horizontal_spacing=0.02, vertical_spacing=0.03)
+for i, yv in enumerate(Y_VARS, start=1):
+    for j, xv in enumerate(X_SHOW, start=1):
+        d = mm.select(xv, yv).drop_nulls()
+        x, y = d[xv].to_numpy().astype(float), TRANSFORMS[SELECTED[yv]](d[yv].to_numpy().astype(float))
+        fit = lowess(y, x[: y.size], frac=0.6)
+        fig.add_trace(go.Scatter(x=x[: y.size], y=y, mode="markers", marker=dict(size=2.5, color=CEMEPI["grey"])), i, j)
+        fig.add_trace(go.Scatter(x=fit[:, 0], y=fit[:, 1], mode="lines", line=dict(color=CEMEPI["deep_teal"], width=1.5)), i, j)
+        if i == len(Y_VARS):
+            fig.update_xaxes(title_text=xv, row=i, col=j, title_font_size=9)
+        if j == 1:
+            fig.update_yaxes(title_text=yv, row=i, col=j, title_font_size=9)
+fig.update_xaxes(showticklabels=False)
+fig.update_yaxes(showticklabels=False)
+save_fig(fig, "fig_lowess_grid", width="double", ratio=0.75)
+fig
+```
+
+```{python}
+#| label: dep-268
+#| include: false
+from statsmodels.stats.diagnostic import linear_reset, linear_harvey_collier
+from statsmodels.gam.api import GLMGam, BSplines
+rows = []
+for yv in Y_VARS:
+    for xv in MACRO_VARS:
+        d = mm.select(xv, yv).drop_nulls()
+        if d.height < 30:
+            continue
+        x = d[xv].to_numpy().astype(float)
+        y = np.arcsinh(d[yv].to_numpy().astype(float)) if SELECTED[yv] == "asinh" else TRANSFORMS[SELECTED[yv]](d[yv].to_numpy().astype(float))
+        X = sm.add_constant(x)
+        ols = sm.OLS(y, X).fit()
+        reset = linear_reset(ols, power=3, use_f=True)
+        try:
+            hc_p = float(linear_harvey_collier(ols)[1])
+        except Exception:
+            hc_p = float("nan")
+        gam = GLMGam(y, exog=np.ones((y.size, 1)), smoother=BSplines(x[:, None], df=[6], degree=[3])).fit()
+        rows.append({"y": yv, "x": xv, "reset_p": float(reset.pvalue), "harvey_collier_p": hc_p,
+                     "aic_linear": ols.aic, "aic_spline": gam.aic, "spline_better": bool(gam.aic + 2 < ols.aic)})
+linearity = pl.DataFrame(rows)
+save_tab(linearity, "tab_linearity", fmt="{:.4g}")
+linearity
+```
+
+```{python}
+#| label: dep-270
+#| include: false
+heavy = {r["variable"]: abs(r["kurtosis"]) > 3 for r in moments_tab.filter(pl.col("level") == "monthly").iter_rows(named=True)}
+decision = linearity.with_columns(
+    ((pl.col("reset_p") < 0.05) | pl.col("spline_better") | pl.col("y").replace_strict(heavy, default=False)).alias("nonlinear_or_heavy"))
+decision = decision.with_columns(pl.when(pl.col("nonlinear_or_heavy")).then(pl.lit("spearman")).otherwise(pl.lit("pearson")).alias("method"))
+div = []
+for r in decision.iter_rows(named=True):
+    d = mm.select(r["x"], r["y"]).drop_nulls()
+    a, b = d[r["x"]].to_numpy().astype(float), d[r["y"]].to_numpy().astype(float)
+    div.append(abs(corr_pair(a, b, "pearson")[0] - corr_pair(a, b, "spearman")[0]))
+decision = decision.with_columns(pl.Series("abs_pearson_minus_spearman", div))
+METHOD = {(r["y"], r["x"]): r["method"] for r in decision.iter_rows(named=True)}
+GLOBAL_METHOD = "spearman" if decision["method"].eq("spearman").mean() >= 0.5 else "pearson"
+save_tab(decision.select("y", "x", "reset_p", "spline_better", "method", "abs_pearson_minus_spearman"), "tab_corr_method_decision", fmt="{:.3f}")
+print(f"Share of pairs using Spearman: {decision['method'].eq('spearman').mean():.0%}; global method: {GLOBAL_METHOD}")
+decision
+```
+
+```{python}
+#| label: dep-273
+#| include: false
+from statsmodels.tsa.stattools import adfuller, kpss, zivot_andrews
+import warnings
+def unit_root_row(x: np.ndarray, name: str) -> dict:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        adf = adfuller(x, autolag="AIC")
+        kp = kpss(x, regression="c", nlags="auto")
+        za = zivot_andrews(x, regression="c", autolag="AIC")
+    return {"series": name, "adf_stat": adf[0], "adf_p": adf[1], "kpss_stat": kp[0], "kpss_p": kp[1],
+            "za_stat": za[0], "za_p": za[1], "za_break_index": int(za[4]),
+            "stationary": bool(adf[1] < 0.05 and kp[1] > 0.05)}
+series = {c: TRANSFORMS[SELECTED[c]](mm[c].drop_nulls().to_numpy().astype(float)) for c in Y_VARS}
+series |= {c: mm[c].drop_nulls().to_numpy().astype(float) for c in MACRO_VARS}
+stationarity = pl.DataFrame([unit_root_row(v, k) for k, v in series.items()] +
+                            [unit_root_row(np.diff(v), f"d_{k}") for k, v in series.items()])
+save_tab(stationarity, "tab_stationarity", fmt="{:.4g}")
+stationarity
+```
+
+```{python}
+#| label: dep-277
+#| include: false
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+LAGS = 24
+fig = make_subplots(rows=len(Y_VARS), cols=2, shared_xaxes=True, vertical_spacing=0.04, column_titles=["ACF", "PACF"])
+lb_rows = []
+for i, c in enumerate(Y_VARS, start=1):
+    x = series[c]
+    band95 = 1.96 / np.sqrt(x.size)
+    for j, vals in enumerate((acf(x, nlags=LAGS)[1:], pacf(x, nlags=LAGS)[1:]), start=1):
+        fig.add_trace(go.Bar(x=list(range(1, LAGS + 1)), y=vals, marker_color=CEMEPI["deep_teal"]), i, j)
+        fig.add_hline(y=band95, line_dash="dot", line_color=CEMEPI["sand"], row=i, col=j)
+        fig.add_hline(y=-band95, line_dash="dot", line_color=CEMEPI["sand"], row=i, col=j)
+    fig.update_yaxes(title_text=c, row=i, col=1, title_font_size=9)
+    lb = acorr_ljungbox(x, lags=[6, 12, 24], return_df=True)
+    lb_rows += [{"series": c, "lag": int(l), "Q": float(q), "p_value": float(p)} for l, q, p in zip(lb.index, lb["lb_stat"], lb["lb_pvalue"])]
+fig.update_xaxes(title_text="Lag (months)", row=len(Y_VARS))
+fig.add_annotation(text="Dotted lines: ±1.96/√n bounds", x=1, y=1.04, xref="paper", yref="paper", showarrow=False, xanchor="right", font_size=9)
+save_fig(fig, "fig_acf_pacf", width="double", ratio=0.9)
+save_tab(pl.DataFrame(lb_rows), "tab_ljungbox", fmt="{:.4g}")
+fig
+```
+
+```{python}
+#| label: dep-279
+#| include: false
+from statsmodels.tsa.arima.model import ARIMA
+stat_map = dict(zip(stationarity["series"], stationarity["stationary"]))
+plan, PREPARED = [], {}
+for k, v in series.items():
+    diff = not stat_map.get(k, False)
+    z = np.diff(v) if diff else v
+    plan.append({"series": k, "transform": SELECTED.get(k, "level"), "differenced": diff})
+    PREPARED[k] = z
+prepared_df = mm.select("month").slice(1).with_columns([pl.Series(k, (v if v.size == mm.height - 1 else v[1:]).astype(float))
+                                                          for k, v in PREPARED.items() if v.size >= mm.height - 1])
+
+def prewhiten(x: np.ndarray, y: np.ndarray, order=(2, 0, 0)) -> tuple[np.ndarray, np.ndarray]:
+    m = ~(np.isnan(x) | np.isnan(y))
+    fit = ARIMA(x[m], order=order).fit()
+    phi = np.r_[1, -fit.arparams]
+    fx = np.convolve(x[m], phi, mode="valid")
+    fy = np.convolve(y[m], phi, mode="valid")
+    return fx, fy
+
+save_tab(pl.DataFrame(plan), "tab_transform_plan")
+pl.DataFrame(plan)
+```
+
+```{python}
+#| label: dep-284
+#| include: false
+monthly_rate = monthly_all.sort("month").with_columns(pl.when(pl.col("stock").shift(1) > 0).then(pl.col("collection") / pl.col("stock").shift(1)).alias("rate")) \
+    .filter(pl.col("rate").is_not_null() & pl.col("rate").is_finite())
+ac_m = acf(monthly_rate["rate"].to_numpy(), nlags=24)[1:]
+ac_a = acf(annual["portfolio_rate"].drop_nulls().to_numpy(), nlags=min(5, annual.height - 2))[1:]
+fig = make_subplots(rows=1, cols=2, column_titles=["Monthly", "Annual"], horizontal_spacing=0.1)
+fig.add_trace(go.Bar(x=list(range(1, 25)), y=ac_m, marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=list(range(1, ac_a.size + 1)), y=ac_a, marker_color=CEMEPI["sand"]), 1, 2)
+fig.add_hline(y=1.96 / np.sqrt(monthly_rate.height), line_dash="dot", row=1, col=1)
+fig.add_hline(y=-1.96 / np.sqrt(monthly_rate.height), line_dash="dot", row=1, col=1)
+fig.add_hline(y=1.96 / np.sqrt(annual.height), line_dash="dot", row=1, col=2)
+fig.add_hline(y=-1.96 / np.sqrt(annual.height), line_dash="dot", row=1, col=2)
+fig.update_xaxes(title_text="Lag (months)", row=1, col=1)
+fig.update_xaxes(title_text="Lag (years)", row=1, col=2)
+fig.update_yaxes(title_text="Autocorrelation of the portfolio recovery rate", row=1, col=1)
+fig.add_annotation(text="Dotted lines: ±1.96/√n bounds", x=1, y=1.08, xref="paper", yref="paper", showarrow=False, xanchor="right", font_size=9)
+save_fig(fig, "fig_portfolio_acf", width="double")
+fig
+```
+
+## Part D. Macroeconomic conditions
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+### D.1 Monthly correlations
+
+*Terms introduced in this section:* Cross-correlation function. Definitions are given in the Glossary.
+
+#### D.1.1 Contemporaneous and short lags
+
+**Method.** Correlation matrices between monthly portfolio series and macroeconomic indicators at lags of 0 to 3 months, using the coefficient selected in C.2.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One heat map per lag: rows are portfolio series (levels and first differences, prefixed d_), columns indicators; colour and printed value give the correlation on a diverging scale fixed on [−1, 1] (teal positive, sand negative, white zero).
+
+**Interpretation.** Strong correlations in levels that vanish in first differences typically reflect common trends rather than short-run relations; no inference is drawn here without the corrections of D.5.
+
+*Output:* Figures `fig_corr_macro_lag0_mensal`, `fig_corr_macro_lag1_mensal`, `fig_corr_macro_lag2_mensal`, `fig_corr_macro_lag3_mensal`.
+
+```{python}
+#| label: c288
+Y_MONTHLY = ["collection", "n_payers", "n_new", "d_collection", "d_n_payers", "d_n_new"]
+mmd = monthly_all.select("month", *Y_MONTHLY).join(macro_m, on="month", how="left").sort("month")
+def corr_matrix(frame: pl.DataFrame, ys, xs, lag: int, freq_col: str) -> pl.DataFrame:
+    rows = []
+    for yv in ys:
+        row = {"y": yv}
+        for xv in xs:
+            x = frame[xv].shift(lag).to_numpy().astype(float)
+            row[xv] = corr_pair(x, frame[yv].to_numpy().astype(float), METHOD.get((yv.removeprefix("d_"), xv), GLOBAL_METHOD))[0]
+        rows.append(row)
+    return pl.DataFrame(rows)
+for lag in range(4):
+    fig = heatmap(corr_matrix(mmd, Y_MONTHLY, MACRO_VARS, lag, "month"), "y")
+    save_fig(fig, f"fig_corr_macro_lag{lag}_mensal", width="double")
+    if lag < 3:
+        fig.show()
+fig
+```
+
+#### D.1.2 Lags of 1 to 12 months
+
+**Method.** Cross-correlation functions between pre-whitened series (C.3.4) at lags of 1 to 12 months.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One heat-map panel per portfolio series; rows are indicators, columns lags in months; the colour bar gives the correlation on [−1, 1].
+
+**Interpretation.** Because pre-whitening removes each series' own autocorrelation, an isolated dark cell indicates that past values of the indicator are associated with the portfolio series beyond common persistence.
+
+*Output:* Figure `fig_ccf_monthly`; Table `tab_ccf_monthly`.
+
+```{python}
+#| label: c290
+rows = []
+for yv in ("collection", "n_payers", "n_new"):
+    for xv in MACRO_VARS:
+        if xv not in PREPARED or yv not in PREPARED:
+            continue
+        x, y = PREPARED[xv], PREPARED[yv]
+        n = min(x.size, y.size)
+        fx, fy = prewhiten(x[-n:], y[-n:])
+        for lag in range(1, 13):
+            r, p = corr_pair(fx[:-lag], fy[lag:], METHOD.get((yv, xv), GLOBAL_METHOD))
+            rows.append({"y": yv, "x": xv, "lag_months": lag, "r": r, "p_value": p, "n": int(fx.size - lag)})
+ccf_m = pl.DataFrame(rows)
+fig = make_subplots(rows=1, cols=3, shared_yaxes=True, column_titles=["collection", "n_payers", "n_new"], horizontal_spacing=0.03)
+for j, yv in enumerate(("collection", "n_payers", "n_new"), start=1):
+    mat = ccf_m.filter(pl.col("y") == yv).pivot(on="lag_months", index="x", values="r")
+    fig.add_trace(go.Heatmap(z=mat.drop("x").to_numpy(), x=list(range(1, 13)), y=mat["x"].to_list(), colorscale=DIV, zmin=-1, zmax=1, zmid=0,
+                             showscale=j == 3), 1, j)
+fig.update_xaxes(title_text="Lag (months)")
+save_fig(fig, "fig_ccf_monthly", width="double")
+save_tab(ccf_m, "tab_ccf_monthly", fmt="{:.4g}")
+fig
+```
+
+### D.2 Quarterly correlations
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### D.2.1 Lags of 1 to 4 quarters
+
+**Method.** Correlations at quarterly frequency between collection and indicators lagged one to four quarters.
+
+**Data.** Quarterly aggregates of the monthly series (1.5, 1.6).
+
+**How to read.** Heat map: rows are indicators, columns lags in quarters; colour bar as in D.1.1.
+
+**Interpretation.** The quarterly resolution is intermediate between noisy monthly data and the short annual sample.
+
+*Output:* Figure `fig_corr_quarterly`; Table `tab_corr_quarterly`.
+
+```{python}
+#| label: c293
+q = monthly_all.with_columns(pl.col("month").dt.truncate("1q").alias("quarter")).group_by("quarter").agg(
+    pl.col("collection").sum(), pl.col("n_new").sum(), pl.col("n_payers").sum(), pl.col("stock").last()).join(macro_q, on="quarter").sort("quarter")
+q = q.with_columns([pl.col(c).diff().alias(f"d_{c}") for c in ("collection", "n_new", "n_payers", "stock", *MACRO_VARS)])
+rows = []
+for yv in ("collection", "n_payers", "n_new", "stock"):
+    for xv in MACRO_VARS:
+        for lag in range(1, 5):
+            r, p = corr_pair(q[f"d_{xv}"].shift(lag).to_numpy().astype(float), q[f"d_{yv}"].to_numpy().astype(float), METHOD.get((yv, xv), GLOBAL_METHOD))
+            rows.append({"y": yv, "x": xv, "lag_quarters": lag, "r": r, "p_value": p})
+corr_q = pl.DataFrame(rows)
+mat = corr_q.filter(pl.col("y") == "collection").pivot(on="lag_quarters", index="x", values="r")
+fig = heatmap(mat.rename({c: f"t-{c}" for c in mat.columns if c != "x"}), "x")
+save_fig(fig, "fig_corr_quarterly")
+save_tab(corr_q, "tab_corr_quarterly", fmt="{:.4g}")
+fig
+```
+
+### D.3 Annual correlations
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+:::{.callout-warning}
+## Checagem das correlações anuais
+A correlação entre emprego e estoque é guiada pela tendência comum e por 2020 (n = 10 anos). A checagem está em
+[Selic over e checagem](../eda/2026-10-23_macro_selic_over_checagem.qmd), seção 2.5. Leia os mapas anuais abaixo com isso em mente.
+:::
+
+#### D.3.1 Annual portfolio aggregates
+
+**Method.** Correlations between annual portfolio aggregates and indicators at lags of 0 to 3 years.
+
+**Data.** Annual aggregates (B.1.1) and annual macroeconomic series, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** One heat map per lag, rows portfolio aggregates, columns indicators; colour bar as in D.1.1.
+
+**Interpretation.** With about ten observations the sampling error of each coefficient is large; values are reported for completeness rather than inference.
+
+*Output:* Figures `fig_corr_macro_lag0_anual`, `fig_corr_macro_lag1_anual`, `fig_corr_macro_lag2_anual`, `fig_corr_macro_lag3_anual`.
+
+```{python}
+#| label: c296
+macro_a = macro_m.with_columns(pl.col("month").dt.year().alias("year")).group_by("year").agg(
+    [pl.col(c).last() if c in LOG_VARS else pl.col(c).mean() for c in MACRO_VARS]).sort("year")
+ann = annual.select("year", "stock", "collected", "portfolio_rate", "share_paying", "n_cda").join(new_year.select("year", "n_new"), on="year", how="left")
+ann_m = ann.join(macro_a, on="year", how="left").sort("year")
+Y_ANNUAL = ["portfolio_rate", "share_paying", "collected", "stock", "n_new"]
+for lag in range(4):
+    fig = heatmap(corr_matrix(ann_m, Y_ANNUAL, MACRO_VARS, lag, "year"), "y")
+    save_fig(fig, f"fig_corr_macro_lag{lag}_anual", width="double")
+    if lag < 3:
+        fig.show()
+fig
+```
+
+#### D.3.2 Annual recovery rate
+
+**Method.** Correlations between the annual portfolio recovery rate and each indicator at lags of 0 to 3 years.
+
+**Data.** As in D.3.1.
+
+**How to read.** Heat map: rows are indicators, columns lags; colour bar as in D.1.1.
+
+**Interpretation.** The same caveat on sample size as in D.3.1 applies.
+
+*Output:* Figure `fig_corr_taxa_recuperacao_macro`.
+
+```{python}
+#| label: c298
+rate_macro = pl.DataFrame([{"x": xv, **{f"t-{lag}": corr_pair(ann_m[xv].shift(lag).to_numpy().astype(float),
+                                                                   ann_m["portfolio_rate"].to_numpy().astype(float), GLOBAL_METHOD)[0]
+                                        for lag in range(4)}} for xv in MACRO_VARS])
+fig = heatmap(rate_macro, "x")
+save_fig(fig, "fig_corr_taxa_recuperacao_macro")
+fig
+```
+
+#### D.3.3 New enrolments and stock
+
+**Method.** Correlations between annual new enrolments, year-end stock and the indicators.
+
+**Data.** As in D.3.1.
+
+**How to read.** One row per pair with the coefficient.
+
+**Interpretation.** The same caveat on sample size as in D.3.1 applies.
+
+*Output:* Table `tab_corr_proxies_annual`.
+
+```{python}
+#| label: c300
+rows = []
+for yv in ("n_new", "stock"):
+    for xv in MACRO_VARS:
+        for lag in range(4):
+            r, p = corr_pair(ann_m[xv].shift(lag).to_numpy().astype(float), ann_m[yv].to_numpy().astype(float), GLOBAL_METHOD)
+            rows.append({"y": yv, "x": xv, "lag_years": lag, "r": r, "p_value": p, "n": int(ann_m.height - lag)})
+corr_proxies = pl.DataFrame(rows)
+save_tab(corr_proxies, "tab_corr_proxies_annual", fmt="{:.4g}")
+corr_proxies
+```
+
+### D.4 Panel correlations
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### D.4.1 Full panel
+
+**Method.** Correlation matrix of CDA-level variables in the full panel, with pairwise-complete observations, computed out of core in DuckDB; Spearman coefficients are Pearson correlations of average ranks.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** Matrix of coefficients for recovery rate, its lag, stock, age and payment indicator.
+
+**Interpretation.** These coefficients describe the whole panel and serve as the benchmark for the estimation sample.
+
+*Output:* Table `tab_corr_full`.
+
+```{python}
+#| label: c303
+PANEL_VARS = ["rate", "rate_l1", "stock", "age", "paid_flag"]
+def panel_corr(frame: pl.DataFrame) -> pl.DataFrame:
+    rows = []
+    for a in PANEL_VARS:
+        row = {"variable": a}
+        for b in PANEL_VARS:
+            row[b] = corr_pair(frame[a].to_numpy().astype(float), frame[b].to_numpy().astype(float), GLOBAL_METHOD)[0]
+        rows.append(row)
+    return pl.DataFrame(rows)
+PANEL_SRC = parts_glob("1.4:panel", PANEL, EXTRACT_PARAMS)
+PAIR_SQL = """
+WITH d AS (
+    SELECT CAST({a} AS DOUBLE) AS a, CAST({b} AS DOUBLE) AS b
+    FROM (SELECT rate, rate_l1, LN(stock) AS stock, age, paid_flag FROM read_parquet('{src}') WHERE stock > 0)
+    WHERE {a} IS NOT NULL AND {b} IS NOT NULL AND NOT isnan({a}) AND NOT isnan({b})
+), r AS (
+    -- average ranks for ties, as in scipy.stats.spearmanr
+    SELECT a, b,
+           RANK() OVER (ORDER BY a) + (COUNT(*) OVER (PARTITION BY a) - 1) / 2.0 AS ra,
+           RANK() OVER (ORDER BY b) + (COUNT(*) OVER (PARTITION BY b) - 1) / 2.0 AS rb
+    FROM d
+)
+SELECT '{a}' AS var_a, '{b}' AS var_b, COUNT(*) AS n, CORR(a, b) AS pearson, CORR(ra, rb) AS spearman FROM r
+"""
+PAIRS = {f"{a}__{b}": PAIR_SQL.format(a=a, b=b, src=PANEL_SRC)
+         for i, a in enumerate(PANEL_VARS) for b in PANEL_VARS[i + 1:]}
+pair_corr = collect(cached_sql_parts("D.4.1", PAIRS, params=EXTRACT_PARAMS))
+lookup = {(r["var_a"], r["var_b"]): r[GLOBAL_METHOD] for r in pair_corr.iter_rows(named=True)}
+corr_full = pl.DataFrame([{"variable": a, **{b: 1.0 if a == b else lookup.get((a, b), lookup.get((b, a))) for b in PANEL_VARS}}
+                          for a in PANEL_VARS])
+save_tab(corr_full, "tab_corr_full", fmt="{:.3f}")
+corr_full
+```
+
+#### D.4.2 Estimation sample
+
+**Method.** The same matrix in the estimation sample.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. Random sample of one million CDA-years used in D.6.
+
+**How to read.** Matrix as in D.4.1.
+
+**Interpretation.** Close agreement with D.4.1 shows that the sample is representative for these variables.
+
+*Output:* Table `tab_corr_sample`.
+
+```{python}
+#| label: c305
+est_sample = collect(cached("D.4.2", lambda: panel.filter((pl.col("stock") > 0) & pl.col("rate_l1").is_not_null())
+                             .select("ID_DEBITO", "year", "rate", "rate_l1", "stock", "age", "paid_flag", "ICMS_ORIGIN")
+                             .collect(engine="streaming").sample(n=1_000_000, seed=SEED), params={**EXTRACT_PARAMS, "n": 1_000_000}))
+corr_sample = panel_corr(est_sample.with_columns(pl.col("stock").log()))
+save_tab(corr_sample, "tab_corr_sample", fmt="{:.3f}")
+corr_sample
+```
+
+### D.5 Statistical significance
+
+*Terms introduced in this section:* Newey–West (HAC) standard errors; moving-block bootstrap. Definitions are given in the Glossary.
+
+#### D.5.1 Robust inference
+
+**Method.** Robust inference for correlations between autocorrelated series: the moving-block bootstrap resamples contiguous blocks of observations and so preserves short-run dependence; results are checked against Newey–West (HAC) standard errors.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One row per variable pair and lag, with the coefficient, bootstrap confidence interval and *p*-value.
+
+**Interpretation.** Intervals that include zero indicate associations not distinguishable from zero once dependence is accounted for.
+
+```{python}
+#| label: c308
+from statsmodels.stats.sandwich_covariance import cov_hac
+
+def block_bootstrap_corr(x: np.ndarray, y: np.ndarray, method: str, block: int = 12, n_boot: int = 999) -> tuple[float, float, float, float]:
+    m = ~(np.isnan(x) | np.isnan(y))
+    x, y = x[m], y[m]
+    n = x.size
+    r0 = corr_pair(x, y, method)[0]
+    rng = np.random.default_rng(SEED)
+    starts = np.arange(n - block + 1)
+    boots = []
+    for _ in range(n_boot):
+        idx = np.concatenate([np.arange(s, s + block) for s in rng.choice(starts, size=int(np.ceil(n / block)))])[:n]
+        boots.append(corr_pair(x[idx], y[idx], method)[0])
+    boots = np.array(boots)
+    p = float(2 * min((boots <= 0).mean(), (boots >= 0).mean()))
+    return r0, float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5)), p
+
+def robust_monthly() -> list[dict]:
+    rows = []
+    for r in ccf_m.iter_rows(named=True):
+        x, y = PREPARED[r["x"]], PREPARED[r["y"]]
+        n = min(x.size, y.size)
+        lag = r["lag_months"]
+        est, lo, hi, p = block_bootstrap_corr(x[-n:][:-lag], y[-n:][lag:], METHOD.get((r["y"], r["x"]), GLOBAL_METHOD))
+        rows.append({"y": r["y"], "x": r["x"], "lag": lag, "frequency": "monthly", "r": est, "ci_low": lo, "ci_high": hi, "p_boot": p})
+    return rows
+
+robust = pl.DataFrame(cached_json("D.5.1", robust_monthly, params={"block": 12, "n_boot": 999}))
+robust.sort("p_boot").head(10)
+```
+
+#### D.5.2 Multiple testing
+
+**Method.** Control of the false discovery rate across all variable–lag combinations with the Benjamini–Hochberg procedure at *q* = 0.05: among the associations declared significant, the expected share of false positives is at most 5%.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** Heat map: rows are indicators, columns lags in months; colour and printed value give the correlation with monthly collection; an asterisk marks combinations significant after correction. The table lists the significant associations.
+
+**Interpretation.** Isolated significant cells at scattered lags are weaker evidence than a consistent block across adjacent lags.
+
+*Output:* Figure `fig_heatmap_significant`; Table `tab_assoc_significance`.
+
+```{python}
+#| label: c310
+robust = robust.with_columns(pl.Series("q_bh", multipletests(robust["p_boot"].to_numpy(), method="fdr_bh")[1]))
+robust = robust.with_columns((pl.col("q_bh") < 0.05).alias("significant"))
+sig = robust.filter(pl.col("y") == "collection").sort("lag")
+mat = sig.pivot(on="lag", index="x", values="r", sort_columns=True)
+flag = sig.pivot(on="lag", index="x", values="significant", sort_columns=True)
+cols = [c for c in mat.columns if c != "x"]
+marks = [[("" if v is None else f"{v:.2f}" + ("*" if f else "")) for v, f in zip(rv, fv)]
+         for rv, fv in zip(mat.select(cols).iter_rows(), flag.select(cols).iter_rows())]
+fig = heatmap(mat, "x", colorbar_title="Correlation with<br>collection", text=marks)
+fig.add_annotation(text="* significant after Benjamini–Hochberg correction (q < 0.05)", x=0, y=-0.25, xref="paper", yref="paper",
+                   showarrow=False, xanchor="left", font_size=9)
+fig.update_layout(xaxis_title="Lag (months)")
+save_fig(fig, "fig_heatmap_significant")
+save_tab(robust.filter(pl.col("significant")).sort("q_bh"), "tab_assoc_significance", fmt="{:.4g}")
+fig
+```
+
+### D.6 CDA-level and portfolio-level models
+
+*Terms introduced in this section:* Logit model, odds ratio, fixed effects, variance inflation factor, AR(1). Definitions are given in the Glossary.
+
+#### D.6.1 Model 1: probability of payment
+
+**Method.** Logit model of the probability that a CDA records a payment in a year, as a function of log stock, age and lagged recovery rate, with year fixed effects that absorb all common shocks, including programmes and macroeconomic conditions.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. Random sample of one million CDA-years with positive stock and an observed lag.
+
+**How to read.** One row per regressor with coefficient, robust standard error, *p*-value and odds ratio.
+
+**Interpretation.** An odds ratio above 1 means higher values of the regressor are associated with higher odds of payment, other regressors held constant.
+
+*Output:* Table `tab_model1_logit`.
+
+```{python}
+#| label: c313
+import statsmodels.formula.api as smf
+est = est_sample.with_columns(pl.col("stock").log().alias("log_stock"), pl.col("year").cast(pl.Utf8)).to_pandas()
+
+def coef_table(res, label: str, odds: bool = False) -> pl.DataFrame:
+    ci = res.conf_int()
+    out = pl.DataFrame({"term": res.params.index.tolist(), "coef": res.params.values, "se": res.bse.values,
+                        "p_value": res.pvalues.values, "ci_low": ci[0].values, "ci_high": ci[1].values}).with_columns(pl.lit(label).alias("model"))
+    return out.with_columns(pl.col("coef").exp().alias("odds_ratio")) if odds else out
+
+m1 = smf.logit("paid_flag ~ log_stock + age + rate_l1 + C(year)", data=est).fit(disp=False, cov_type="HC1")
+tab_m1 = coef_table(m1, "logit", odds=True)
+save_tab(tab_m1.filter(~pl.col("term").str.starts_with("C(year)")), "tab_model1_logit", fmt="{:.4g}")
+print(f"McFadden pseudo-R2 = {m1.prsquared:.4f}; n = {int(m1.nobs):,}")
+tab_m1
+```
+
+#### D.6.2 Model 2: CDA recovery rate
+
+**Method.** OLS regression of the CDA recovery rate on its lag, log stock and age, with year fixed effects and heteroskedasticity-robust (HC1) standard errors; CDA-years with rates above one are excluded.
+
+**Data.** As in D.6.1.
+
+**How to read.** One row per regressor with coefficient, standard error and *p*-value; R² and sample size are printed.
+
+**Interpretation.** The coefficient on the lagged rate measures persistence of recovery at the CDA level.
+
+*Output:* Table `tab_model2_ols`.
+
+```{python}
+#| label: c315
+m2 = smf.ols("rate ~ rate_l1 + log_stock + age + C(year)", data=est[est["rate"] <= 1]).fit(cov_type="HC1")
+tab_m2 = coef_table(m2, "ols")
+save_tab(tab_m2.filter(~pl.col("term").str.starts_with("C(year)")), "tab_model2_ols", fmt="{:.4g}")
+print(f"R2 = {m2.rsquared:.4f}; n = {int(m2.nobs):,}")
+tab_m2
+```
+
+#### D.6.3 Model 3: portfolio recovery rate
+
+**Method.** First-order autoregression of the portfolio recovery rate, r_t = α + ρ r_{t−1} + ε_t, at annual and monthly frequency, with Newey–West standard errors (12 lags) at monthly frequency; only finite rates enter the estimation.
+
+**Data.** Annual rates (B.1.1) and monthly rates (C.4.2).
+
+**How to read.** One row per frequency and term, with coefficient, standard error, *p*-value and number of observations.
+
+**Interpretation.** ρ near 0 indicates that shocks to recovery do not carry over; ρ near 1 indicates highly persistent recovery.
+
+*Output:* Table `tab_model3_ar1`.
+
+```{python}
+#| label: c317
+from statsmodels.tsa.ar_model import AutoReg
+y_a = annual["portfolio_rate"].drop_nulls().to_numpy()
+y_m = monthly_rate["rate"].drop_nulls().to_numpy()
+ar_a = AutoReg(y_a[np.isfinite(y_a)], lags=1).fit()
+ar_m = AutoReg(y_m[np.isfinite(y_m)], lags=1).fit(cov_type="HAC", cov_kwds={"maxlags": 12})
+tab_m3 = pl.DataFrame([{"frequency": f, "term": t, "coef": float(r.params[i]), "se": float(r.bse[i]), "p_value": float(r.pvalues[i]), "n": int(r.nobs)}
+                       for f, r in (("annual", ar_a), ("monthly", ar_m)) for i, t in enumerate(("const", "rate_lag1"))])
+save_tab(tab_m3, "tab_model3_ar1", fmt="{:.4g}")
+tab_m3
+```
+
+#### D.6.4 Model 4: probability of payment and macroeconomic conditions
+
+**Method.** Model 1 with year fixed effects replaced by five annual macroeconomic indicators (Selic, IPCA, IBC-Br, credit to firms, unemployment), each standardised to zero mean and unit variance; collinearity is assessed with variance inflation factors.
+
+**Data.** As in D.6.1, merged with annual macroeconomic series.
+
+**How to read.** Coefficient table as in D.6.1, plus a table of VIFs.
+
+**Interpretation.** Odds ratios refer to a one-standard-deviation change in the indicator. VIFs above about 10 mean that individual coefficients are poorly identified.
+
+*Output:* Tables `tab_model4_logit_macro`, `tab_vif`.
+
+```{python}
+#| label: c319
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+macro_std = macro_a.with_columns([((pl.col(c) - pl.col(c).mean()) / pl.col(c).std()).alias(c) for c in MACRO_VARS])
+est_m = est_sample.with_columns(pl.col("stock").log().alias("log_stock")).join(macro_std, on="year", how="left").drop_nulls(MACRO_VARS).to_pandas()
+MAIN_MACRO = ["selic", "ipca", "gdp_monthly", "credit_firms", "unemployment"]
+m4 = smf.logit("paid_flag ~ log_stock + age + rate_l1 + " + " + ".join(MAIN_MACRO), data=est_m).fit(disp=False, cov_type="HC1")
+tab_m4 = coef_table(m4, "logit_macro", odds=True)
+Xv = macro_std.select(MAIN_MACRO).drop_nulls().to_numpy()
+vif = pl.DataFrame({"variable": MAIN_MACRO, "vif": [variance_inflation_factor(np.column_stack([np.ones(len(Xv)), Xv]), i + 1) for i in range(len(MAIN_MACRO))]})
+save_tab(tab_m4, "tab_model4_logit_macro", fmt="{:.4g}")
+save_tab(vif, "tab_vif", fmt="{:.2f}")
+tab_m4
+```
+
+#### D.6.5 Model 4b: principal components
+
+**Method.** Model 4 estimated on the principal components of the standardised indicators, which are uncorrelated by construction.
+
+**Data.** As in D.6.4.
+
+**How to read.** Loadings table: weight of each indicator in each component; coefficient table as in D.6.1.
+
+**Interpretation.** Interpret a component's coefficient through its loadings, for example as a general activity or price factor.
+
+*Output:* Tables `tab_pca_loadings`, `tab_model4b_pcs`.
+
+```{python}
+#| label: c321
+from sklearn.decomposition import PCA as _PCA
+Z = macro_std.drop_nulls(MACRO_VARS)
+pca_macro = _PCA(n_components=3, random_state=SEED).fit(Z.select(MACRO_VARS).to_numpy())
+loadings = pl.DataFrame({"variable": MACRO_VARS, **{f"PC{i + 1}": pca_macro.components_[i] for i in range(3)}})
+pcs = pl.DataFrame({"year": Z["year"], **{f"PC{i + 1}": pca_macro.transform(Z.select(MACRO_VARS).to_numpy())[:, i] for i in range(3)}})
+est_pc = est_sample.with_columns(pl.col("stock").log().alias("log_stock")).join(pcs, on="year", how="inner").to_pandas()
+m4b = smf.logit("paid_flag ~ log_stock + age + rate_l1 + PC1 + PC2 + PC3", data=est_pc).fit(disp=False, cov_type="HC1")
+tab_m4b = coef_table(m4b, "logit_pcs", odds=True)
+save_tab(loadings.with_columns(pl.lit(None).alias("_")).drop("_"), "tab_pca_loadings", fmt="{:.3f}")
+save_tab(tab_m4b, "tab_model4b_pcs", fmt="{:.4g}")
+print("Explained variance:", np.round(pca_macro.explained_variance_ratio_, 3))
+tab_m4b
+```
+
+#### D.6.6 Model comparison
+
+**Method.** Comparison of specifications by McFadden's pseudo-R² and likelihood-ratio tests between nested models.
+
+**Data.** Models of D.6.1, D.6.4 and D.6.5.
+
+**How to read.** One row per model or comparison.
+
+**Interpretation.** The fixed-effects model is the upper benchmark for specifications based on annual common variables, because year dummies absorb all of their variation.
+
+*Output:* Table `tab_model_comparison`.
+
+```{python}
+#| label: c323
+base = smf.logit("paid_flag ~ log_stock + age + rate_l1", data=est_m).fit(disp=False)
+fe = smf.logit("paid_flag ~ log_stock + age + rate_l1 + C(year)", data=est_m.assign(year=est_m["year"].astype(str))).fit(disp=False)
+macro_fit = smf.logit("paid_flag ~ log_stock + age + rate_l1 + " + " + ".join(MAIN_MACRO), data=est_m).fit(disp=False)
+pc_fit = smf.logit("paid_flag ~ log_stock + age + rate_l1 + PC1 + PC2 + PC3", data=est_pc).fit(disp=False)
+def lr(a, b) -> tuple[float, float]:
+    stat = 2 * (b.llf - a.llf)
+    return float(stat), float(stats.chi2.sf(stat, b.df_model - a.df_model))
+comparison = pl.DataFrame([{"model": n, "pseudo_r2": float(r.prsquared), "aic": float(r.aic), "df_model": int(r.df_model),
+                            "lr_vs_base": lr(base, r)[0] if n != "CDA variables only" else float("nan"),
+                            "p_lr": lr(base, r)[1] if n != "CDA variables only" else float("nan")}
+                           for n, r in (("CDA variables only", base), ("Year fixed effects", fe), ("Macro indicators", macro_fit), ("Macro PCs", pc_fit))])
+save_tab(comparison, "tab_model_comparison", fmt="{:.4g}")
+comparison
+```
+
+### D.7 Dynamic models
+
+*Terms introduced in this section:* ARDL, Granger causality. Definitions are given in the Glossary.
+
+#### D.7.1 Autoregressive distributed-lag models
+
+**Method.** Autoregressive distributed-lag (ARDL) models of each stationary monthly portfolio series on its own lags and on current and lagged indicators, with programme dummies; lag orders selected by an information criterion; Newey–West standard errors.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency. Pooled portfolio and by origin.
+
+**How to read.** One row per model and regressor with coefficient, standard error and *p*-value.
+
+**Interpretation.** Significant lagged indicators suggest delayed associations; coefficients are conditional on the programme dummies.
+
+*Output:* Table `tab_ardl`.
+
+```{python}
+#| label: c326
+from statsmodels.tsa.ardl import ardl_select_order
+PROG_DUMMY = np.zeros(prepared_df.height)
+months = prepared_df["month"].to_numpy()
+for _, a, b in PROGRAMMES:
+    PROG_DUMMY[(months >= np.datetime64(a)) & (months <= np.datetime64(b))] = 1
+rows = []
+for yv in ("collection", "n_payers"):
+    if yv not in prepared_df.columns:
+        continue
+    X = prepared_df.select([c for c in MAIN_MACRO if c in prepared_df.columns]).to_pandas()
+    sel = ardl_select_order(prepared_df[yv].to_numpy(), maxlag=3, exog=X, maxorder=6, ic="aic", trend="c",
+                            fixed=PROG_DUMMY[:, None], seasonal=True, period=12)
+    res = sel.model.fit(cov_type="HAC", cov_kwds={"maxlags": 12})
+    rows += [{"y": yv, "term": t, "coef": float(c), "se": float(s), "p_value": float(p)}
+             for t, c, s, p in zip(res.params.index, res.params.values, res.bse.values, res.pvalues.values)]
+ardl = pl.DataFrame(rows)
+save_tab(ardl.filter(~pl.col("term").str.contains("s\\(")), "tab_ardl", fmt="{:.4g}")
+ardl
+```
+
+#### D.7.2 Granger causality
+
+**Method.** Granger tests: an indicator Granger-causes a portfolio series if its past values improve the prediction of the series beyond the series' own past. The test is an *F* test of the lagged indicator in a vector autoregression with lag length selected by AIC; *q*-values apply the Benjamini–Hochberg correction.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One row per pair with selected lags, *F* statistic, *p*-value and *q*-value.
+
+**Interpretation.** A significant result means predictive precedence, not causation.
+
+*Output:* Table `tab_granger`.
+
+```{python}
+#| label: c328
+from statsmodels.tsa.stattools import grangercausalitytests
+from statsmodels.tsa.api import VAR
+rows = []
+for yv in ("collection", "n_payers"):
+    for xv in MAIN_MACRO:
+        d = prepared_df.select(yv, xv).drop_nulls().to_numpy()
+        p_sel = max(1, VAR(d).select_order(maxlags=12).aic)
+        res = grangercausalitytests(d, maxlag=[p_sel])[p_sel][0]["ssr_ftest"]
+        rows.append({"y": yv, "x": xv, "lags": int(p_sel), "F": float(res[0]), "p_value": float(res[1])})
+granger = pl.DataFrame(rows).with_columns(pl.Series("q_bh", multipletests([r["p_value"] for r in rows], method="fdr_bh")[1]))
+save_tab(granger, "tab_granger", fmt="{:.4g}")
+granger
+```
+
+#### D.7.3 The Selic rate and tax non-payment as financing
+
+**Method.** Interpretation of the Selic coefficients for stock and recovery under the hypothesis that firms use unpaid taxes as financing when credit is expensive (H4b), with and without credit to firms as a control.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One row per outcome and specification with the Selic coefficient and its robust standard error.
+
+**Interpretation.** Under H4b, a higher Selic would be associated with a larger stock and lower recovery; robustness to the credit control indicates that the association is not merely a credit-cycle effect.
+
+*Output:* Table `tab_selic`.
+
+```{python}
+#| label: c330
+selic_rows = []
+for yv in ("collection", "stock", "n_payers"):
+    if yv not in prepared_df.columns:
+        continue
+    for spec, extra in (("Selic", []), ("Selic + credit to firms", ["credit_firms"])):
+        d = prepared_df.select(yv, "selic", *extra).drop_nulls().to_pandas()
+        for lag in (0, 3, 6, 12):
+            dd = d.assign(selic_l=d["selic"].shift(lag)).dropna()
+            res = smf.ols(f"{yv} ~ selic_l" + "".join(f" + {e}" for e in extra), data=dd).fit(cov_type="HAC", cov_kwds={"maxlags": 12})
+            selic_rows.append({"y": yv, "specification": spec, "lag_months": lag, "coef_selic": float(res.params["selic_l"]),
+                               "se": float(res.bse["selic_l"]), "p_value": float(res.pvalues["selic_l"]), "n": int(res.nobs)})
+selic_tab = pl.DataFrame(selic_rows)
+save_tab(selic_tab, "tab_selic", fmt="{:.4g}")
+selic_tab
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```

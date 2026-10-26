@@ -16,6 +16,12 @@ listing:
     description: "Pergunta"
 ---
 
+## Entrada principal: o EDA do paper
+
+**[EDA do paper (paper_eda_v1) no laboratório](paper_eda/index.qmd)** — o EDA inteiro do artigo (partes A a E),
+portado em páginas com as mudanças das reuniões de outubro: sem 2026, Selic over, estrelas de significância
+(p ≤ 0,10), avisos de qualidade do DEBITO e só agregados. As entradas datadas abaixo detalham cada mudança.
+
 ## O que é este site
 
 Caderno de laboratório da pesquisa sobre a dívida ativa inscrita do Estado de São Paulo.
@@ -29,6 +35,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
 ## O que mudou nesta versão
 
+- *(2026-10-26)* **[EDA do paper inteiro no laboratório](paper_eda/index.qmd):** `paper_eda_v1` em 8 páginas (dados, A, B em três partes, C, D, E), geradas do notebook sem rodá-lo, com corte em 2025, Selic over, estrelas de significância e qualidade do DEBITO sinalizada. O K-means passa a mostrar perfis de k = 2, 3 e 4.
 - *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](dados/2026-10-26_cnpj_enrich.qmd):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
 - *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.
 - *(2026-10-23)* **K-means no top 1% das CDAs ICMS:** 100 inicializações por k, de k=2 a k=8, com cotovelo e silhueta; k=2 e k=4 comparados por estabilidade entre sementes, ARI, tamanhos e perfis agregados; a figura da seção 5.18 refeita.

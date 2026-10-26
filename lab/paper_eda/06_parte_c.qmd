@@ -1,0 +1,487 @@
+---
+title: "Parte C. Propriedades estatísticas"
+description: "Porte do paper EDA v1 (Parte C) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+:::{.callout-important}
+## Qualidade do DEBITO (só sinalizado, nada corrigido)
+- Faltam as fotos de **2018-12** e de **2020-10 a 2020-12**. O arquivo de 2020 M10–M12 repete o de M04–M06, e o de
+  2018 M10–M12 está truncado (2018-11 parcial). A foto de **2024-03** está parcial.
+- Consequência no painel: o "fim de ano" de 2018 é a última foto em que cada CDA aparece (out. ou nov.), e o de 2020 é setembro.
+- No laboratório, o estoque mensal soma **uma linha por CDA e mês** (o paper somava as linhas repetidas). A tabela de
+  qualidade está na página [Dados](01_dados.qmd#lab-qualidade).
+:::
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+```{python}
+#| label: dep-85
+#| include: false
+annual = collect(panel.group_by("year").agg(
+    pl.len().alias("n_cda"), pl.col("stock").sum().alias("stock"), pl.col("paid").sum().alias("collected"),
+    pl.col("rate").filter(pl.col("stock") > 0).mean().alias("mean_cda_rate"),
+    pl.col("paid_flag").mean().alias("share_paying")).sort("year"))
+annual = annual.with_columns(pl.when(pl.col("stock") > 0).then(pl.col("collected") / pl.col("stock")).alias("portfolio_rate"),
+                             (pl.col("stock") / 1e9).alias("stock_bn"), (pl.col("collected") / 1e9).alias("collected_bn"))
+save_tab(annual.select("year", "n_cda", "stock_bn", "collected_bn",
+                       (100 * pl.col("portfolio_rate")).alias("portfolio_rate_pct"),
+                       (100 * pl.col("mean_cda_rate")).alias("mean_cda_rate_pct"),
+                       (100 * pl.col("share_paying")).alias("share_paying_pct")), "tab_serie_agregada_ano", fmt="{:,.3f}")
+annual
+```
+
+## Part C. Statistical properties
+The properties are examined in a fixed order because each step conditions the next. The distribution of the variables (C.1) determines whether moment-based statistics are reliable and which transformation is required. Linearity (C.2) then determines, before any association is inspected, whether Pearson's or Spearman's coefficient is appropriate, which avoids choosing the measure after seeing the results. Stationarity and autocorrelation (C.3) must be addressed because correlations between trending or autocorrelated series are spurious (Granger and Newbold, 1974) and their naive *p*-values invalid. Finally, the persistence of recovery (C.4) informs the lag structure of the models in Part D.
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+### C.1 Distribution
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### C.1.1 Moments and zero inflation
+
+**Method.** Moments and zero inflation of the main variables.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. CDA-year variables from a random sample of one million CDA-years with positive stock (1.4).
+
+**How to read.** One row per variable and level (monthly or CDA-year): mean, median, standard deviation, skewness, excess kurtosis and share of zeros.
+
+**Interpretation.** Skewness far from zero and excess kurtosis far above zero indicate departures from normality that make moment-based statistics, such as Pearson's correlation, sensitive to a few observations.
+
+*Output:* Table `tab_moments`.
+
+```{python}
+#| label: c259
+Y_VARS = ["collection", "n_payers", "n_new", "stock"]
+mm = monthly_all.select("month", *Y_VARS).join(macro_m, on="month", how="left").sort("month")
+def moments(x: np.ndarray, name: str, level: str) -> dict:
+    x = x[~np.isnan(x)]
+    return {"variable": name, "level": level, "n": x.size, "mean": x.mean(), "median": np.median(x), "sd": x.std(ddof=1),
+            "skewness": stats.skew(x), "kurtosis": stats.kurtosis(x), "share_zero": float((x == 0).mean())}
+cda_sample = collect(panel.filter(pl.col("stock") > 0).select("rate", "paid", "stock")).sample(n=1_000_000, seed=SEED)
+moments_tab = pl.DataFrame([moments(mm[c].to_numpy().astype(float), c, "monthly") for c in Y_VARS] +
+                           [moments(cda_sample[c].to_numpy().astype(float), c, "CDA-year") for c in ("rate", "paid", "stock")])
+save_tab(moments_tab, "tab_moments", fmt="{:,.4g}")
+moments_tab
+```
+
+#### C.1.2 Normality
+
+**Method.** Normality tests (Shapiro–Wilk and Jarque–Bera) and normal Q–Q plots, for each series in levels, logarithms and inverse hyperbolic sine.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** Q–Q plots: one panel per series and transformation; the horizontal axis gives standard normal quantiles, the vertical axis standardised sample quantiles; the dotted line is the 45-degree reference. The table gives test statistics and *p*-values.
+
+**Interpretation.** Points on the line indicate normality; points above it at the right end and below it at the left end indicate heavy tails. A transformation that brings points onto the line is preferred.
+
+*Output:* Figure `fig_qq`; Table `tab_normality`.
+
+```{python}
+#| label: c261
+TRANSFORMS = {"level": lambda x: x, "log": lambda x: np.log(x[x > 0]), "asinh": np.arcsinh}
+rows = []
+for c in Y_VARS:
+    x = mm[c].drop_nulls().to_numpy().astype(float)
+    for t, f in TRANSFORMS.items():
+        v = f(x)
+        sw, jb = stats.shapiro(v), stats.jarque_bera(v)
+        rows.append({"variable": c, "transform": t, "shapiro_W": sw.statistic, "shapiro_p": sw.pvalue,
+                     "jb_stat": jb.statistic, "jb_p": jb.pvalue})
+normality = pl.DataFrame(rows)
+fig = make_subplots(rows=2, cols=len(Y_VARS), horizontal_spacing=0.06, vertical_spacing=0.12,
+                    subplot_titles=[f"{c} ({t})" for t in ("level", "log") for c in Y_VARS])
+for j, c in enumerate(Y_VARS, start=1):
+    for i, t in enumerate(("level", "log"), start=1):
+        v = np.sort(TRANSFORMS[t](mm[c].drop_nulls().to_numpy().astype(float)))
+        q = stats.norm.ppf((np.arange(1, v.size + 1) - 0.5) / v.size)
+        z = (v - v.mean()) / v.std()
+        fig.add_trace(go.Scatter(x=q, y=z, mode="markers", marker=dict(size=3, color=CEMEPI["deep_teal"])), i, j)
+        fig.add_trace(go.Scatter(x=[-3, 3], y=[-3, 3], mode="lines", line=dict(color=CEMEPI["sand"], dash="dot")), i, j)
+fig.update_annotations(font_size=9)
+save_fig(fig, "fig_qq", width="double", ratio=0.6)
+save_tab(normality, "tab_normality", fmt="{:.4g}")
+fig
+```
+
+#### C.1.3 Transformations
+
+**Method.** Choice of variance-stabilising transformations: the Box–Cox parameter λ is estimated by maximum likelihood (λ = 0 corresponds to the logarithm, λ = 1 to no transformation); the inverse hyperbolic sine is used for series with zeros.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** One row per series with the estimated λ and the transformation adopted.
+
+**Interpretation.** λ close to 0 supports the logarithm; λ far from both 0 and 1 suggests a power transformation.
+
+*Output:* Table `tab_transforms`.
+
+```{python}
+#| label: c263
+from scipy.stats import boxcox
+rows = []
+for c in Y_VARS:
+    x = mm[c].drop_nulls().to_numpy().astype(float)
+    best = min(normality.filter(pl.col("variable") == c).iter_rows(named=True), key=lambda r: -r["shapiro_p"])
+    lam = boxcox(x[x > 0])[1] if (x > 0).all() else float("nan")
+    rows.append({"variable": c, "boxcox_lambda": lam, "has_zeros": bool((x == 0).any()),
+                 "selected": "asinh" if (x == 0).any() else best["transform"]})
+transforms = pl.DataFrame(rows)
+SELECTED = dict(zip(transforms["variable"], transforms["selected"]))
+save_tab(transforms, "tab_transforms", fmt="{:.3f}")
+transforms
+```
+
+### C.2 Linearity and the choice of correlation coefficient
+
+*Terms introduced in this section:* Pearson *r*, Spearman ρ, Kendall τ, LOWESS, RESET, Harvey–Collier. Definitions are given in the Glossary.
+
+#### C.2.1 Visual assessment
+
+**Method.** Visual check of functional form with LOWESS smoothers, which fit weighted local regressions over a moving window and trace the relation without assuming a functional form.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** Grid of scatter plots: rows are portfolio series, columns macroeconomic indicators; each panel shows the points and the smoother.
+
+**Interpretation.** A smoother close to a straight line supports a linear relation; marked curvature or a flat smoother argues against Pearson's coefficient.
+
+*Output:* Figure `fig_lowess_grid`.
+
+```{python}
+#| label: c266
+import statsmodels.api as sm
+lowess = sm.nonparametric.lowess
+X_SHOW = ["selic", "gdp_monthly", "credit_firms", "unemployment", "ipca", "hh_indebtedness"]
+fig = make_subplots(rows=len(Y_VARS), cols=len(X_SHOW), horizontal_spacing=0.02, vertical_spacing=0.03)
+for i, yv in enumerate(Y_VARS, start=1):
+    for j, xv in enumerate(X_SHOW, start=1):
+        d = mm.select(xv, yv).drop_nulls()
+        x, y = d[xv].to_numpy().astype(float), TRANSFORMS[SELECTED[yv]](d[yv].to_numpy().astype(float))
+        fit = lowess(y, x[: y.size], frac=0.6)
+        fig.add_trace(go.Scatter(x=x[: y.size], y=y, mode="markers", marker=dict(size=2.5, color=CEMEPI["grey"])), i, j)
+        fig.add_trace(go.Scatter(x=fit[:, 0], y=fit[:, 1], mode="lines", line=dict(color=CEMEPI["deep_teal"], width=1.5)), i, j)
+        if i == len(Y_VARS):
+            fig.update_xaxes(title_text=xv, row=i, col=j, title_font_size=9)
+        if j == 1:
+            fig.update_yaxes(title_text=yv, row=i, col=j, title_font_size=9)
+fig.update_xaxes(showticklabels=False)
+fig.update_yaxes(showticklabels=False)
+save_fig(fig, "fig_lowess_grid", width="double", ratio=0.75)
+fig
+```
+
+#### C.2.2 Tests of functional form
+
+**Method.** Formal tests of linearity: Ramsey's RESET test (joint significance of powers of the fitted values), the Harvey–Collier test (mean of recursive residuals) and the comparison of linear and spline fits by the Akaike information criterion.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One row per pair of variables, with test statistics, *p*-values and AIC difference.
+
+**Interpretation.** Rejection by the tests or a lower AIC for the spline indicates a nonlinear relation.
+
+*Output:* Table `tab_linearity`.
+
+```{python}
+#| label: c268
+from statsmodels.stats.diagnostic import linear_reset, linear_harvey_collier
+from statsmodels.gam.api import GLMGam, BSplines
+rows = []
+for yv in Y_VARS:
+    for xv in MACRO_VARS:
+        d = mm.select(xv, yv).drop_nulls()
+        if d.height < 30:
+            continue
+        x = d[xv].to_numpy().astype(float)
+        y = np.arcsinh(d[yv].to_numpy().astype(float)) if SELECTED[yv] == "asinh" else TRANSFORMS[SELECTED[yv]](d[yv].to_numpy().astype(float))
+        X = sm.add_constant(x)
+        ols = sm.OLS(y, X).fit()
+        reset = linear_reset(ols, power=3, use_f=True)
+        try:
+            hc_p = float(linear_harvey_collier(ols)[1])
+        except Exception:
+            hc_p = float("nan")
+        gam = GLMGam(y, exog=np.ones((y.size, 1)), smoother=BSplines(x[:, None], df=[6], degree=[3])).fit()
+        rows.append({"y": yv, "x": xv, "reset_p": float(reset.pvalue), "harvey_collier_p": hc_p,
+                     "aic_linear": ols.aic, "aic_spline": gam.aic, "spline_better": bool(gam.aic + 2 < ols.aic)})
+linearity = pl.DataFrame(rows)
+save_tab(linearity, "tab_linearity", fmt="{:.4g}")
+linearity
+```
+
+#### C.2.3 Decision rule
+
+**Method.** Pre-specified rule for the correlation coefficient: Spearman's ρ (with Kendall's τ as robustness check) whenever linearity is rejected at the 5% level or the variables are heavy-tailed, Pearson's *r* otherwise. Setting the rule before inspecting correlations avoids choosing the coefficient on the basis of the results.
+
+**Data.** Results of C.1 and C.2.
+
+**How to read.** One row per pair, with the rule's outcome and the difference between coefficients.
+
+**Interpretation.** Large differences between coefficients confirm that the choice matters for that pair.
+
+*Output:* Table `tab_corr_method_decision`.
+
+```{python}
+#| label: c270
+heavy = {r["variable"]: abs(r["kurtosis"]) > 3 for r in moments_tab.filter(pl.col("level") == "monthly").iter_rows(named=True)}
+decision = linearity.with_columns(
+    ((pl.col("reset_p") < 0.05) | pl.col("spline_better") | pl.col("y").replace_strict(heavy, default=False)).alias("nonlinear_or_heavy"))
+decision = decision.with_columns(pl.when(pl.col("nonlinear_or_heavy")).then(pl.lit("spearman")).otherwise(pl.lit("pearson")).alias("method"))
+div = []
+for r in decision.iter_rows(named=True):
+    d = mm.select(r["x"], r["y"]).drop_nulls()
+    a, b = d[r["x"]].to_numpy().astype(float), d[r["y"]].to_numpy().astype(float)
+    div.append(abs(corr_pair(a, b, "pearson")[0] - corr_pair(a, b, "spearman")[0]))
+decision = decision.with_columns(pl.Series("abs_pearson_minus_spearman", div))
+METHOD = {(r["y"], r["x"]): r["method"] for r in decision.iter_rows(named=True)}
+GLOBAL_METHOD = "spearman" if decision["method"].eq("spearman").mean() >= 0.5 else "pearson"
+save_tab(decision.select("y", "x", "reset_p", "spline_better", "method", "abs_pearson_minus_spearman"), "tab_corr_method_decision", fmt="{:.3f}")
+print(f"Share of pairs using Spearman: {decision['method'].eq('spearman').mean():.0%}; global method: {GLOBAL_METHOD}")
+decision
+```
+
+### C.3 Stationarity and autocorrelation
+
+*Terms introduced in this section:* Stationarity, unit root, ADF, KPSS, Zivot–Andrews, ACF, PACF, Ljung–Box, pre-whitening. Definitions are given in the Glossary.
+
+#### C.3.1 Unit roots
+
+**Method.** Unit-root and stationarity tests. The augmented Dickey–Fuller (ADF) test has a unit root as null hypothesis, the KPSS test has stationarity as null; the Zivot–Andrews test allows one structural break at an unknown date, which matters here because programmes may produce breaks that ADF would mistake for a unit root.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** One row per series and test, with statistic, *p*-value and, for Zivot–Andrews, the estimated break date.
+
+**Interpretation.** ADF rejecting and KPSS not rejecting indicates stationarity; the reverse indicates a unit root; disagreement indicates a borderline case to be differenced conservatively.
+
+*Output:* Table `tab_stationarity`.
+
+```{python}
+#| label: c273
+from statsmodels.tsa.stattools import adfuller, kpss, zivot_andrews
+import warnings
+def unit_root_row(x: np.ndarray, name: str) -> dict:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        adf = adfuller(x, autolag="AIC")
+        kp = kpss(x, regression="c", nlags="auto")
+        za = zivot_andrews(x, regression="c", autolag="AIC")
+    return {"series": name, "adf_stat": adf[0], "adf_p": adf[1], "kpss_stat": kp[0], "kpss_p": kp[1],
+            "za_stat": za[0], "za_p": za[1], "za_break_index": int(za[4]),
+            "stationary": bool(adf[1] < 0.05 and kp[1] > 0.05)}
+series = {c: TRANSFORMS[SELECTED[c]](mm[c].drop_nulls().to_numpy().astype(float)) for c in Y_VARS}
+series |= {c: mm[c].drop_nulls().to_numpy().astype(float) for c in MACRO_VARS}
+stationarity = pl.DataFrame([unit_root_row(v, k) for k, v in series.items()] +
+                            [unit_root_row(np.diff(v), f"d_{k}") for k, v in series.items()])
+save_tab(stationarity, "tab_stationarity", fmt="{:.4g}")
+stationarity
+```
+
+#### C.3.2 Seasonal unit roots
+
+**Method.** Seasonal unit-root tests: an OCSB-type regression testing the coefficient on the lagged seasonal level, and a Canova–Hansen-type test of the stability of seasonal dummies across the two halves of the sample.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** One row per series with statistics and *p*-values.
+
+**Interpretation.** Evidence of a seasonal unit root would require seasonal differencing before association analysis.
+
+*Output:* Table `tab_seasonal_unitroot`.
+
+```{python}
+#| label: c275
+def ocsb_like(x: np.ndarray, m: int = 12) -> dict:
+    # Seasonal-difference regression test (OCSB form): significance of the seasonal unit-root coefficient
+    dx = np.diff(x)
+    sdx = x[m:] - x[:-m]
+    y = sdx[1:] - sdx[:-1]
+    X = sm.add_constant(np.column_stack([dx[m - 1:-1], sdx[:-1]]))
+    res = sm.OLS(y, X).fit()
+    return {"ocsb_t_seasonal": float(res.tvalues[2]), "ocsb_p": float(res.pvalues[2])}
+
+def canova_hansen_proxy(x: np.ndarray, m: int = 12) -> dict:
+    # Stability of seasonal dummies across halves of the sample (Chow-type F test)
+    n = x.size
+    months = np.arange(n) % m
+    D = np.eye(m)[months]
+    half = (np.arange(n) >= n // 2).astype(float)[:, None]
+    full = sm.OLS(x, np.column_stack([D, D * half])).fit()
+    restricted = sm.OLS(x, D).fit()
+    f, p, _ = full.compare_f_test(restricted)
+    return {"seasonal_stability_F": float(f), "seasonal_stability_p": float(p)}
+
+seasonal_ur = pl.DataFrame([{"series": c, **ocsb_like(series[c]), **canova_hansen_proxy(series[c])} for c in Y_VARS])
+save_tab(seasonal_ur, "tab_seasonal_unitroot", fmt="{:.4g}")
+seasonal_ur
+```
+
+#### C.3.3 Autocorrelation
+
+**Method.** Autocorrelation (ACF) and partial autocorrelation (PACF) functions, and Ljung–Box tests. The ACF gives the correlation between a series and its own lags; the PACF gives the same after removing shorter lags.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** One row of panels per series, ACF on the left and PACF on the right; the horizontal axis gives the lag in months, bars give the coefficients and dotted lines the approximate 95% bounds ±1.96/√n. The table gives Ljung–Box tests at lags 6, 12 and 24.
+
+**Interpretation.** Bars beyond the bounds indicate significant autocorrelation. A slowly decaying ACF is typical of a trending or non-stationary series; a PACF that cuts off after a few lags suggests an autoregressive process of that order; spikes at lag 12 indicate seasonality.
+
+*Output:* Figure `fig_acf_pacf`; Table `tab_ljungbox`.
+
+```{python}
+#| label: c277
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.stats.diagnostic import acorr_ljungbox
+LAGS = 24
+fig = make_subplots(rows=len(Y_VARS), cols=2, shared_xaxes=True, vertical_spacing=0.04, column_titles=["ACF", "PACF"])
+lb_rows = []
+for i, c in enumerate(Y_VARS, start=1):
+    x = series[c]
+    band95 = 1.96 / np.sqrt(x.size)
+    for j, vals in enumerate((acf(x, nlags=LAGS)[1:], pacf(x, nlags=LAGS)[1:]), start=1):
+        fig.add_trace(go.Bar(x=list(range(1, LAGS + 1)), y=vals, marker_color=CEMEPI["deep_teal"]), i, j)
+        fig.add_hline(y=band95, line_dash="dot", line_color=CEMEPI["sand"], row=i, col=j)
+        fig.add_hline(y=-band95, line_dash="dot", line_color=CEMEPI["sand"], row=i, col=j)
+    fig.update_yaxes(title_text=c, row=i, col=1, title_font_size=9)
+    lb = acorr_ljungbox(x, lags=[6, 12, 24], return_df=True)
+    lb_rows += [{"series": c, "lag": int(l), "Q": float(q), "p_value": float(p)} for l, q, p in zip(lb.index, lb["lb_stat"], lb["lb_pvalue"])]
+fig.update_xaxes(title_text="Lag (months)", row=len(Y_VARS))
+fig.add_annotation(text="Dotted lines: ±1.96/√n bounds", x=1, y=1.04, xref="paper", yref="paper", showarrow=False, xanchor="right", font_size=9)
+save_fig(fig, "fig_acf_pacf", width="double", ratio=0.9)
+save_tab(pl.DataFrame(lb_rows), "tab_ljungbox", fmt="{:.4g}")
+fig
+```
+
+#### C.3.4 Transformations for association analysis
+
+**Method.** Transformations for association analysis: differencing where C.3.1 indicates a unit root, followed by pre-whitening, in which an autoregressive model is fitted to each macroeconomic series and the same filter is applied to the portfolio series, so that the remaining cross-correlations are not driven by shared autocorrelation.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Macroeconomic series from 1.6 at the same frequency.
+
+**How to read.** One row per series with the differencing order and the filter applied.
+
+**Interpretation.** Associations computed after these steps are less exposed to spurious correlation between trending series.
+
+*Output:* Table `tab_transform_plan`.
+
+```{python}
+#| label: c279
+from statsmodels.tsa.arima.model import ARIMA
+stat_map = dict(zip(stationarity["series"], stationarity["stationary"]))
+plan, PREPARED = [], {}
+for k, v in series.items():
+    diff = not stat_map.get(k, False)
+    z = np.diff(v) if diff else v
+    plan.append({"series": k, "transform": SELECTED.get(k, "level"), "differenced": diff})
+    PREPARED[k] = z
+prepared_df = mm.select("month").slice(1).with_columns([pl.Series(k, (v if v.size == mm.height - 1 else v[1:]).astype(float))
+                                                          for k, v in PREPARED.items() if v.size >= mm.height - 1])
+
+def prewhiten(x: np.ndarray, y: np.ndarray, order=(2, 0, 0)) -> tuple[np.ndarray, np.ndarray]:
+    m = ~(np.isnan(x) | np.isnan(y))
+    fit = ARIMA(x[m], order=order).fit()
+    phi = np.r_[1, -fit.arparams]
+    fx = np.convolve(x[m], phi, mode="valid")
+    fy = np.convolve(y[m], phi, mode="valid")
+    return fx, fy
+
+save_tab(pl.DataFrame(plan), "tab_transform_plan")
+pl.DataFrame(plan)
+```
+
+### C.4 Persistence of recovery
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### C.4.1 Persistence at the CDA level
+
+**Method.** Persistence of recovery at the CDA level: correlation between a CDA's recovery rate in year *t* and in years *t* − 1 to *t* − 3, with Pearson and Spearman coefficients.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** Heat map: rows are coefficients, columns lags, colour and value give the correlation. Bar chart: the same values as grouped bars, identified in the legend.
+
+**Interpretation.** A Spearman coefficient well above Pearson indicates persistence in ranks (paying CDAs keep paying) weakened in the linear measure by extreme rates.
+
+*Output:* Figures `fig_corr_pearson_lags`, `fig_autocorr_taxa_lags`.
+
+```{python}
+#| label: c282
+pl_sample = collect(panel.filter(pl.col("stock") > 0).select("rate", "rate_l1", "rate_l2", "rate_l3")).sample(n=2_000_000, seed=SEED)
+rows = []
+for m in ("pearson", "spearman"):
+    for k in (1, 2, 3):
+        r, p = corr_pair(pl_sample["rate"].to_numpy().astype(float), pl_sample[f"rate_l{k}"].to_numpy().astype(float), m)
+        rows.append({"method": m, "lag": f"t-{k}", "r": r})
+lag_corr = pl.DataFrame(rows)
+fig = heatmap(lag_corr.pivot(on="lag", index="method", values="r"), "method")
+save_fig(fig, "fig_corr_pearson_lags")
+fig.show()
+fig = go.Figure([go.Bar(x=d["lag"], y=d["r"], name=k[0], marker_color=color(i)) for i, (k, d) in enumerate(lag_corr.group_by("method", maintain_order=True))])
+fig.update_layout(barmode="group", yaxis_title="Correlation with rate in year t", showlegend=True, legend=dict(orientation="h", y=1.1))
+save_fig(fig, "fig_autocorr_taxa_lags")
+fig
+```
+
+#### C.4.2 Persistence at the portfolio level
+
+**Method.** Autocorrelation of the portfolio recovery rate. The monthly rate is collection in month *t* divided by the stock at the end of month *t* − 1, computed only when that stock is positive; the annual rate is from B.1.1.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Annual rates 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Left: monthly autocorrelations (lags in months); right: annual autocorrelations (lags in years); dotted lines give the approximate 95% bounds.
+
+**Interpretation.** With about ten annual observations, the annual coefficients are imprecise and should not be read individually.
+
+*Output:* Figure `fig_portfolio_acf`.
+
+```{python}
+#| label: c284
+monthly_rate = monthly_all.sort("month").with_columns(pl.when(pl.col("stock").shift(1) > 0).then(pl.col("collection") / pl.col("stock").shift(1)).alias("rate")) \
+    .filter(pl.col("rate").is_not_null() & pl.col("rate").is_finite())
+ac_m = acf(monthly_rate["rate"].to_numpy(), nlags=24)[1:]
+ac_a = acf(annual["portfolio_rate"].drop_nulls().to_numpy(), nlags=min(5, annual.height - 2))[1:]
+fig = make_subplots(rows=1, cols=2, column_titles=["Monthly", "Annual"], horizontal_spacing=0.1)
+fig.add_trace(go.Bar(x=list(range(1, 25)), y=ac_m, marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=list(range(1, ac_a.size + 1)), y=ac_a, marker_color=CEMEPI["sand"]), 1, 2)
+fig.add_hline(y=1.96 / np.sqrt(monthly_rate.height), line_dash="dot", row=1, col=1)
+fig.add_hline(y=-1.96 / np.sqrt(monthly_rate.height), line_dash="dot", row=1, col=1)
+fig.add_hline(y=1.96 / np.sqrt(annual.height), line_dash="dot", row=1, col=2)
+fig.add_hline(y=-1.96 / np.sqrt(annual.height), line_dash="dot", row=1, col=2)
+fig.update_xaxes(title_text="Lag (months)", row=1, col=1)
+fig.update_xaxes(title_text="Lag (years)", row=1, col=2)
+fig.update_yaxes(title_text="Autocorrelation of the portfolio recovery rate", row=1, col=1)
+fig.add_annotation(text="Dotted lines: ±1.96/√n bounds", x=1, y=1.08, xref="paper", yref="paper", showarrow=False, xanchor="right", font_size=9)
+save_fig(fig, "fig_portfolio_acf", width="double")
+fig
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```

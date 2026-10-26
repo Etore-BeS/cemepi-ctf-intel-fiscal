@@ -1,0 +1,601 @@
+---
+title: "Parte A. A carteira por tributo"
+description: "Porte do paper EDA v1 (Parte A) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+## Part A. The portfolio across tax types
+This part describes the whole portfolio and assembles the evidence on which the restriction to ICMS rests (A.7).
+
+*Terms introduced in this section:* ICMS, IPVA, ITCMD, logarithmic scale. Definitions are given in the Glossary.
+
+### A.1 Volume of the database
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### A.1.1 Rows per table
+
+**Method.** Count of the rows of each source table.
+
+**Data.** All tables of the extraction.
+
+**How to read.** Horizontal bars, one per table; the horizontal axis gives the number of rows on a logarithmic scale and the exact count is printed at the end of each bar.
+
+**Interpretation.** The longest bar shows which table dominates the data volume; the repetition of CDAs in monthly snapshots explains the size of `DEBITO` and motivates the out-of-core processing of Section 0.
+
+*Output:* Figure `fig_volume_tabelas`; Table `tab_inventory`.
+
+```{python}
+#| label: c37
+fig = bars(inventory, "table", "rows", log=True, val_title="Rows (log scale)", text_fmt="{:,.0f}")
+save_fig(fig, "fig_volume_tabelas", width="double", ratio=0.5)
+save_tab(inventory.sort("rows", descending=True), "tab_inventory", fmt="{:,.0f}")
+fig
+```
+
+#### A.1.2 Schema
+
+**Method.** Listing of the columns and storage types of each table.
+
+**Data.** All tables of the extraction.
+
+**How to read.** One row per column, with its table and type.
+
+**Interpretation.** The schema documents the raw structure from which all derived variables are built.
+
+*Output:* Table `tab_schema`.
+
+```{python}
+#| label: c39
+def schema_table() -> pl.DataFrame:
+    con = duck()
+    try:
+        return con.execute("""SELECT table_name AS "table", column_name AS "column", data_type AS type
+                              FROM information_schema.columns WHERE NOT starts_with(table_name, '_')
+                              ORDER BY table_name, ordinal_position""").pl()
+    finally:
+        con.close()
+
+schema = collect(cached("A.1.2", schema_table))
+save_tab(schema, "tab_schema")
+schema
+```
+
+#### A.1.3 Uniqueness of CDAs in the annual panel
+
+**Method.** Consistency check of the deduplication of snapshots.
+
+**Data.** Annual panel, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** For each year, the number of rows and the number of distinct CDAs.
+
+**Interpretation.** Equal values confirm one observation per CDA and year; a larger row count would indicate duplicated snapshots.
+
+*Output:* Table `tab_sanity_panel`.
+
+```{python}
+#| label: c41
+sanity = collect(year_end.group_by("year").agg(pl.len().alias("rows"), pl.col("ID_DEBITO").n_unique().alias("distinct_cda"))
+                 .with_columns((pl.col("rows") == pl.col("distinct_cda")).alias("one_row_per_cda")).sort("year"))
+save_tab(sanity, "tab_sanity_panel", fmt="{:,.0f}")
+sanity
+```
+
+#### A.1.4 Structure of a single raw snapshot
+
+**Method.** Profile of one raw monthly snapshot, computed on a subquery restricted to that month so that other months do not contaminate the profile.
+
+**Data.** `DEBITO`, a single monthly snapshot.
+
+**How to read.** Summary of the records in the snapshot.
+
+**Interpretation.** The profile illustrates what a single snapshot contains before any aggregation.
+
+*Output:* Table `tab_probe_month`.
+
+```{python}
+#| label: c43
+# lab: no lugar da amostra de 10 linhas da foto (registros individuais), o esquema da tabela DEBITO,
+# sem as colunas de pessoa. O laboratório só mostra agregados.
+def debito_schema() -> pl.DataFrame:
+    con = duck()
+    try:
+        return con.execute("""SELECT column_name, data_type FROM information_schema.columns
+                              WHERE table_name = 'DEBITO' AND column_name NOT IN ('NOME_DEVEDOR', 'CPF_DEVEDOR')
+                              ORDER BY ordinal_position""").pl()
+    finally:
+        con.close()
+
+probe = collect(cached("A.1.4", debito_schema))
+save_tab(probe, "tab_probe_month")
+probe
+```
+
+### A.2 Missing values
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### A.2.1 Fields with missing values
+
+**Method.** Share of missing values per field, distinguishing structural gaps (field not applicable) from genuine gaps.
+
+**Data.** All tables of the extraction.
+
+**How to read.** Horizontal bars, one per field, sorted from the most to the least incomplete; the horizontal axis gives the percentage of missing values.
+
+**Interpretation.** High shares in fields such as administrative fees are structural and need no treatment; gaps in key fields such as enrolment date or value limit what can be measured.
+
+*Output:* Figure `fig_nulos_top`; Table `tab_nulls`.
+
+```{python}
+#| label: c46
+def null_shares() -> pl.DataFrame:
+    con = duck()
+    rows = []
+    try:
+        cols = con.execute("""SELECT table_name, column_name FROM information_schema.columns
+                              WHERE NOT starts_with(table_name, '_')""").fetchall()
+        by_table: dict[str, list[str]] = {}
+        for t, c in cols:
+            if c.upper() in ("NOME_DEVEDOR", "CPF_DEVEDOR"):  # lab: colunas de pessoa não são lidas
+                continue
+            by_table.setdefault(t, []).append(c)
+        for t, cs in by_table.items():
+            where = f"WHERE ANO_EXTRACAO = {SNAP_YEAR} AND MES_EXTRACAO = {SNAP_MONTH}" if t == "DEBITO" else ""
+            exprs = ", ".join(f"""AVG(CASE WHEN "{c}" IS NULL OR CAST("{c}" AS VARCHAR) = '' THEN 1 ELSE 0 END) AS "{c}" """ for c in cs)
+            res = con.execute(f'SELECT {exprs} FROM "{t}" {where}').fetchone()
+            rows += [{"table": t, "column": c, "null_share": float(v)} for c, v in zip(cs, res)]
+    finally:
+        con.close()
+    return pl.DataFrame(rows)
+
+nulls = collect(cached("A.2.1", null_shares, params={"snapshot": EXTRACT}))
+top_nulls = nulls.filter(pl.col("null_share") > 0).sort("null_share", descending=True).head(20) \
+                 .with_columns((pl.col("table") + "." + pl.col("column")).alias("field"), (100 * pl.col("null_share")).alias("pct"))
+fig = bars(top_nulls, "field", "pct", val_title="Missing values (%)")
+save_fig(fig, "fig_nulos_top", width="double")
+save_tab(nulls.sort("table", "null_share", descending=[False, True]), "tab_nulls", fmt="{:.4f}")
+fig
+```
+
+#### A.2.2 Missing values by tax type
+
+**Method.** Share of missing values in key fields by tax type.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** Rows are tax types; columns give the percentage missing for enrolment date, administrative situation, filing status and value.
+
+**Interpretation.** Marked differences across tax types indicate that data quality itself may justify treating some types separately (criterion v of A.7).
+
+*Output:* Table `tab_nulls_by_tax`.
+
+```{python}
+#| label: c48
+key_fields = ["DATA_INSCRICAO", "SITUACAO_DEBITO", "STATUS_AJUIZAMENTO_DEBITO", "value"]
+nulls_by_tax = collect(snapshot_all.group_by("bucket").agg(
+    [(pl.col(c).is_null().mean() * 100).alias(c) for c in key_fields]
+    + [((pl.col("identifier") == "No CNPJ").mean() * 100).alias("debtor_identifier")]).sort("bucket"))
+save_tab(nulls_by_tax, "tab_nulls_by_tax", fmt="{:.3f}")
+nulls_by_tax
+```
+
+### A.3 Grouping of debt types
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### A.3.1 Classification rule
+
+**Method.** Assignment of raw debt types to tax groups (ICMS, IPVA, ITCMD, fees and other) by a text rule applied to the type name.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per raw type, with its assigned group.
+
+**Interpretation.** The rule is transparent and can be checked type by type.
+
+*Output:* Table `tab_tipo_debito_buckets`.
+
+```{python}
+#| label: c51
+bucket_table = collect(snapshot_all.group_by("TIPO_DEBITO", "bucket").agg(
+    pl.len().alias("n_cda"), (pl.col("value").sum() / 1e9).alias("stock_bn")).sort("bucket", "n_cda", descending=[False, True]))
+bucket_table = bucket_table.with_columns(pl.col("bucket").replace_strict(
+    {"ICMS": "contains 'ICMS'", "IPVA": "contains 'IPVA'", "ITCMD": "contains 'ITCMD'"}, default="none of the above").alias("rule"))
+save_tab(bucket_table, "tab_tipo_debito_buckets", fmt="{:,.3f}")
+bucket_table
+```
+
+#### A.3.2 Composition of the ITCMD group
+
+**Method.** Listing of the raw types forming the ITCMD group.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per raw type in the group.
+
+**Interpretation.** The table documents the scope of the ITCMD group in the cross-tax comparisons.
+
+*Output:* Table `tab_itcmd_types`.
+
+```{python}
+#| label: c53
+itcmd = bucket_table.filter(pl.col("bucket") == "ITCMD")
+save_tab(itcmd, "tab_itcmd_types", fmt="{:,.3f}")
+itcmd
+```
+
+### A.4 Frequency and monetary value
+
+*Terms introduced in this section:* Value of a CDA, ECDF. Definitions are given in the Glossary.
+
+#### A.4.1 Number of CDAs by tax type
+
+**Method.** Count of outstanding CDAs by tax group.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** Horizontal bars; the horizontal axis gives the number of CDAs in millions, with the value printed at the end of each bar.
+
+**Interpretation.** Compare with A.4.2: a group that ranks high here but low there consists of many small debts.
+
+*Output:* Figure `fig_bucket_n_id`.
+
+```{python}
+#| label: c56
+composition = collect(snapshot_all.group_by("bucket").agg(
+    pl.len().alias("n_cda"), pl.col("value").sum().alias("stock"),
+    pl.col("value").mean().alias("mean_value"), pl.col("value").median().alias("median_value")))
+composition = composition.with_columns((100 * pl.col("n_cda") / pl.col("n_cda").sum()).alias("pct_cda"),
+                                       (100 * pl.col("stock") / pl.col("stock").sum()).alias("pct_stock"),
+                                       (pl.col("stock") / 1e9).alias("stock_bn"))
+fig = bars(composition.with_columns((pl.col("n_cda") / 1e6).alias("n_cda_m")), "bucket", "n_cda_m",
+           val_title="CDAs (million)", text_fmt="{:,.2f}")
+save_fig(fig, "fig_bucket_n_id")
+fig
+```
+
+#### A.4.2 Stock by tax type
+
+**Method.** Outstanding stock by tax group.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** Horizontal bars; the horizontal axis gives the stock in R$ billion.
+
+**Interpretation.** A group that dominates the stock but not the count holds fewer, larger debts.
+
+*Output:* Figure `fig_bucket_valor`.
+
+```{python}
+#| label: c58
+fig = bars(composition, "bucket", "stock_bn", val_title="Stock (R$ bn)")
+save_fig(fig, "fig_bucket_valor")
+fig
+```
+
+#### A.4.3 Share of CDAs versus share of value
+
+**Method.** Paired comparison of each group's share of the number of CDAs and of the stock.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per tax group; the circle marks the share of CDAs and the diamond the share of stock, both in percent on a common horizontal axis, joined by a grey line; values are printed next to the markers.
+
+**Interpretation.** A long line indicates that count and value are strongly out of proportion. A diamond to the right of the circle identifies a group whose debts are larger than average. This is the main evidence for criterion (i) of A.7.
+
+*Output:* Figure `fig_bucket_pct_qtd_valor`; Table `tab_composition`.
+
+```{python}
+#| label: c60
+d = composition.sort("pct_stock")
+fig = go.Figure()
+for b, a, s in zip(d["bucket"], d["pct_cda"], d["pct_stock"]):
+    fig.add_trace(go.Scatter(x=[a, s], y=[b, b], mode="lines", line=dict(color="#C9CED1", width=3),
+                             hoverinfo="skip", showlegend=False))
+for i, (col, other, name, sym) in enumerate((("pct_cda", "pct_stock", "Share of CDAs", "circle"),
+                                              ("pct_stock", "pct_cda", "Share of stock", "diamond"))):
+    pos = ["middle right" if v >= o else "middle left" for v, o in zip(d[col], d[other])]
+    fig.add_trace(go.Scatter(x=d[col], y=d["bucket"], mode="markers+text", name=name, cliponaxis=False,
+                             marker=dict(color=color(i), size=11, symbol=sym), text=[f"  {v:.1f}%  " for v in d[col]],
+                             textposition=pos, textfont=dict(color=color(i), size=9)))
+fig.update_layout(xaxis=dict(title="Share of the portfolio (%)", range=[-12, 115], showgrid=True, gridcolor="#E6E6E6"),
+                  yaxis=dict(showgrid=False), showlegend=True,
+                  legend=dict(orientation="h", y=-0.28, x=0.5, xanchor="center"),
+                  meta={"min_height": 120 + 45 * d.height})
+save_fig(fig, "fig_bucket_pct_qtd_valor", width="double", ratio=0.45)
+save_tab(composition.select("bucket", "n_cda", "stock_bn", "pct_cda", "pct_stock").sort("pct_stock", descending=True),
+         "tab_composition")
+fig
+```
+
+#### A.4.4 Average value per CDA
+
+**Method.** Mean and median value per CDA by tax group.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per group; columns give mean and median value in R$.
+
+**Interpretation.** Because value distributions are skewed, a mean far above the median indicates that a few very large debts dominate the group's total.
+
+*Output:* Table `tab_ticket_by_tax`.
+
+```{python}
+#| label: c62
+ticket = composition.select("bucket", "mean_value", "median_value").sort("mean_value", descending=True)
+save_tab(ticket, "tab_ticket_by_tax", fmt="{:,.0f}")
+ticket
+```
+
+#### A.4.5 Distribution of CDA values
+
+**Method.** Empirical cumulative distribution functions (ECDF) of CDA value. An ECDF needs no choice of bins and shows the whole distribution, which makes it preferable to histograms for comparing several groups.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA. CDAs with positive value.
+
+**How to read.** The horizontal axis gives CDA value in R$ on a logarithmic scale; the vertical axis gives the cumulative share of CDAs with value up to that point; one line per tax group, identified in the legend.
+
+**Interpretation.** A curve further to the right corresponds to larger debts throughout the distribution; a steep curve indicates values concentrated in a narrow range; crossing curves indicate that the groups differ in dispersion rather than only in level.
+
+*Output:* Figure `fig_value_dist_by_tax`.
+
+```{python}
+#| label: c64
+value_sample = collect(snapshot_all.select("bucket", "value").filter(pl.col("value") > 0)
+                       .group_by("bucket").agg(pl.col("value").sample(n=200_000, with_replacement=True, seed=SEED))
+                       .explode("value"))
+fig = ecdf(value_sample, "value", "bucket", x_title="CDA value (R$, log scale)")
+save_fig(fig, "fig_value_dist_by_tax")
+fig
+```
+
+### A.5 Stock and age
+
+*Terms introduced in this section:* Interquartile range. Definitions are given in the Glossary.
+
+#### A.5.1 Stock by tax type over time
+
+**Method.** Year-end stock by tax group over time.
+
+**Data.** Year-end snapshots of `DEBITO`, all tax types, 2016–2025 [lab: era 2016–2026]; unit of observation: the group-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives stock in R$ billion on a logarithmic scale; one line per group, identified in the legend.
+
+**Interpretation.** On a logarithmic axis, parallel lines mean equal proportional growth and therefore a stable composition; converging or diverging lines indicate a change in composition.
+
+*Output:* Figure `fig_stock_by_tax_year`.
+
+```{python}
+#| label: c67
+STOCK_BY_TAX_SQL = f"""
+WITH last_month AS (
+    SELECT ANO_EXTRACAO, MAX(MES_EXTRACAO) AS m FROM DEBITO
+    WHERE ANO_EXTRACAO BETWEEN {YEARS[0]} AND {YEARS[-1]} AND MES_EXTRACAO BETWEEN 1 AND 12 GROUP BY 1)
+SELECT d.ANO_EXTRACAO AS year, {BUCKET_SQL} AS bucket, COUNT(*) AS n_cda, SUM(VALOR_SEM_HONORARIOS) AS stock
+FROM DEBITO d JOIN last_month l ON d.ANO_EXTRACAO = l.ANO_EXTRACAO AND d.MES_EXTRACAO = l.m
+GROUP BY ALL
+"""
+stock_by_tax = collect(query("A.5.1", STOCK_BY_TAX_SQL, params={"snapshot": EXTRACT}))
+fig = lines(stock_by_tax.with_columns((pl.col("stock") / 1e9).alias("stock_bn")), "year", "stock_bn", "bucket",
+            log_y=True, y_title="Year-end stock (R$ bn, log scale)")
+save_fig(fig, "fig_stock_by_tax_year")
+fig
+```
+
+#### A.5.2 Age of CDAs by tax type
+
+**Method.** Median, mean and interquartile range of CDA age by tax group.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` for all tax types (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per group; the dot marks the median, the diamond the mean and the grey bar the interquartile range, all in years; the legend identifies the markers.
+
+**Interpretation.** A mean well to the right of the median indicates a long tail of old debts; a wide bar indicates heterogeneous enrolment dates.
+
+*Output:* Figure `fig_idade_cda_bucket`; Table `tab_age_by_tax`.
+
+```{python}
+#| label: c69
+age_by_tax = collect(snapshot_all.group_by("bucket").agg(
+    pl.col("age_years").mean().alias("mean_age"), pl.col("age_years").median().alias("median_age"),
+    pl.col("age_years").quantile(0.25).alias("q25"), pl.col("age_years").quantile(0.75).alias("q75")).sort("mean_age"))
+d = age_by_tax.sort("median_age")
+fig = go.Figure()
+for b, lo, hi in zip(d["bucket"], d["q25"], d["q75"]):
+    fig.add_trace(go.Scatter(x=[lo, hi], y=[b, b], mode="lines", line=dict(color="#C9CED1", width=4),
+                             hoverinfo="skip", showlegend=False))
+fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", line=dict(color="#C9CED1", width=4), name="Interquartile range"))
+fig.add_trace(go.Scatter(x=d["median_age"], y=d["bucket"], mode="markers+text", name="Median", cliponaxis=False,
+                         marker=dict(color=CEMEPI["deep_teal"], size=10), text=[f"{v:.1f}" for v in d["median_age"]],
+                         textposition="top center", textfont=dict(size=9, color=CEMEPI["deep_teal"])))
+fig.add_trace(go.Scatter(x=d["mean_age"], y=d["bucket"], mode="markers", name="Mean",
+                         marker=dict(color=CEMEPI["sand"], size=9, symbol="diamond-open", line=dict(width=1.5))))
+fig.update_layout(xaxis=dict(title="Age of CDA (years)", rangemode="tozero", showgrid=True, gridcolor="#E6E6E6"),
+                  yaxis=dict(showgrid=False), showlegend=True,
+                  legend=dict(orientation="h", y=-0.3, x=0.5, xanchor="center"), meta={"min_height": 120 + 45 * d.height})
+save_fig(fig, "fig_idade_cda_bucket", width="double", ratio=0.45)
+save_tab(age_by_tax, "tab_age_by_tax")
+fig
+```
+
+### A.6 Recovery and payments
+
+*Terms introduced in this section:* Non-accumulated recovery, payment indicator. Definitions are given in the Glossary.
+
+#### A.6.1 Recovery rate by tax type
+
+**Method.** Annual non-accumulated recovery rate by tax group: amount paid in the year divided by year-end stock.
+
+**Data.** Year-end snapshots of `DEBITO` and GARE payments, all tax types, 2016–2025 [lab: era 2016–2026]; unit of observation: the group-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives the rate in percent on a logarithmic scale; one line per group, identified in the legend.
+
+**Interpretation.** A persistent vertical gap between lines reflects a structural difference in recovery between tax groups; lines that rise together in the same years reflect common shocks such as settlement programmes.
+
+*Output:* Figure `fig_recovery_by_tax`.
+
+```{python}
+#| label: c72
+RECOVERY_BY_TAX_SQL = f"""
+WITH last_month AS (
+    SELECT ANO_EXTRACAO, MAX(MES_EXTRACAO) AS m FROM DEBITO
+    WHERE ANO_EXTRACAO BETWEEN {YEARS[0]} AND {YEARS[-1]} AND MES_EXTRACAO BETWEEN 1 AND 12 GROUP BY 1),
+ye AS (
+    SELECT d.ANO_EXTRACAO AS year, d.ID_DEBITO, {BUCKET_SQL} AS bucket, d.VALOR_SEM_HONORARIOS AS stock
+    FROM DEBITO d JOIN last_month l ON d.ANO_EXTRACAO = l.ANO_EXTRACAO AND d.MES_EXTRACAO = l.m),
+pay AS (
+    SELECT YEAR(DATA_ARRECADACAO_GARE) AS year, ID_DEBITO, SUM(VALOR_RECEITA) AS paid
+    FROM ARRECADACAO GROUP BY ALL)
+SELECT ye.year, ye.bucket, COUNT(*) AS n_cda, SUM(ye.stock) AS stock,
+       SUM(COALESCE(pay.paid, 0)) AS paid, AVG(CASE WHEN pay.paid > 0 THEN 1 ELSE 0 END) AS share_paying
+FROM ye LEFT JOIN pay ON ye.year = pay.year AND ye.ID_DEBITO = pay.ID_DEBITO
+GROUP BY ALL
+"""
+recovery_by_tax = collect(query("A.6.1", RECOVERY_BY_TAX_SQL, params={"snapshot": EXTRACT})) \
+    .with_columns((100 * pl.col("paid") / pl.col("stock")).alias("rate_pct"))
+fig = lines(recovery_by_tax.filter(pl.col("rate_pct") > 0), "year", "rate_pct", "bucket", log_y=True,
+            y_title="Recovery rate (% of year-end stock, log scale)")
+save_fig(fig, "fig_recovery_by_tax")
+fig
+```
+
+#### A.6.2 Share of paying CDAs by tax type
+
+**Method.** Annual share of CDAs with at least one payment, by tax group.
+
+**Data.** As in A.6.1.
+
+**How to read.** Rows are tax groups and years; the value is the percentage of CDAs paying.
+
+**Interpretation.** This separates whether debts are paid at all (extensive margin) from how much is recovered (A.6.1).
+
+*Output:* Table `tab_payers_by_tax`.
+
+```{python}
+#| label: c74
+payers_by_tax = recovery_by_tax.with_columns((100 * pl.col("share_paying")).alias("pct_paying")) \
+    .pivot(on="bucket", index="year", values="pct_paying").sort("year")
+save_tab(payers_by_tax, "tab_payers_by_tax", fmt="{:.2f}")
+payers_by_tax
+```
+
+#### A.6.3 Monthly enrolment frequency by tax type
+
+**Method.** Monthly count of new CDAs by tax group.
+
+**Data.** `DEBITO`, all tax types, enrolment dates from January 2016 to December 2025 [lab: era até março de 2026], with implausible dates removed; unit of observation: the group-month.
+
+**How to read.** The horizontal axis gives the month; the vertical axis gives the number of new CDAs on a logarithmic scale; one line per group, identified in the legend.
+
+**Interpretation.** Groups with many small debts produce large and irregular counts that would dominate any analysis based on event frequencies (criterion iii of A.7).
+
+*Output:* Figure `fig_enrolment_freq_by_tax`.
+
+```{python}
+#| label: c76
+ENROLMENT_BY_TAX_SQL = f"""
+WITH ids AS (
+    SELECT DISTINCT ID_DEBITO, {BUCKET_SQL} AS bucket, {enrol_date_sql()} AS enrol
+    FROM DEBITO WHERE ANO_EXTRACAO BETWEEN {YEARS[0]} AND {YEARS[-1]} AND MES_EXTRACAO BETWEEN 1 AND 12)
+SELECT DATE_TRUNC('month', enrol) AS month, bucket, COUNT(*) AS n_new
+FROM ids WHERE enrol >= DATE '{YEARS[0]}-01-01' GROUP BY ALL
+"""
+enrol_by_tax = collect(query("A.6.3", ENROLMENT_BY_TAX_SQL, params={"snapshot": EXTRACT}))
+fig = lines(enrol_by_tax.filter(pl.col("n_new") > 0), "month", "n_new", "bucket", log_y=True, markers=False,
+            y_title="New CDAs per month (log scale)")
+save_fig(fig, "fig_enrolment_freq_by_tax", width="double")
+fig
+```
+
+### A.7 Segmentation decision
+
+*Terms introduced in this section:* ICMS Declarado, ICMS Autuação (AIIM). Definitions are given in the Glossary.
+
+#### A.7.1 Criteria for an ICMS-only analysis
+
+**Method.** Structured assessment of the restriction of Parts B to D to ICMS against six explicit criteria: share of the stock, value per CDA and its dispersion, distortion of event frequencies, age and recovery dynamics, data completeness and institutional relevance.
+
+**Data.** Results of A.2 to A.6.
+
+**How to read.** One row per criterion, with the evidence, its implication and what is lost by excluding the other tax groups.
+
+**Interpretation.** The decision rests on the joint weight of the criteria rather than on any single one.
+
+*Output:* Table `tab_segmentation_criteria`.
+
+```{python}
+#| label: c79
+comp = {r["bucket"]: r for r in composition.iter_rows(named=True)}
+ages = {r["bucket"]: r for r in age_by_tax.iter_rows(named=True)}
+rec = recovery_by_tax.group_by("bucket").agg((100 * pl.col("paid").sum() / pl.col("stock").sum()).alias("r"))
+rec = dict(zip(rec["bucket"], rec["r"]))
+enrol_share = enrol_by_tax.group_by("bucket").agg(pl.col("n_new").sum()).with_columns(
+    (100 * pl.col("n_new") / pl.col("n_new").sum()).alias("pct"))
+enrol_share = dict(zip(enrol_share["bucket"], enrol_share["pct"]))
+miss = dict(zip(nulls_by_tax["bucket"], nulls_by_tax["debtor_identifier"]))
+segmentation = pl.DataFrame([
+    ("Share of the stock", f"ICMS {comp['ICMS']['pct_stock']:.1f}% vs IPVA {comp['IPVA']['pct_stock']:.1f}%", "ICMS dominates the monetary portfolio"),
+    ("Share of CDAs", f"ICMS {comp['ICMS']['pct_cda']:.1f}% vs IPVA {comp['IPVA']['pct_cda']:.1f}%", "IPVA dominates counts but not value"),
+    ("Mean value per CDA (R$)", f"ICMS {comp['ICMS']['mean_value']:,.0f} vs IPVA {comp['IPVA']['mean_value']:,.0f}", "Ticket sizes differ by orders of magnitude"),
+    ("Share of new enrolments", f"ICMS {enrol_share.get('ICMS', float('nan')):.1f}% vs IPVA {enrol_share.get('IPVA', float('nan')):.1f}%", "Pooling would let IPVA drive event frequencies"),
+    ("Median age (years)", f"ICMS {ages['ICMS']['median_age']:.1f} vs IPVA {ages['IPVA']['median_age']:.1f}", "Distinct age structures"),
+    ("Recovery rate 2016-2025 (%)", f"ICMS {rec['ICMS']:.2f} vs IPVA {rec['IPVA']:.2f}", "Distinct recovery dynamics"),
+    ("No CNPJ, i.e. CPF or no identifier (%) [lab: era só sem identificador]", f"ICMS {miss['ICMS']:.3f} vs IPVA {miss['IPVA']:.3f}", "Data completeness by tax"),
+    ("Institutional relevance", "Collection policy of PGE-SP centred on ICMS", "ICMS is the policy-relevant portfolio"),
+], schema=["criterion", "evidence", "implication"], orient="row")
+save_tab(segmentation, "tab_segmentation_criteria")
+segmentation
+```
+
+#### A.7.2 Declared versus assessed ICMS
+
+**Method.** Breakdown of the ICMS stock by raw type.
+
+**Data.** December 2025 snapshot [lab: era março de 2026] of `DEBITO` restricted to ICMS (1.2); legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per raw ICMS type, with CDA count, stock and value per CDA.
+
+**Interpretation.** A sharp contrast between declared and assessed debts in number and unit value would justify carrying the origin of the debt through the later analyses; the formal tests are in B.2.
+
+*Output:* Table `tab_icms_types`.
+
+```{python}
+#| label: c81
+icms_types = bucket_table.filter(pl.col("bucket") == "ICMS").with_columns(
+    (100 * pl.col("n_cda") / pl.col("n_cda").sum()).alias("pct_cda"),
+    (100 * pl.col("stock_bn") / pl.col("stock_bn").sum()).alias("pct_stock"),
+    (pl.col("stock_bn") * 1e9 / pl.col("n_cda")).alias("mean_value")).drop("bucket", "rule")
+save_tab(icms_types, "tab_icms_types")
+icms_types
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```

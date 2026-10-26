@@ -1,0 +1,703 @@
+---
+title: "Parte B (1/3). Carteira de ICMS: evolução, tipos, origem e concentração"
+description: "Porte do paper EDA v1 (Parte B (1/3)) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+:::{.callout-important}
+## Qualidade do DEBITO (só sinalizado, nada corrigido)
+- Faltam as fotos de **2018-12** e de **2020-10 a 2020-12**. O arquivo de 2020 M10–M12 repete o de M04–M06, e o de
+  2018 M10–M12 está truncado (2018-11 parcial). A foto de **2024-03** está parcial.
+- Consequência no painel: o "fim de ano" de 2018 é a última foto em que cada CDA aparece (out. ou nov.), e o de 2020 é setembro.
+- No laboratório, o estoque mensal soma **uma linha por CDA e mês** (o paper somava as linhas repetidas). A tabela de
+  qualidade está na página [Dados](01_dados.qmd#lab-qualidade).
+:::
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+## Part B. The ICMS portfolio
+
+*Terms introduced in this section:* Portfolio recovery rate. Definitions are given in the Glossary.
+
+### B.1 Evolution of the portfolio
+
+*Terms introduced in this section:* Bootstrap, settlement programme. Definitions are given in the Glossary.
+
+#### B.1.1 Annual aggregates
+
+**Method.** Annual aggregates of the ICMS portfolio. The portfolio recovery rate weights CDAs by their stock (total paid over total stock, computed only when the stock is positive); the mean CDA rate gives each CDA equal weight.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** One row per year: year-end stock, amount collected, portfolio recovery rate, mean CDA recovery rate and share of CDAs paying.
+
+**Interpretation.** A gap between the portfolio rate and the mean CDA rate indicates that recovery differs between large and small debts.
+
+*Output:* Table `tab_serie_agregada_ano`.
+
+```{python}
+#| label: c85
+annual = collect(panel.group_by("year").agg(
+    pl.len().alias("n_cda"), pl.col("stock").sum().alias("stock"), pl.col("paid").sum().alias("collected"),
+    pl.col("rate").filter(pl.col("stock") > 0).mean().alias("mean_cda_rate"),
+    pl.col("paid_flag").mean().alias("share_paying")).sort("year"))
+annual = annual.with_columns(pl.when(pl.col("stock") > 0).then(pl.col("collected") / pl.col("stock")).alias("portfolio_rate"),
+                             (pl.col("stock") / 1e9).alias("stock_bn"), (pl.col("collected") / 1e9).alias("collected_bn"))
+save_tab(annual.select("year", "n_cda", "stock_bn", "collected_bn",
+                       (100 * pl.col("portfolio_rate")).alias("portfolio_rate_pct"),
+                       (100 * pl.col("mean_cda_rate")).alias("mean_cda_rate_pct"),
+                       (100 * pl.col("share_paying")).alias("share_paying_pct")), "tab_serie_agregada_ano", fmt="{:,.3f}")
+annual
+```
+
+#### B.1.2 Stock by year
+
+**Method.** Year-end ICMS stock.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** Vertical bars, one per year; the vertical axis gives the stock in R$ billion, printed above each bar.
+
+**Interpretation.** Year-to-year changes combine new enrolments, payments and exits; a sudden fall may reflect cancellations or a settlement programme.
+
+*Output:* Figure `fig_estoque_agregado_ano`.
+
+```{python}
+#| label: c87
+fig = go.Figure(go.Bar(x=annual["year"], y=annual["stock_bn"], marker_color=CEMEPI["deep_teal"],
+                       text=[f"{v:,.0f}" for v in annual["stock_bn"]], textposition="outside"))
+fig.update_layout(yaxis_title="Year-end ICMS stock (R$ bn)")
+save_fig(fig, "fig_estoque_agregado_ano")
+fig
+```
+
+#### B.1.3 Stock and collection
+
+**Method.** Joint display of stock and collection in two aligned panels with a common time axis, which avoids the arbitrary visual scaling of a dual axis.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** Upper panel: year-end stock in R$ billion; lower panel: annual collection in R$ billion; the horizontal axis gives the year.
+
+**Interpretation.** Compare the timing of movements across panels rather than their heights.
+
+*Output:* Figure `fig_serie_agregada_icms`.
+
+```{python}
+#| label: c89
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08)
+fig.add_trace(go.Scatter(x=annual["year"], y=annual["stock_bn"], mode="lines+markers", line_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=annual["year"], y=annual["collected_bn"], marker_color=CEMEPI["sand"]), 2, 1)
+fig.update_yaxes(title_text="Stock (R$ bn)", row=1, col=1)
+fig.update_yaxes(title_text="Collected (R$ bn)", row=2, col=1)
+save_fig(fig, "fig_serie_agregada_icms", ratio=0.9)
+fig
+```
+
+#### B.1.4 Mean CDA recovery rate by year
+
+**Method.** Annual mean of CDA-level recovery rates with a 95% confidence interval from a nonparametric bootstrap (200 resamples of CDAs with replacement within each year; interval from the 2.5th and 97.5th percentiles). The bootstrap is used because rates are skewed and zero-inflated, which makes normal-theory intervals unreliable.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. CDA-years with positive stock.
+
+**How to read.** The horizontal axis gives the year; the line gives the mean rate in percent and the shaded band its 95% bootstrap interval, as identified in the legend.
+
+**Interpretation.** A wide band indicates that the mean is driven by a few CDAs with very high rates; means above 100% arise when payments in a year exceed the year-end stock, for instance when a debt is largely paid off during the year.
+
+*Output:* Figure `fig_painel_taxa_media_ano`.
+
+```{python}
+#| label: c91
+rates = collect(panel.filter(pl.col("stock") > 0).select("year", "rate"))
+rng = np.random.default_rng(SEED)
+rows = []
+for (y,), d in rates.group_by("year"):
+    v = d["rate"].to_numpy()
+    boots = [rng.choice(v, size=v.size).mean() for _ in range(200)]
+    rows.append({"year": y, "mean": v.mean() * 100, "lo": np.percentile(boots, 2.5) * 100, "hi": np.percentile(boots, 97.5) * 100})
+ci = pl.DataFrame(rows).sort("year")
+fig = go.Figure([
+    go.Scatter(x=ci["year"].to_list() + ci["year"].to_list()[::-1], y=ci["hi"].to_list() + ci["lo"].to_list()[::-1],
+               fill="toself", fillcolor="rgba(21,76,86,0.15)", line_width=0, hoverinfo="skip", name="95% bootstrap interval"),
+    go.Scatter(x=ci["year"], y=ci["mean"], mode="lines+markers", line_color=CEMEPI["deep_teal"], name="Mean")])
+fig.update_layout(yaxis_title="Mean CDA recovery rate (%)", xaxis_title="Year", showlegend=True,
+                  legend=dict(orientation="h", y=-0.3))
+save_fig(fig, "fig_painel_taxa_media_ano")
+fig
+```
+
+#### B.1.5 New enrolments
+
+**Method.** Number and value of newly enrolled ICMS CDAs per year.
+
+**Data.** ICMS extract (1.3), enrolment years 2016–2025 [lab: era 2016–2026]; unit of observation: the enrolment year.
+
+**How to read.** Left panel: new CDAs in thousands; right panel: enrolled value in R$ billion; the horizontal axis gives the year.
+
+**Interpretation.** Years with many enrolments but little value indicate an inflow of small debts; the final year covers only January to March.
+
+*Output:* Figure `fig_new_enrolments_year`.
+
+```{python}
+#| label: c93
+new_year = collect(attributes.with_columns(pl.col("DATA_INSCRICAO").dt.year().alias("year"))
+                   .filter(pl.col("year") >= YEARS[0]).group_by("year")
+                   .agg(pl.len().alias("n_new"), (pl.col("max_value").sum() / 1e9).alias("value_bn")).sort("year"))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.15)
+fig.add_trace(go.Bar(x=new_year["year"], y=new_year["n_new"] / 1e3, marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=new_year["year"], y=new_year["value_bn"], marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_yaxes(title_text="New CDAs (thousand)", row=1, col=1)
+fig.update_yaxes(title_text="Value enrolled (R$ bn)", row=1, col=2)
+save_fig(fig, "fig_new_enrolments_year", width="double")
+fig
+```
+
+#### B.1.6 Monthly overview
+
+**Method.** Monthly overview of stock, new enrolments and collection against the calendar of settlement programmes.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** Three panels on a common monthly axis: stock (R$ billion), new CDAs (thousand) and collection (R$ billion); cream bands mark the PEP 2019 and Acordo Paulista 2024 windows.
+
+**Interpretation.** Peaks inside the bands are associated with programmes; isolated spikes or dips in the stock outside them may reflect data events such as batch cancellations.
+
+*Output:* Figure `fig_icms_monthly_overview`.
+
+```{python}
+#| label: c95
+fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.05)
+fig.add_trace(go.Scatter(x=monthly_all["month"], y=bn(monthly_all["stock"]), line_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Scatter(x=monthly_all["month"], y=monthly_all["n_new"] / 1e3, line_color=CEMEPI["teal"]), 2, 1)
+fig.add_trace(go.Scatter(x=monthly_all["month"], y=bn(monthly_all["collection"]), line_color=CEMEPI["sand"]), 3, 1)
+for r, t in enumerate(("Stock (R$ bn)", "New CDAs (thousand)", "Collection (R$ bn)"), start=1):
+    fig.update_yaxes(title_text=t, row=r, col=1)
+shade_programmes(fig)
+save_fig(fig, "fig_icms_monthly_overview", width="double", ratio=0.8)
+fig
+```
+
+### B.2 Raw ICMS debt types and the case for grouping
+Before any grouping, the five raw ICMS debt types recorded in the source are analysed separately, and their homogeneity is tested formally. The grouping adopted in B.3 rests on this evidence.
+
+*Terms introduced in this section:* Simples Nacional, Fecoep, GIA, judicial filing, Kruskal–Wallis, Mann–Whitney *U*, Dunn test, rank-biserial correlation, epsilon-squared, Kolmogorov–Smirnov, Anderson–Darling, chi-square test, Fisher exact test, Cramér's *V*, Benjamini–Hochberg *q*-value. Definitions are given in the Glossary.
+
+#### B.2.1 Counts and stock by raw type
+
+**Method.** Counts and stock by raw ICMS type.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Annual counts from the year-end snapshots.
+
+**How to read.** Left panel: number of CDAs; right panel: stock in R$ billion; both horizontal axes are logarithmic.
+
+**Interpretation.** Raw types with very few CDAs cannot sustain separate analysis and are candidates for pooling.
+
+*Output:* Figure `fig_icms_raw_counts_value`; Table `tab_icms_raw_summary`.
+
+```{python}
+#| label: c98
+snap_icms = (scan_icms().filter((pl.col("year") == SNAP_YEAR) & (pl.col("MES_EXTRACAO") == SNAP_MONTH))
+             .with_columns(((pl.date(SNAP_YEAR, SNAP_MONTH, 1) - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("age")))
+raw_summary = collect(snap_icms.group_by("TIPO_DEBITO").agg(
+    pl.len().alias("n_cda"), (pl.col("VALOR_SEM_HONORARIOS").sum() / 1e9).alias("stock_bn")).sort("n_cda", descending=True))
+raw_by_year = collect(panel.group_by("year", "TIPO_DEBITO").agg(pl.len().alias("n_cda"),
+                                                                (pl.col("stock").sum() / 1e9).alias("stock_bn")))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.18)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["n_cda"], orientation="h", marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["stock_bn"], orientation="h", marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_xaxes(type="log", title_text="CDAs (log)", row=1, col=1)
+fig.update_xaxes(type="log", title_text="Stock, R$ bn (log)", row=1, col=2)
+fig.update_yaxes(showticklabels=False, row=1, col=2)
+save_fig(fig, "fig_icms_raw_counts_value", width="double")
+save_tab(raw_summary.join(raw_by_year.pivot(on="year", index="TIPO_DEBITO", values="n_cda"), on="TIPO_DEBITO", how="left"),
+         "tab_icms_raw_summary", fmt="{:,.2f}")
+fig
+```
+
+#### B.2.2 Value per CDA by raw type
+
+**Method.** Location, dispersion and ECDF of CDA value by raw type.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** The table gives mean, median and interquartile range; in the figure the horizontal axis gives value in R$ on a logarithmic scale and the vertical axis the cumulative share; one line per raw type, identified in the legend.
+
+**Interpretation.** Close curves indicate similar value distributions; a curve clearly to the right indicates systematically larger debts.
+
+*Output:* Figure `fig_icms_raw_value_ecdf`; Table `tab_icms_raw_ticket`.
+
+```{python}
+#| label: c100
+raw_values = collect(snap_icms.select("TIPO_DEBITO", pl.col("VALOR_SEM_HONORARIOS").alias("value"), "age", "ICMS_ORIGIN",
+                                     "STATUS_AJUIZAMENTO_DEBITO", "SITUACAO_DEBITO", "ID_DEBITO", "CNPJ_ROOT"))
+ticket_raw = raw_values.group_by("TIPO_DEBITO").agg(
+    pl.col("value").mean().alias("mean"), pl.col("value").median().alias("median"),
+    pl.col("value").quantile(0.25).alias("q25"), pl.col("value").quantile(0.75).alias("q75")).sort("mean", descending=True)
+fig = ecdf(raw_values, "value", "TIPO_DEBITO", x_title="CDA value (R$, log scale)")
+save_fig(fig, "fig_icms_raw_value_ecdf", width="double")
+save_tab(ticket_raw, "tab_icms_raw_ticket", fmt="{:,.0f}")
+fig
+```
+
+#### B.2.3 Age by raw type
+
+**Method.** Distribution of CDA age by raw type.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** Box plots: the box spans the interquartile range, the inner line marks the median and the whiskers the range of non-outlying values; the vertical axis gives age in years.
+
+**Interpretation.** Similar boxes indicate types enrolled over similar periods; a type concentrated at low ages was introduced or became frequent only recently.
+
+*Output:* Figure `fig_icms_raw_age`; Table `tab_icms_raw_age`.
+
+```{python}
+#| label: c102
+age_raw = raw_values.group_by("TIPO_DEBITO").agg(
+    pl.col("age").mean().alias("mean"), pl.col("age").median().alias("median"),
+    pl.col("age").quantile(0.25).alias("q25"), pl.col("age").quantile(0.75).alias("q75")).sort("median")
+fig = go.Figure([go.Box(y=d["age"].sample(min(d.height, 50_000), seed=SEED), name=k[0], marker_color=color(i), boxpoints=False)
+                 for i, (k, d) in enumerate(raw_values.sort("TIPO_DEBITO").group_by("TIPO_DEBITO", maintain_order=True))])
+fig.update_layout(yaxis_title="Age of CDA (years)")
+save_fig(fig, "fig_icms_raw_age", width="double")
+save_tab(age_raw, "tab_icms_raw_age")
+fig
+```
+
+#### B.2.4 Recovery by raw type
+
+**Method.** Annual non-accumulated recovery rate by raw type.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives the rate in percent on a logarithmic scale; one line per raw type, identified in the legend. Missing points mark years without payments.
+
+**Interpretation.** Lines with similar level and shape support pooling; persistent gaps argue against it.
+
+*Output:* Figure `fig_icms_raw_recovery`; Table `tab_icms_raw_recovery`.
+
+```{python}
+#| label: c104
+rec_raw = collect(panel.group_by("year", "TIPO_DEBITO").agg(
+    (100 * pl.col("paid").sum() / pl.col("stock").sum()).alias("rate_pct"),
+    pl.col("rate").filter(pl.col("stock") > 0).median().alias("median_cda_rate"),
+    pl.col("rate").filter(pl.col("stock") > 0).mean().alias("mean_cda_rate")))
+fig = lines(rec_raw.filter(pl.col("rate_pct") > 0), "year", "rate_pct", "TIPO_DEBITO", log_y=True,
+            y_title="Recovery rate (% of stock, log scale)")
+save_fig(fig, "fig_icms_raw_recovery", width="double")
+save_tab(rec_raw.pivot(on="TIPO_DEBITO", index="year", values="rate_pct").sort("year"), "tab_icms_raw_recovery", fmt="{:.3f}")
+fig
+```
+
+#### B.2.5 Payment behaviour by raw type
+
+**Method.** Share of CDAs with any payment by raw type.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Payments from GARE since enrolment.
+
+**How to read.** Horizontal bars; the horizontal axis gives the percentage of CDAs with at least one payment, printed at the end of each bar. The table adds time to first payment and the distribution of payments by age window.
+
+**Interpretation.** Differences in the share paying reflect differences in payment propensity between types.
+
+*Output:* Figure `fig_icms_raw_payment`; Table `tab_icms_raw_payment`.
+
+```{python}
+#| label: c106
+first_pay = collect(scan_gare().group_by("ID_DEBITO").agg(pl.col("DATA_ARRECADACAO_GARE").min().alias("first_payment"),
+                                                          pl.col("VALOR_RECEITA").sum().alias("paid_total")))
+cda = collect(attributes).join(first_pay, on="ID_DEBITO", how="left").with_columns(
+    ((pl.col("first_payment") - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("years_to_first_payment"),
+    pl.col("first_payment").is_not_null().alias("ever_paid"))
+pay_raw = cda.group_by("TIPO_DEBITO").agg(
+    (100 * pl.col("ever_paid").mean()).alias("pct_ever_paid"),
+    pl.col("years_to_first_payment").median().alias("median_years_to_first_payment"),
+    (pl.col("years_to_first_payment") < 1).mean().alias("share_first_payment_year0")).sort("pct_ever_paid", descending=True)
+fig = bars(pay_raw, "TIPO_DEBITO", "pct_ever_paid", val_title="CDAs with any payment (%)")
+save_fig(fig, "fig_icms_raw_payment", width="double")
+save_tab(pay_raw, "tab_icms_raw_payment", fmt="{:.3f}")
+fig
+```
+
+#### B.2.6 Judicial filing by raw type
+
+**Method.** Share of CDAs and of stock filed in court by raw type.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per raw type with both shares.
+
+**Interpretation.** A share of stock above the share of CDAs indicates that filing concentrates on larger debts.
+
+*Output:* Table `tab_icms_raw_filing`.
+
+```{python}
+#| label: c108
+filing_raw = raw_values.group_by("TIPO_DEBITO").agg(
+    (100 * (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").mean()).alias("pct_cda_filed"),
+    (100 * pl.col("value").filter(pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").sum() / pl.col("value").sum()).alias("pct_stock_filed"))
+save_tab(filing_raw, "tab_icms_raw_filing", fmt="{:.2f}")
+filing_raw
+```
+
+#### B.2.7 Seasonality by raw type
+
+**Method.** Seasonal profile of enrolments by raw type, normalised by each type's monthly mean so that types of very different size can be compared.
+
+**Data.** ICMS extract (1.3), enrolments from 2016 onward; unit of observation: the type-calendar month.
+
+**How to read.** The horizontal axis gives the calendar month; the vertical axis gives enrolments relative to the type's mean (1 = average month); one line per raw type, identified in the legend.
+
+**Interpretation.** Values above 1 mark months in which enrolments of that type concentrate; a single large spike for a small type may reflect one batch rather than a seasonal pattern.
+
+*Output:* Figure `fig_icms_raw_seasonality`.
+
+```{python}
+#| label: c110
+season_raw = (cda.filter(pl.col("DATA_INSCRICAO").dt.year() >= YEARS[0])
+              .with_columns(pl.col("DATA_INSCRICAO").dt.year().alias("y"), pl.col("DATA_INSCRICAO").dt.month().alias("month"))
+              .group_by("TIPO_DEBITO", "y", "month").agg(pl.len().alias("n"))
+              .group_by("TIPO_DEBITO", "month").agg(pl.col("n").mean())
+              .with_columns((pl.col("n") / pl.col("n").mean().over("TIPO_DEBITO")).alias("index")))
+fig = lines(season_raw, "month", "index", "TIPO_DEBITO", y_title="Enrolments relative to type mean", x_title="Calendar month")
+fig.update_xaxes(tickmode="array", tickvals=list(range(1, 13)))
+save_fig(fig, "fig_icms_raw_seasonality", width="double")
+fig
+```
+
+#### B.2.8 Tests of distributional homogeneity
+
+**Method.** Rank-based tests of differences in value, age and recovery rate across raw types. The Kruskal–Wallis test is a nonparametric analogue of one-way analysis of variance that does not assume normality and is robust to heavy tails. It is followed by pairwise Mann–Whitney *U* tests and Dunn's test, with Benjamini–Hochberg adjustment. Effect sizes are epsilon-squared (global) and the rank-biserial correlation (pairwise). Whole distributions are compared with two-sample Kolmogorov–Smirnov and Anderson–Darling tests. Types with fewer than 1,000 CDAs are compared with exact or permutation tests.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Recovery rates at the CDA level.
+
+**How to read.** The first table gives the global test for each variable; the second the pairwise tests with adjusted *p*-values and effect sizes; the third the distributional tests.
+
+**Interpretation.** With samples of this size, negligible differences become significant; decisions therefore rely on effect sizes. As a guide, rank-biserial values below about 0.1 in absolute value indicate negligible differences and values above about 0.3 substantial ones.
+
+*Output:* Tables `tab_icms_raw_kruskal`, `tab_icms_raw_pairwise`, `tab_icms_raw_ks`.
+
+```{python}
+#| label: c112
+RATE_CDA_SQL = """
+SELECT ID_DEBITO, TIPO_DEBITO, SUM(paid) / AVG(stock) AS rate_cda
+FROM read_parquet('{src}')
+WHERE stock > 0 AND ID_DEBITO % {n} = {k}
+GROUP BY ID_DEBITO, TIPO_DEBITO
+"""
+RATE_CDA = {f"b{k}": RATE_CDA_SQL.format(src=parts_glob("1.4:panel", PANEL, EXTRACT_PARAMS), n=BUCKETS, k=k)
+            for k in range(BUCKETS)}
+rate_cda = collect(cached_sql_parts("B.2.8:rate_cda", RATE_CDA, params=EXTRACT_PARAMS))
+
+def homogeneity_tests() -> dict:
+    frames = {"value": raw_values.select("TIPO_DEBITO", "value"), "age": raw_values.select("TIPO_DEBITO", "age"),
+              "rate": rate_cda.select("TIPO_DEBITO", pl.col("rate_cda").alias("rate"))}
+    kw, pw, dunn = [], [], []
+    for var, f in frames.items():
+        kw.append(kruskal_test(f, var, "TIPO_DEBITO"))
+        pw.append(pairwise_tests(f, var, "TIPO_DEBITO"))
+        sample = f.group_by("TIPO_DEBITO").agg(pl.col(var).sample(n=pl.min_horizontal(pl.len(), 100_000), seed=SEED)).explode(var)
+        dunn.append(dunn_test(sample, var, "TIPO_DEBITO"))
+    pairwise = pl.concat(pw).join(pl.concat(dunn).select("variable", "group_a", "group_b", pl.col("z").alias("dunn_z"),
+                                                         pl.col("p_bh").alias("dunn_p_bh")),
+                                  on=["variable", "group_a", "group_b"], how="left")
+    return {"kruskal": kw, "pairwise": pairwise.to_dicts()}
+
+homog = cached_json("B.2.8", homogeneity_tests, params={"snapshot": EXTRACT})
+kruskal_tab = pl.DataFrame(homog["kruskal"])
+pairwise_tab = pl.DataFrame(homog["pairwise"])
+save_tab(kruskal_tab, "tab_icms_raw_kruskal", fmt="{:.4g}")
+save_tab(pairwise_tab.select("variable", "group_a", "group_b", "rank_biserial", "p_value_bh", "dunn_p_bh"),
+         "tab_icms_raw_pairwise", fmt="{:.4g}")
+save_tab(pairwise_tab.select("variable", "group_a", "group_b", "ks_stat", "ks_p_bh", "ad_stat", "ad_p_bh"),
+         "tab_icms_raw_ks", fmt="{:.4g}")
+pairwise_tab
+```
+
+#### B.2.9 Tests of independence for payment and filing status
+
+**Method.** Tests of independence between raw type and (i) paid versus open status and (ii) filed versus not filed: Pearson's chi-square test, or Fisher's exact test where expected counts are below five. Cramér's *V* (0 = independence, 1 = perfect association) measures strength, and standardised residuals locate the cells that drive the association.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per test, with statistic, *p*-value, Cramér's *V* and the largest residuals.
+
+**Interpretation.** Residuals above about 2 in absolute value mark cells clearly above or below the count expected under independence.
+
+*Output:* Table `tab_icms_raw_chi2`.
+
+```{python}
+#| label: c114
+def independence_tests() -> list[dict]:
+    ever = cda.select("ID_DEBITO", "ever_paid")
+    d = raw_values.join(ever, on="ID_DEBITO", how="left").with_columns(pl.col("ever_paid").fill_null(False),
+                                                                     (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").alias("filed"))
+    out = []
+    for status in ("ever_paid", "filed"):
+        ct_df = d.group_by("TIPO_DEBITO", status).len().pivot(on=status, index="TIPO_DEBITO", values="len").fill_null(0).sort("TIPO_DEBITO")
+        ct = ct_df.drop("TIPO_DEBITO").to_numpy()
+        res = chi2_table(ct)
+        expected = stats.contingency.expected_freq(ct)
+        resid = (ct - expected) / np.sqrt(expected)
+        out.append({"status": status, **res,
+                    "max_abs_std_residual": float(np.abs(resid).max()),
+                    "type_with_max_residual": ct_df["TIPO_DEBITO"][int(np.abs(resid).max(axis=1).argmax())]})
+    return out
+
+chi2_tab = pl.DataFrame(cached_json("B.2.9", independence_tests, params={"snapshot": EXTRACT}))
+save_tab(chi2_tab, "tab_icms_raw_chi2", fmt="{:.4g}")
+chi2_tab
+```
+
+#### B.2.10 Seasonal profiles
+
+**Method.** Tests of equality of seasonal enrolment profiles across raw types: a chi-square test on the type × calendar-month table of counts, and a regression of the monthly series on type, month and their interaction, with a joint test of the interaction terms.
+
+**Data.** ICMS extract (1.3), enrolments from 2016 onward.
+
+**How to read.** One row per test, with statistic and *p*-value.
+
+**Interpretation.** Rejection means that at least one type has a different seasonal profile; the figure in B.2.7 shows which.
+
+*Output:* Table `tab_icms_raw_season_test`.
+
+```{python}
+#| label: c116
+import statsmodels.formula.api as smf
+
+def season_tests() -> list[dict]:
+    d = (cda.filter(pl.col("DATA_INSCRICAO").dt.year() >= YEARS[0])
+         .with_columns(pl.col("DATA_INSCRICAO").dt.month().alias("month"), pl.col("DATA_INSCRICAO").dt.year().alias("y")))
+    ct = d.group_by("TIPO_DEBITO", "month").len().pivot(on="month", index="TIPO_DEBITO", values="len").fill_null(0)
+    res = chi2_table(ct.drop("TIPO_DEBITO").to_numpy())
+    m = d.group_by("TIPO_DEBITO", "y", "month").len().with_columns(pl.col("len").log1p().alias("log_n")).to_pandas()
+    full = smf.ols("log_n ~ C(TIPO_DEBITO) * C(month) + C(y)", data=m).fit()
+    restricted = smf.ols("log_n ~ C(TIPO_DEBITO) + C(month) + C(y)", data=m).fit()
+    f, p, df_diff = full.compare_f_test(restricted)
+    return [{"test": "chi-square type x month", "statistic": res["chi2"], "df": res["df"], "p_value": res["p_value"],
+             "effect": res["cramers_v"]},
+            {"test": "F test type x month interaction", "statistic": float(f), "df": int(df_diff), "p_value": float(p),
+             "effect": float(full.rsquared - restricted.rsquared)}]
+
+season_tab = pl.DataFrame(cached_json("B.2.10", season_tests, params={"snapshot": EXTRACT}))
+save_tab(season_tab, "tab_icms_raw_season_test", fmt="{:.4g}")
+season_tab
+```
+
+#### B.2.11 Grouping decision
+
+**Method.** Decision on the grouping of raw types into origins: *declared* (ICMS Declarado), *assessed* (ICMS Autuação and ICMS Autuação Simples Nacional) and *other* (ICMS Fecoep and ICMS Alteração de GIA). Assessed types are pooled only if B.2.8 to B.2.10 show small effect sizes between them; the *other* group is kept in totals but not interpreted on its own.
+
+**Data.** Results of B.2.1 to B.2.10.
+
+**How to read.** One row per criterion, with the test result and the decision.
+
+**Interpretation.** The grouping is used in all later analyses by origin.
+
+*Output:* Table `tab_icms_grouping_decision`.
+
+```{python}
+#| label: c118
+def effect(var: str, a: str, b: str) -> float:
+    r = pairwise_tab.filter((pl.col("variable") == var) & (((pl.col("group_a") == a) & (pl.col("group_b") == b)) |
+                                                          ((pl.col("group_a") == b) & (pl.col("group_b") == a))))
+    return float(r["rank_biserial"].abs()[0]) if r.height else float("nan")
+
+A, S, D = "ICMS Autuação", "ICMS Autuação Simples Nacional", "ICMS Declarado"
+SMALL = 0.1
+rows = []
+for var in ("value", "age", "rate"):
+    e_as, e_ad = effect(var, A, S), effect(var, A, D)
+    rows.append({"criterion": f"{var}: assessed types (|r_rb|)", "result": f"{e_as:.3f}",
+                 "decision": "pool" if e_as < SMALL else "pool with caution"})
+    rows.append({"criterion": f"{var}: assessed vs declared (|r_rb|)", "result": f"{e_ad:.3f}",
+                 "decision": "keep separate" if e_ad >= SMALL else "similar"})
+for r in chi2_tab.iter_rows(named=True):
+    rows.append({"criterion": f"{r['status']} by type (Cramér's V)", "result": f"{r['cramers_v']:.3f}",
+                 "decision": "types differ" if r["cramers_v"] >= SMALL else "small association"})
+grouping = pl.DataFrame(rows)
+ORIGIN_MAP = {D: "declared", A: "assessed", S: "assessed", "ICMS Fecoep": "other", "ICMS Alteração de GIA": "other"}
+save_tab(grouping, "tab_icms_grouping_decision")
+grouping
+```
+
+### B.3 Declared versus assessed ICMS
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### B.3.1 Stock, count and value per CDA by origin
+
+**Method.** Annual aggregates by origin.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives year-end stock in R$ billion on a logarithmic scale; one line per origin, identified in the legend. The table adds counts and value per CDA.
+
+**Interpretation.** Parallel lines indicate a stable split of the stock between origins.
+
+*Output:* Figure `fig_icms_type_stock`; Table `tab_icms_type_summary`.
+
+```{python}
+#| label: c121
+origin_year = collect(panel.group_by("year", "ICMS_ORIGIN").agg(
+    pl.len().alias("n_cda"), (pl.col("stock").sum() / 1e9).alias("stock_bn"), (pl.col("paid").sum() / 1e9).alias("paid_bn"),
+    pl.col("stock").mean().alias("mean_value"), pl.col("paid_flag").mean().alias("share_paying"))).sort("ICMS_ORIGIN", "year")
+fig = lines(origin_year, "year", "stock_bn", "ICMS_ORIGIN", log_y=True, y_title="Year-end stock (R$ bn, log scale)")
+save_fig(fig, "fig_icms_type_stock")
+save_tab(origin_year, "tab_icms_type_summary", fmt="{:,.3f}")
+fig
+```
+
+#### B.3.2 Recovery by origin
+
+**Method.** Annual recovery rate by origin, with a Mann–Whitney comparison of CDA-level rates between declared and assessed debts.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives the rate in percent on a logarithmic scale; one line per origin, identified in the legend.
+
+**Interpretation.** A persistent gap between declared and assessed debts indicates that origin is associated with recovery and should be controlled for.
+
+*Output:* Figure `fig_recovery_by_icms_type`.
+
+```{python}
+#| label: c123
+origin_rate = origin_year.with_columns((100 * pl.col("paid_bn") / pl.col("stock_bn")).alias("rate_pct"))
+rates_origin = rate_cda.join(cda.select("ID_DEBITO", "ICMS_ORIGIN"), on="ID_DEBITO")
+mw_origin = mann_whitney(rates_origin.filter(pl.col("ICMS_ORIGIN") == "declared")["rate_cda"].to_numpy().astype(float),
+                         rates_origin.filter(pl.col("ICMS_ORIGIN") == "assessed")["rate_cda"].to_numpy().astype(float))
+fig = lines(origin_rate.filter(pl.col("rate_pct") > 0), "year", "rate_pct", "ICMS_ORIGIN", log_y=True,
+            y_title="Recovery rate (% of stock, log scale)")
+save_fig(fig, "fig_recovery_by_icms_type")
+print(mw_origin)
+fig
+```
+
+#### B.3.3 Reporting convention
+
+From this point on, results are reported for the pooled ICMS portfolio and, where sample sizes allow, separately for declared and assessed debts.
+
+### B.4 Concentration
+
+*Terms introduced in this section:* Lorenz curve, Gini coefficient. Definitions are given in the Glossary.
+
+:::{.callout-note}
+## Concentração por tipo de tributo e por devedor
+A concentração por grupo de tributo (ICMS, IPVA, ITCMD, taxas) e por devedor (raiz do CNPJ), na foto de
+dezembro de 2025, está na página [Concentração e liquidação](../eda/2026-10-23_concentracao_e_liquidacao.qmd). Aqui fica a concentração do ICMS, como no paper.
+:::
+
+#### B.4.1 Concentration of the stock across CDAs
+
+**Method.** Concentration curve of the stock across CDAs: CDAs are ranked from the largest to the smallest and the curve gives the share of the stock held by the largest *x* percent. The Gini coefficient summarises inequality (0 = equal values, 1 = the whole stock in one CDA).
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** The horizontal axis gives the share of CDAs, ranked by value, in percent on a logarithmic scale, which spreads out the upper tail; the vertical axis gives the cumulative share of the stock; labelled points mark the top 0.1%, 1% and 10%.
+
+**Interpretation.** A curve that rises steeply at the left means that a very small share of CDAs holds most of the stock; the table adds the Gini and the number of CDAs needed to reach half of the stock.
+
+*Output:* Figure `fig_pareto_icms`; Table `tab_concentration`.
+
+```{python}
+#| label: c127
+values_now = raw_values["value"].drop_nulls().to_numpy()
+share, cum, gini = lorenz(values_now)
+idx = np.unique(np.geomspace(1, share.size, 400).astype(int)) - 1
+fig = go.Figure(go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", line_color=CEMEPI["deep_teal"]))
+for f in (0.1, 1, 10):
+    k = int(f / 100 * share.size)
+    fig.add_annotation(x=np.log10(f), y=cum[k] * 100, text=f"top {f:g}%: {cum[k] * 100:.0f}%", showarrow=True, arrowhead=0, ax=30, ay=20)
+fig.update_xaxes(type="log", title_text="Share of CDAs, ranked by value (%, log scale)")
+fig.update_yaxes(title_text="Cumulative share of the stock (%)")
+save_fig(fig, "fig_pareto_icms")
+k50 = int(np.searchsorted(cum, 0.5)) + 1
+concentration = pl.DataFrame([{"level": "CDA", "n": int(values_now.size), "gini": gini, **top_shares(values_now),
+                               "n_for_50pct": k50, "pct_for_50pct": 100 * k50 / values_now.size}])
+save_tab(concentration, "tab_concentration", fmt="{:,.4f}")
+fig
+```
+
+#### B.4.2 Concentration across debtors
+
+**Method.** The same concentration curve with debts aggregated by debtor (CNPJ root).
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Aggregated by CNPJ root.
+
+**How to read.** Axes as in B.4.1; one line for CDAs and one for debtors, identified in the legend.
+
+**Interpretation.** If the debtor curve lies to the left of the CDA curve at the top, a smaller share of firms than of CDAs holds the same share of the stock; the reverse means large debts are spread across many firms.
+
+*Output:* Figure `fig_pareto_debtor`.
+
+```{python}
+#| label: c129
+debtor_values = raw_values.group_by("CNPJ_ROOT").agg(pl.col("value").sum())["value"].to_numpy()
+share_d, cum_d, gini_d = lorenz(debtor_values)
+idx_d = np.unique(np.geomspace(1, share_d.size, 400).astype(int)) - 1
+fig = go.Figure([go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", line=dict(color=CEMEPI["deep_teal"]), name="CDA"),
+                 go.Scatter(x=share_d[idx_d] * 100, y=cum_d[idx_d] * 100, mode="lines", line=dict(color=CEMEPI["sand"], dash="dash"), name="Debtor (CNPJ root)")])
+fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.3))
+fig.update_xaxes(type="log", title_text="Share of units, ranked by value (%, log scale)")
+fig.update_yaxes(title_text="Cumulative share of the stock (%)")
+concentration = pl.concat([concentration, pl.DataFrame([{"level": "Debtor", "n": int(debtor_values.size), "gini": gini_d,
+                                                         **top_shares(debtor_values),
+                                                         "n_for_50pct": int(np.searchsorted(cum_d, 0.5)) + 1,
+                                                         "pct_for_50pct": 100 * (int(np.searchsorted(cum_d, 0.5)) + 1) / debtor_values.size}])])
+save_fig(fig, "fig_pareto_debtor")
+save_tab(concentration, "tab_concentration", fmt="{:,.4f}")
+fig
+```
+
+#### B.4.3 Largest debts versus the tail
+
+**Method.** Comparison of the largest debts with the remainder.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Payment history from GARE.
+
+**How to read.** Rows give the top 0.1%, top 1% and remainder; columns give age, recovery and payment measures.
+
+**Interpretation.** Systematic differences justify the separate study of the top set in B.5.
+
+*Output:* Table `tab_large_vs_tail`.
+
+```{python}
+#| label: c131
+thr = {f: np.quantile(values_now, 1 - f) for f in (0.001, 0.01)}
+strata = raw_values.join(cda.select("ID_DEBITO", "ever_paid"), on="ID_DEBITO", how="left").with_columns(
+    pl.when(pl.col("value") >= thr[0.001]).then(pl.lit("top 0.1%"))
+      .when(pl.col("value") >= thr[0.01]).then(pl.lit("top 0.1-1%")).otherwise(pl.lit("remainder")).alias("stratum"))
+large_vs_tail = strata.group_by("stratum").agg(
+    pl.len().alias("n_cda"), (pl.col("value").sum() / 1e9).alias("stock_bn"), pl.col("age").median().alias("median_age"),
+    (100 * pl.col("ever_paid").fill_null(False).mean()).alias("pct_ever_paid"),
+    (100 * (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").mean()).alias("pct_filed"),
+    (100 * (pl.col("ICMS_ORIGIN") == "assessed").mean()).alias("pct_assessed")).sort("stock_bn", descending=True)
+save_tab(large_vs_tail, "tab_large_vs_tail", fmt="{:,.2f}")
+large_vs_tail
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```

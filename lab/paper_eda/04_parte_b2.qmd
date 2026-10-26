@@ -1,0 +1,1060 @@
+---
+title: "Parte B (2/3). As CDAs mais concentradas"
+description: "Porte do paper EDA v1 (Parte B (2/3)) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+```{python}
+#| label: dep-56
+#| include: false
+composition = collect(snapshot_all.group_by("bucket").agg(
+    pl.len().alias("n_cda"), pl.col("value").sum().alias("stock"),
+    pl.col("value").mean().alias("mean_value"), pl.col("value").median().alias("median_value")))
+composition = composition.with_columns((100 * pl.col("n_cda") / pl.col("n_cda").sum()).alias("pct_cda"),
+                                       (100 * pl.col("stock") / pl.col("stock").sum()).alias("pct_stock"),
+                                       (pl.col("stock") / 1e9).alias("stock_bn"))
+fig = bars(composition.with_columns((pl.col("n_cda") / 1e6).alias("n_cda_m")), "bucket", "n_cda_m",
+           val_title="CDAs (million)", text_fmt="{:,.2f}")
+save_fig(fig, "fig_bucket_n_id")
+fig
+```
+
+```{python}
+#| label: dep-60
+#| include: false
+d = composition.sort("pct_stock")
+fig = go.Figure()
+for b, a, s in zip(d["bucket"], d["pct_cda"], d["pct_stock"]):
+    fig.add_trace(go.Scatter(x=[a, s], y=[b, b], mode="lines", line=dict(color="#C9CED1", width=3),
+                             hoverinfo="skip", showlegend=False))
+for i, (col, other, name, sym) in enumerate((("pct_cda", "pct_stock", "Share of CDAs", "circle"),
+                                              ("pct_stock", "pct_cda", "Share of stock", "diamond"))):
+    pos = ["middle right" if v >= o else "middle left" for v, o in zip(d[col], d[other])]
+    fig.add_trace(go.Scatter(x=d[col], y=d["bucket"], mode="markers+text", name=name, cliponaxis=False,
+                             marker=dict(color=color(i), size=11, symbol=sym), text=[f"  {v:.1f}%  " for v in d[col]],
+                             textposition=pos, textfont=dict(color=color(i), size=9)))
+fig.update_layout(xaxis=dict(title="Share of the portfolio (%)", range=[-12, 115], showgrid=True, gridcolor="#E6E6E6"),
+                  yaxis=dict(showgrid=False), showlegend=True,
+                  legend=dict(orientation="h", y=-0.28, x=0.5, xanchor="center"),
+                  meta={"min_height": 120 + 45 * d.height})
+save_fig(fig, "fig_bucket_pct_qtd_valor", width="double", ratio=0.45)
+save_tab(composition.select("bucket", "n_cda", "stock_bn", "pct_cda", "pct_stock").sort("pct_stock", descending=True),
+         "tab_composition")
+fig
+```
+
+```{python}
+#| label: dep-98
+#| include: false
+snap_icms = (scan_icms().filter((pl.col("year") == SNAP_YEAR) & (pl.col("MES_EXTRACAO") == SNAP_MONTH))
+             .with_columns(((pl.date(SNAP_YEAR, SNAP_MONTH, 1) - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("age")))
+raw_summary = collect(snap_icms.group_by("TIPO_DEBITO").agg(
+    pl.len().alias("n_cda"), (pl.col("VALOR_SEM_HONORARIOS").sum() / 1e9).alias("stock_bn")).sort("n_cda", descending=True))
+raw_by_year = collect(panel.group_by("year", "TIPO_DEBITO").agg(pl.len().alias("n_cda"),
+                                                                (pl.col("stock").sum() / 1e9).alias("stock_bn")))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.18)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["n_cda"], orientation="h", marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["stock_bn"], orientation="h", marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_xaxes(type="log", title_text="CDAs (log)", row=1, col=1)
+fig.update_xaxes(type="log", title_text="Stock, R$ bn (log)", row=1, col=2)
+fig.update_yaxes(showticklabels=False, row=1, col=2)
+save_fig(fig, "fig_icms_raw_counts_value", width="double")
+save_tab(raw_summary.join(raw_by_year.pivot(on="year", index="TIPO_DEBITO", values="n_cda"), on="TIPO_DEBITO", how="left"),
+         "tab_icms_raw_summary", fmt="{:,.2f}")
+fig
+```
+
+```{python}
+#| label: dep-100
+#| include: false
+raw_values = collect(snap_icms.select("TIPO_DEBITO", pl.col("VALOR_SEM_HONORARIOS").alias("value"), "age", "ICMS_ORIGIN",
+                                     "STATUS_AJUIZAMENTO_DEBITO", "SITUACAO_DEBITO", "ID_DEBITO", "CNPJ_ROOT"))
+ticket_raw = raw_values.group_by("TIPO_DEBITO").agg(
+    pl.col("value").mean().alias("mean"), pl.col("value").median().alias("median"),
+    pl.col("value").quantile(0.25).alias("q25"), pl.col("value").quantile(0.75).alias("q75")).sort("mean", descending=True)
+fig = ecdf(raw_values, "value", "TIPO_DEBITO", x_title="CDA value (R$, log scale)")
+save_fig(fig, "fig_icms_raw_value_ecdf", width="double")
+save_tab(ticket_raw, "tab_icms_raw_ticket", fmt="{:,.0f}")
+fig
+```
+
+```{python}
+#| label: dep-106
+#| include: false
+first_pay = collect(scan_gare().group_by("ID_DEBITO").agg(pl.col("DATA_ARRECADACAO_GARE").min().alias("first_payment"),
+                                                          pl.col("VALOR_RECEITA").sum().alias("paid_total")))
+cda = collect(attributes).join(first_pay, on="ID_DEBITO", how="left").with_columns(
+    ((pl.col("first_payment") - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("years_to_first_payment"),
+    pl.col("first_payment").is_not_null().alias("ever_paid"))
+pay_raw = cda.group_by("TIPO_DEBITO").agg(
+    (100 * pl.col("ever_paid").mean()).alias("pct_ever_paid"),
+    pl.col("years_to_first_payment").median().alias("median_years_to_first_payment"),
+    (pl.col("years_to_first_payment") < 1).mean().alias("share_first_payment_year0")).sort("pct_ever_paid", descending=True)
+fig = bars(pay_raw, "TIPO_DEBITO", "pct_ever_paid", val_title="CDAs with any payment (%)")
+save_fig(fig, "fig_icms_raw_payment", width="double")
+save_tab(pay_raw, "tab_icms_raw_payment", fmt="{:.3f}")
+fig
+```
+
+```{python}
+#| label: dep-112
+#| include: false
+RATE_CDA_SQL = """
+SELECT ID_DEBITO, TIPO_DEBITO, SUM(paid) / AVG(stock) AS rate_cda
+FROM read_parquet('{src}')
+WHERE stock > 0 AND ID_DEBITO % {n} = {k}
+GROUP BY ID_DEBITO, TIPO_DEBITO
+"""
+RATE_CDA = {f"b{k}": RATE_CDA_SQL.format(src=parts_glob("1.4:panel", PANEL, EXTRACT_PARAMS), n=BUCKETS, k=k)
+            for k in range(BUCKETS)}
+rate_cda = collect(cached_sql_parts("B.2.8:rate_cda", RATE_CDA, params=EXTRACT_PARAMS))
+
+def homogeneity_tests() -> dict:
+    frames = {"value": raw_values.select("TIPO_DEBITO", "value"), "age": raw_values.select("TIPO_DEBITO", "age"),
+              "rate": rate_cda.select("TIPO_DEBITO", pl.col("rate_cda").alias("rate"))}
+    kw, pw, dunn = [], [], []
+    for var, f in frames.items():
+        kw.append(kruskal_test(f, var, "TIPO_DEBITO"))
+        pw.append(pairwise_tests(f, var, "TIPO_DEBITO"))
+        sample = f.group_by("TIPO_DEBITO").agg(pl.col(var).sample(n=pl.min_horizontal(pl.len(), 100_000), seed=SEED)).explode(var)
+        dunn.append(dunn_test(sample, var, "TIPO_DEBITO"))
+    pairwise = pl.concat(pw).join(pl.concat(dunn).select("variable", "group_a", "group_b", pl.col("z").alias("dunn_z"),
+                                                         pl.col("p_bh").alias("dunn_p_bh")),
+                                  on=["variable", "group_a", "group_b"], how="left")
+    return {"kruskal": kw, "pairwise": pairwise.to_dicts()}
+
+homog = cached_json("B.2.8", homogeneity_tests, params={"snapshot": EXTRACT})
+kruskal_tab = pl.DataFrame(homog["kruskal"])
+pairwise_tab = pl.DataFrame(homog["pairwise"])
+save_tab(kruskal_tab, "tab_icms_raw_kruskal", fmt="{:.4g}")
+save_tab(pairwise_tab.select("variable", "group_a", "group_b", "rank_biserial", "p_value_bh", "dunn_p_bh"),
+         "tab_icms_raw_pairwise", fmt="{:.4g}")
+save_tab(pairwise_tab.select("variable", "group_a", "group_b", "ks_stat", "ks_p_bh", "ad_stat", "ad_p_bh"),
+         "tab_icms_raw_ks", fmt="{:.4g}")
+pairwise_tab
+```
+
+### B.5 The most concentrated CDAs
+Because a very small fraction of CDAs holds a large share of the stock (B.4), this group is examined in depth: its definition and sensitivity, its characteristics and behaviour, the structure of the debtors behind it, the similarity among its members and its contrast with the rest of the portfolio. Debtor names are never used; CNPJ roots appear in outputs only as salted hashes.
+
+*Terms introduced in this section:* Top 1% (top set), Jaccard index, accumulated recovery, Kaplan–Meier estimator, censoring, log-rank test, intraclass correlation, administrative situation, Gower distance, principal component analysis, t-SNE, agglomerative clustering, HDBSCAN, silhouette coefficient, adjusted Rand index, medoid, dynamic time warping. Definitions are given in the Glossary.
+
+#### B.5.1 Definition of the top set
+
+**Method.** Definition of four alternative top sets: the top 0.1% and top 1% of CDAs by value, and the smallest sets of CDAs that together hold 50% and 80% of the stock. The top 1% is the reference set.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per set, with its size, share of the stock and value threshold.
+
+**Interpretation.** Thresholds show how large a debt must be to enter each set.
+
+*Output:* Table `tab_top_definitions`.
+
+```{python}
+#| label: c134
+ranked = raw_values.sort("value", descending=True).with_columns(
+    (pl.col("value").cum_sum() / pl.col("value").sum()).alias("cum_share"), pl.int_range(1, pl.len() + 1).alias("rank"))
+N = ranked.height
+TOP_SETS = {"top_0.1pct": ranked["rank"] <= max(1, round(0.001 * N)),
+            "top_1pct": ranked["rank"] <= max(1, round(0.01 * N)),
+            "stock_50pct": ranked["cum_share"].shift(1, fill_value=0) < 0.5,
+            "stock_80pct": ranked["cum_share"].shift(1, fill_value=0) < 0.8}
+top_definitions = pl.DataFrame([{"set": k, "n_cda": int(m.sum()), "pct_cda": 100 * m.sum() / N,
+                                 "pct_stock": 100 * ranked.filter(m)["value"].sum() / ranked["value"].sum(),
+                                 "min_value": float(ranked.filter(m)["value"].min())} for k, m in TOP_SETS.items()])
+top = ranked.filter(TOP_SETS["top_1pct"])
+top_ids = set(top["ID_DEBITO"].to_list())
+save_tab(top_definitions, "tab_top_definitions", fmt="{:,.3f}")
+top_definitions
+```
+
+#### B.5.2 Sensitivity of the top set
+
+**Method.** Sensitivity of the top set. The Jaccard index (intersection over union, 0 to 1) measures overlap between alternative sets; membership stability is the share of last year's top 1% that remains in the top 1%.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA. Year-end snapshots 2016–2025 [lab: era 2016–2026] for stability.
+
+**How to read.** Heat map: rows and columns are the four sets, colour and printed value give the Jaccard index, with the colour bar from 0 to 1. Line chart: the horizontal axis gives the year and the vertical axis the percentage retained from the previous year.
+
+**Interpretation.** Values near 1 on the heat map mean two definitions select the same CDAs; high retention means that results for the top set do not depend on the snapshot chosen, while a sharp drop in one year points to a change in the portfolio rather than gradual turnover.
+
+*Output:* Figures `fig_top_overlap`, `fig_top_membership_stability`; Table `tab_top_overlap`.
+
+```{python}
+#| label: c136
+sets = {k: set(ranked.filter(m)["ID_DEBITO"].to_list()) for k, m in TOP_SETS.items()}
+names = list(sets)
+jac = np.array([[len(sets[a] & sets[b]) / len(sets[a] | sets[b]) for b in names] for a in names])
+SET_NAMES = {"top_0.1pct": "Top 0.1%", "top_1pct": "Top 1%", "stock_50pct": "50% of stock", "stock_80pct": "80% of stock"}
+overlap = pl.DataFrame({"set": [SET_NAMES.get(a, a) for a in names], **{SET_NAMES.get(b, b): jac[:, j] for j, b in enumerate(names)}})
+fig_overlap = heatmap(overlap, "set", diverging=False, zmin=0, zmax=1, colorbar_title="Jaccard")
+save_fig(fig_overlap, "fig_top_overlap")
+fig_overlap.show()
+
+ye_top = collect(year_end.select("year", "ID_DEBITO", "stock"))
+members = {}
+for (y,), d in ye_top.group_by("year"):
+    k = max(1, round(0.01 * d.height))
+    members[y] = set(d.sort("stock", descending=True).head(k)["ID_DEBITO"].to_list())
+stability = pl.DataFrame([{"year": y, "retention": len(members[y] & members[y - 1]) / len(members[y - 1])}
+                          for y in sorted(members) if y - 1 in members])
+fig = lines(stability.with_columns(pl.col("retention") * 100), "year", "retention", y_title="Top 1% retained from previous year (%)")
+save_fig(fig, "fig_top_membership_stability")
+save_tab(overlap, "tab_top_overlap", fmt="{:.3f}")
+fig
+```
+
+#### Characteristics
+
+#### B.5.3 Composition by type and origin
+
+**Method.** Composition of the top set by raw type compared with the portfolio.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Horizontal grouped bars; the horizontal axis gives the share of CDAs in percent; bars for the top 1% and for the whole portfolio are identified in the legend.
+
+**Interpretation.** A raw type whose top-set bar exceeds its portfolio bar is over-represented among the largest debts.
+
+*Output:* Figure `fig_top_composition`; Table `tab_top_composition`.
+
+```{python}
+#| label: c139
+def composition_share(frame: pl.DataFrame, label: str) -> pl.DataFrame:
+    return frame.group_by("TIPO_DEBITO").agg(pl.len().alias("n"), pl.col("value").sum().alias("v")).with_columns(
+        (100 * pl.col("n") / pl.col("n").sum()).alias("pct_cda"), (100 * pl.col("v") / pl.col("v").sum()).alias("pct_stock"),
+        pl.lit(label).alias("group")).drop("n", "v")
+
+top_comp = pl.concat([composition_share(top, "Top 1%"), composition_share(raw_values, "Portfolio")])
+fig = go.Figure([go.Bar(y=d["TIPO_DEBITO"], x=d["pct_cda"], orientation="h", name=k[0], marker_color=color(i))
+                 for i, (k, d) in enumerate(top_comp.group_by("group", maintain_order=True))])
+fig.update_layout(barmode="group", xaxis_title="Share of CDAs (%)", showlegend=True, legend=dict(orientation="h", y=1.1))
+save_fig(fig, "fig_top_composition", width="double")
+save_tab(top_comp, "tab_top_composition")
+fig
+```
+
+#### B.5.4 Age and year of enrolment
+
+**Method.** Distribution of age and year of enrolment in the top set.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Left histogram: age in years; right histogram: year of enrolment; vertical axes give numbers of CDAs.
+
+**Interpretation.** A concentration at old ages would indicate that large debts accumulate because they remain unpaid.
+
+*Output:* Figure `fig_top_age_enrolment`.
+
+```{python}
+#| label: c141
+top_enrol = top.with_columns(pl.col("ID_DEBITO")).join(cda.select("ID_DEBITO", pl.col("DATA_INSCRICAO").dt.year().alias("enrol_year")), on="ID_DEBITO")
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.15)
+fig.add_trace(go.Histogram(x=top["age"], nbinsx=40, marker_color=CEMEPI["deep_teal"]), 1, 1)
+counts = top_enrol.group_by("enrol_year").len().sort("enrol_year")
+fig.add_trace(go.Bar(x=counts["enrol_year"], y=counts["len"], marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_xaxes(title_text="Age (years)", row=1, col=1)
+fig.update_xaxes(title_text="Year of enrolment", row=1, col=2)
+fig.update_yaxes(title_text="CDAs", row=1, col=1)
+save_fig(fig, "fig_top_age_enrolment", width="double")
+fig
+```
+
+#### B.5.5 Value distribution within the top set
+
+**Method.** Distribution of value within the top set and its internal concentration.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Histogram of log₁₀ CDA value; the vertical axis gives the number of CDAs; the annotation gives the Gini coefficient within the set.
+
+**Interpretation.** A high internal Gini indicates that concentration persists even among the largest debts.
+
+*Output:* Figure `fig_top_value_dist`.
+
+```{python}
+#| label: c143
+v = np.sort(top["value"].to_numpy())[::-1]
+fig = go.Figure(go.Histogram(x=np.log10(v), nbinsx=50, marker_color=CEMEPI["deep_teal"]))
+fig.update_layout(xaxis_title="log10 CDA value (R$)", yaxis_title="CDAs")
+_, _, gini_top = lorenz(v)
+fig.add_annotation(x=0.98, y=0.95, xref="paper", yref="paper", text=f"Gini within top 1% = {gini_top:.2f}", showarrow=False, xanchor="right")
+save_fig(fig, "fig_top_value_dist")
+fig
+```
+
+#### B.5.6 Administrative situation and judicial filing
+
+**Method.** Administrative situation and filing status of the top set.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Rows give categories; columns give shares for the top set and for the remainder.
+
+**Interpretation.** Differences indicate whether the largest debts are handled differently by the administration or the courts.
+
+*Output:* Table `tab_top_situation_filing`.
+
+```{python}
+#| label: c145
+situation_filing = pl.concat([
+    frame.group_by(col).agg(pl.len().alias("n")).with_columns((100 * pl.col("n") / pl.col("n").sum()).alias("pct"),
+                                                          pl.lit(label).alias("group"), pl.lit(col).alias("dimension")).rename({col: "category"})
+    for frame, label in ((top, "Top 1%"), (raw_values, "Portfolio"))
+    for col in ("SITUACAO_DEBITO", "STATUS_AJUIZAMENTO_DEBITO")]).select("dimension", "category", "group", "n", "pct")
+save_tab(situation_filing, "tab_top_situation_filing", fmt="{:,.2f}")
+situation_filing
+```
+
+#### Behaviour
+
+#### B.5.7 Payments and recovery
+
+**Method.** Annual recovery of the top set compared with the remainder.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. Remainder from the panel.
+
+**How to read.** The horizontal axis gives the year; the vertical axis gives the non-accumulated recovery rate in percent on a logarithmic scale; one line per group, identified in the legend.
+
+**Interpretation.** A line persistently below the other on a log axis indicates proportionally lower recovery; parallel movements indicate common shocks.
+
+*Output:* Figure `fig_top_recovery`; Table `tab_top_payments`.
+
+```{python}
+#| label: c148
+panel_top = collect(panel.filter(pl.col("ID_DEBITO").is_in(list(top_ids))))
+TOP_IDS = pl.Series("ID_DEBITO", sorted(top_ids), dtype=pl.Int64)
+top_payments = collect(panel.select("year", "ID_DEBITO", "stock", "paid", "paid_flag")
+                       .with_columns(pl.col("ID_DEBITO").is_in(TOP_IDS.implode()).alias("is_top"))
+                       .group_by("year", "is_top").agg(
+    (100 * pl.col("paid").sum() / pl.col("stock").sum()).alias("rate_pct"), (100 * pl.col("paid_flag").mean()).alias("pct_paying"),
+    (pl.col("paid").sum() / 1e9).alias("paid_bn"))).with_columns(
+    pl.when(pl.col("is_top")).then(pl.lit("Top 1%")).otherwise(pl.lit("Remainder")).alias("group")).sort("year")
+fig = lines(top_payments.filter(pl.col("rate_pct") > 0), "year", "rate_pct", "group", log_y=True, y_title="Recovery rate (%, log scale)")
+save_fig(fig, "fig_top_recovery")
+save_tab(top_payments.drop("is_top"), "tab_top_payments", fmt="{:,.3f}")
+fig
+```
+
+#### B.5.8 Recovery trajectories
+
+**Method.** Accumulated recovery trajectories of individual top CDAs, with the median and upper percentiles across all top CDAs.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** The horizontal axis gives years since enrolment; the vertical axis gives the cumulative amount paid as a percentage of the enrolled value. Thin grey lines are a random sample of 150 CDAs; the thick line is the median and the dashed and dotted lines the 75th and 90th percentiles, as identified in the legend.
+
+**Interpretation.** A median at zero means that most top CDAs have not been paid at all at that horizon, so recovery of the set is driven by a minority.
+
+*Output:* Figure `fig_top_trajectories`.
+
+```{python}
+#| label: c150
+gare_top = collect(scan_gare().filter(pl.col("ID_DEBITO").is_in(list(top_ids)))
+                   .group_by("ID_DEBITO", pl.col("DATA_ARRECADACAO_GARE").dt.year().alias("pay_year")).agg(pl.col("VALOR_RECEITA").sum()))
+enrol_val = top.select("ID_DEBITO", "value").join(cda.select("ID_DEBITO", pl.col("DATA_INSCRICAO").dt.year().alias("enrol_year"),
+                                                          pl.col("max_value")), on="ID_DEBITO")
+traj = (gare_top.join(enrol_val, on="ID_DEBITO").with_columns((pl.col("pay_year") - pl.col("enrol_year")).alias("h"))
+        .filter(pl.col("h").is_between(0, 10)).group_by("ID_DEBITO", "h").agg(pl.col("VALOR_RECEITA").sum(), pl.col("max_value").first()))
+grid = enrol_val.select("ID_DEBITO", "max_value", "enrol_year").join(pl.DataFrame({"h": list(range(11))}), how="cross") \
+    .filter(pl.col("enrol_year") + pl.col("h") <= SNAP_YEAR)
+traj = (grid.join(traj.select("ID_DEBITO", "h", "VALOR_RECEITA"), on=["ID_DEBITO", "h"], how="left")
+        .with_columns(pl.col("VALOR_RECEITA").fill_null(0)).sort("ID_DEBITO", "h")
+        .with_columns((pl.col("VALOR_RECEITA").cum_sum().over("ID_DEBITO") / pl.col("max_value")).alias("acc_rec")))
+bands = traj.group_by("h").agg(pl.col("acc_rec").quantile(0.25).alias("q25"), pl.col("acc_rec").median().alias("q50"),
+                               pl.col("acc_rec").quantile(0.75).alias("q75"), pl.col("acc_rec").quantile(0.9).alias("q90")).sort("h")
+fig = go.Figure()
+for i, sid in enumerate(traj["ID_DEBITO"].unique().sample(n=min(150, traj["ID_DEBITO"].n_unique()), seed=SEED)):
+    d = traj.filter(pl.col("ID_DEBITO") == sid)
+    fig.add_trace(go.Scatter(x=d["h"], y=d["acc_rec"] * 100, mode="lines", line=dict(color="rgba(138,148,153,0.35)", width=0.7),
+                             hoverinfo="skip", name="Individual CDAs (random sample of 150)", legendgroup="cda", showlegend=i == 0))
+fig.add_trace(go.Scatter(x=bands["h"], y=bands["q50"] * 100, mode="lines", line=dict(color=CEMEPI["deep_teal"], width=2.5), name="Median"))
+fig.add_trace(go.Scatter(x=bands["h"], y=bands["q75"] * 100, mode="lines", line=dict(color=CEMEPI["teal"], dash="dash"), name="75th percentile"))
+fig.add_trace(go.Scatter(x=bands["h"], y=bands["q90"] * 100, mode="lines", line=dict(color=CEMEPI["sand"], dash="dot"), name="90th percentile"))
+fig.update_layout(xaxis_title="Years since enrolment", yaxis_title="Accumulated recovery (% of enrolled value)",
+                  showlegend=True, legend=dict(orientation="h", y=-0.3))
+save_fig(fig, "fig_top_trajectories", width="double")
+fig
+```
+
+#### B.5.9 Time to first payment
+
+**Method.** Kaplan–Meier estimation of the time from enrolment to first payment. CDAs without a payment by the last snapshot are right-censored: only a lower bound on their time is known. The estimator handles censoring without assuming a distribution for durations (`SurvfuncRight`, `statsmodels`), and the log-rank test (`survdiff`) compares the two curves.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. The remainder is represented by a random sample of 200,000 CDAs.
+
+**How to read.** The horizontal axis gives years since enrolment; the vertical axis gives the cumulative probability of a first payment (one minus the survival function); one line per group, identified in the legend.
+
+**Interpretation.** A higher curve means faster first payment; the curves flatten where few further first payments occur. The test asks whether the groups differ over the whole horizon, not at a specific time.
+
+*Output:* Figure `fig_top_km_first_payment`; Table `tab_top_logrank`.
+
+```{python}
+#| label: c152
+from statsmodels.duration.survfunc import SurvfuncRight, survdiff
+
+censor_date = np.datetime64(f"{SNAP_YEAR}-{SNAP_MONTH:02d}-28")
+surv = cda.filter(pl.col("DATA_INSCRICAO") >= pl.date(YEARS[0], 1, 1)).with_columns(
+    pl.col("ID_DEBITO").is_in(list(top_ids)).cast(pl.Int8).alias("is_top"),
+    pl.coalesce(pl.col("first_payment"), pl.lit(censor_date).cast(pl.Date)).alias("_end")).with_columns(
+    ((pl.col("_end") - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).clip(lower_bound=1 / 365).alias("t"),
+    pl.col("ever_paid").cast(pl.Int8).alias("event"))
+rest = surv.filter(pl.col("is_top") == 0)
+surv_s = pl.concat([surv.filter(pl.col("is_top") == 1), rest.sample(n=min(200_000, rest.height), seed=SEED)])
+fig = go.Figure()
+for i, (g, label) in enumerate(((1, "Top 1%"), (0, "Remainder"))):
+    d = surv_s.filter(pl.col("is_top") == g)
+    sf = SurvfuncRight(d["t"].to_numpy(), d["event"].to_numpy())
+    fig.add_trace(go.Scatter(x=sf.surv_times, y=1 - sf.surv_prob, mode="lines", line_shape="hv",
+                             line=dict(color=color(i), dash=DASHES[i]), name=label))
+chi2, pval = survdiff(surv_s["t"].to_numpy(), surv_s["event"].to_numpy(), surv_s["is_top"].to_numpy())
+fig.update_layout(xaxis_title="Years since enrolment", yaxis_title="Cumulative probability of first payment", showlegend=True,
+                  legend=dict(orientation="h", yanchor="top", y=-0.22, x=0.5, xanchor="center"))
+logrank = pl.DataFrame([{"test": "log-rank", "chi2": float(chi2), "p_value": float(pval),
+                         "n_top": int(surv_s["is_top"].sum()), "n_remainder_sample": int((surv_s["is_top"] == 0).sum())}])
+save_fig(fig, "fig_top_km_first_payment")
+save_tab(logrank, "tab_top_logrank", fmt="{:.4g}")
+fig
+```
+
+#### B.5.10 Response to settlement programmes
+
+**Method.** Response to settlement programmes: the mean monthly amount paid during each programme window divided by the mean monthly amount paid in the twelve months before it.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. All GARE payments, monthly.
+
+**How to read.** Grouped bars, one pair per programme; the vertical axis gives the ratio, printed above each bar (1 = no change); groups are identified in the legend.
+
+**Interpretation.** A higher ratio for the top set means that large debts respond proportionally more strongly to programmes.
+
+*Output:* Figure `fig_top_programme_response`; Table `tab_top_programme_response`.
+
+```{python}
+#| label: c154
+gare_month = collect(scan_gare().with_columns(pl.col("DATA_ARRECADACAO_GARE").dt.truncate("1mo").alias("month"),
+                                             pl.col("ID_DEBITO").is_in(list(top_ids)).alias("is_top"))
+                     .group_by("month", "is_top").agg(pl.col("VALOR_RECEITA").sum().alias("paid")))
+rows = []
+for name, start, end in PROGRAMMES:
+    s, e = np.datetime64(start), np.datetime64(end)
+    for is_top in (True, False):
+        d = gare_month.filter(pl.col("is_top") == is_top)
+        pre = d.filter((pl.col("month") >= s - np.timedelta64(365, "D")) & (pl.col("month") < s))["paid"].mean()
+        during = d.filter((pl.col("month") >= s) & (pl.col("month") <= e))["paid"].mean()
+        rows.append({"programme": name, "group": "Top 1%" if is_top else "Remainder", "pre_mean_mn": pre / 1e6,
+                     "during_mean_mn": during / 1e6, "ratio": during / pre if pre else float("nan")})
+prog_resp = pl.DataFrame(rows)
+fig = go.Figure([go.Bar(x=d["programme"], y=d["ratio"], name=k[0], marker_color=color(i),
+                        text=[f"{v:.1f}x" for v in d["ratio"]], textposition="outside")
+                 for i, (k, d) in enumerate(prog_resp.group_by("group", maintain_order=True))])
+fig.update_layout(barmode="group", yaxis_title="Monthly payments during / 12 months before", showlegend=True, legend=dict(orientation="h", y=1.1))
+save_fig(fig, "fig_top_programme_response")
+save_tab(prog_resp, "tab_top_programme_response")
+fig
+```
+
+#### B.5.11 Persistence
+
+**Method.** Persistence of payment status in the top set.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Transition matrix: rows give status in year *t* − 1, columns status in year *t*, cells the conditional probability.
+
+**Interpretation.** Large diagonal entries mean that paying and non-paying CDAs tend to remain so.
+
+*Output:* Table `tab_top_transition`.
+
+```{python}
+#| label: c156
+trans = panel_top.sort("ID_DEBITO", "year").with_columns(pl.col("paid_flag").shift(1).over("ID_DEBITO").alias("prev"),
+                                                         pl.col("year").shift(1).over("ID_DEBITO").alias("prev_year")) \
+    .filter(pl.col("prev_year") == pl.col("year") - 1)
+transition = trans.group_by("prev", "paid_flag").len().with_columns((pl.col("len") / pl.col("len").sum().over("prev")).alias("prob")).sort("prev", "paid_flag")
+acf_top = corr_pair(panel_top["rate"].to_numpy().astype(float), panel_top["rate_l1"].to_numpy().astype(float), "spearman")
+transition = transition.with_columns(pl.lit(acf_top[0]).alias("spearman_rate_lag1"))
+save_tab(transition, "tab_top_transition", fmt="{:.4f}")
+transition
+```
+
+#### Debtor structure
+
+#### B.5.12 CDAs per debtor
+
+**Method.** Distribution of the number of CDAs per debtor.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** Scatter on logarithmic axes: the horizontal axis gives the number of CDAs per firm, the vertical axis the number of firms with that count. The table gives shares of debtors and of stock held by multi-CDA debtors, by full CNPJ and by CNPJ root.
+
+**Interpretation.** An approximately straight declining pattern on log axes indicates a heavy-tailed distribution: most firms have one or a few CDAs and a few firms accumulate very many.
+
+*Output:* Figure `fig_cdas_per_debtor`; Table `tab_multi_cda_debtors`.
+
+```{python}
+#| label: c159
+per_est = raw_values.group_by("CNPJ_ROOT").agg(pl.len().alias("n_cda"), pl.col("value").sum())
+snap_cnpj = collect(snap_icms.select("ID_DEBITO", "CNPJ"))
+per_full = raw_values.join(snap_cnpj, on="ID_DEBITO").group_by("CNPJ").agg(pl.len().alias("n_cda"), pl.col("value").sum())
+def multi(frame: pl.DataFrame, level: str) -> dict:
+    m = frame["n_cda"] > 1
+    return {"level": level, "debtors": frame.height, "pct_multi_cda": 100 * m.mean(),
+            "pct_stock_multi_cda": 100 * frame.filter(m)["value"].sum() / frame["value"].sum(),
+            "max_cda_per_debtor": int(frame["n_cda"].max()), "median_cda_per_debtor": float(frame["n_cda"].median())}
+multi_tab = pl.DataFrame([multi(per_full, "Establishment (full CNPJ)"), multi(per_est, "Firm (CNPJ root)")])
+counts = per_est.group_by("n_cda").len().sort("n_cda")
+fig = go.Figure(go.Scatter(x=counts["n_cda"], y=counts["len"], mode="markers", marker_color=CEMEPI["deep_teal"]))
+fig.update_xaxes(type="log", title_text="CDAs per firm (log)")
+fig.update_yaxes(type="log", title_text="Firms (log)")
+save_fig(fig, "fig_cdas_per_debtor")
+save_tab(multi_tab, "tab_multi_cda_debtors", fmt="{:,.2f}")
+fig
+```
+
+#### B.5.13 Concentration at the debtor level
+
+**Method.** Lorenz curves of the top-set stock across CDAs and across their debtors. Units are ordered from smallest to largest; each curve gives the cumulative share of the stock held by the smallest *x* percent of units.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. Aggregated by CNPJ root for the debtor curve.
+
+**How to read.** The horizontal axis gives the cumulative share of units in percent; the vertical axis the cumulative share of the stock; the legend gives the Gini coefficient of each curve.
+
+**Interpretation.** The further a curve lies below the diagonal, the more unequal the distribution; a debtor curve below the CDA curve means that aggregation by firm increases concentration.
+
+*Output:* Figure `fig_debtor_lorenz`.
+
+```{python}
+#| label: c161
+top_roots = top["CNPJ_ROOT"].unique()
+dv = per_est.filter(pl.col("CNPJ_ROOT").is_in(top_roots))["value"].to_numpy()
+s1, c1, g1 = lorenz(top["value"].to_numpy())
+s2, c2, g2 = lorenz(dv)
+fig = go.Figure([go.Scatter(x=s1 * 100, y=c1 * 100, mode="lines", line=dict(color=CEMEPI["deep_teal"]), name=f"Top 1% CDAs (Gini {g1:.2f})"),
+                 go.Scatter(x=s2 * 100, y=c2 * 100, mode="lines", line=dict(color=CEMEPI["sand"], dash="dash"),
+                            name=f"Their debtors, CNPJ root (Gini {g2:.2f})")])
+fig.update_layout(xaxis_title="Cumulative share of units, ranked by value (%)", yaxis_title="Cumulative share of the stock (%)",
+                  showlegend=True, legend=dict(orientation="h", y=-0.3))
+save_fig(fig, "fig_debtor_lorenz")
+fig
+```
+
+#### B.5.14 Establishments within firms
+
+**Method.** Number of establishments per firm among top debtors and distribution of the stock across them.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Rows give firms grouped by number of establishments; columns give counts and the share of stock in the largest establishment.
+
+**Interpretation.** A high share in the largest establishment means that the firm's debt is concentrated in one unit.
+
+*Output:* Table `tab_establishments_per_root`.
+
+```{python}
+#| label: c163
+est_top = raw_values.join(snap_cnpj, on="ID_DEBITO").filter(pl.col("CNPJ_ROOT").is_in(top_roots)) \
+    .group_by("CNPJ_ROOT", "CNPJ").agg(pl.col("value").sum()) \
+    .group_by("CNPJ_ROOT").agg(pl.len().alias("establishments"), (pl.col("value").max() / pl.col("value").sum()).alias("share_largest"))
+establishments = est_top.select(
+    pl.len().alias("top_firms"), pl.col("establishments").mean().alias("mean_establishments"),
+    pl.col("establishments").median().alias("median_establishments"), pl.col("establishments").max().alias("max_establishments"),
+    (100 * (pl.col("establishments") > 1).mean()).alias("pct_multi_establishment"),
+    pl.col("share_largest").median().alias("median_share_largest_establishment"))
+save_tab(establishments, "tab_establishments_per_root", fmt="{:,.2f}")
+establishments
+```
+
+#### B.5.15 Within-debtor homogeneity
+
+**Method.** Within-debtor homogeneity: coefficient of variation of value and age, Shannon entropy of raw types and share of CDAs paid within each multi-CDA debtor, and the intraclass correlation of the recovery rate from a linear mixed model with a random intercept per debtor (`MixedLM`).
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. Debtors with more than one CDA.
+
+**How to read.** One row per measure, with its distribution across debtors.
+
+**Interpretation.** An intraclass correlation near 1 means that CDAs of the same firm behave alike, so that the firm rather than the individual CDA is the natural unit for collection decisions.
+
+*Output:* Table `tab_within_debtor_homogeneity`.
+
+```{python}
+#| label: c165
+from statsmodels.regression.mixed_linear_model import MixedLM
+
+within = raw_values.filter(pl.col("CNPJ_ROOT").is_in(top_roots)).join(cda.select("ID_DEBITO", "ever_paid"), on="ID_DEBITO", how="left")
+def entropy(s: pl.Series) -> float:
+    p = s.value_counts()["count"].to_numpy() / s.len()
+    return float(-(p * np.log(p)).sum())
+homog_rows = []
+for (root,), d in within.group_by("CNPJ_ROOT"):
+    if d.height < 2:
+        continue
+    homog_rows.append({"cv_value": float(d["value"].std() / d["value"].mean()), "sd_age": float(d["age"].std()),
+                       "entropy_type": entropy(d["TIPO_DEBITO"]), "share_paid": float(d["ever_paid"].fill_null(False).mean())})
+h = pl.DataFrame(homog_rows)
+icc_data = rate_cda.join(raw_values.select("ID_DEBITO", "CNPJ_ROOT"), on="ID_DEBITO").filter(pl.col("CNPJ_ROOT").is_in(top_roots)) \
+    .filter(pl.col("CNPJ_ROOT").count().over("CNPJ_ROOT") > 1).with_columns(pl.col("rate_cda").clip(0, 1)).to_pandas()
+mixed = MixedLM.from_formula("rate_cda ~ 1", groups="CNPJ_ROOT", data=icc_data).fit()
+icc = float(mixed.cov_re.iloc[0, 0] / (mixed.cov_re.iloc[0, 0] + mixed.scale))
+within_tab = h.select([pl.col(c).median().alias(f"median_{c}") for c in h.columns]).with_columns(
+    pl.lit(h.height).alias("multi_cda_firms"), pl.lit(icc).alias("icc_recovery_rate"))
+save_tab(within_tab, "tab_within_debtor_homogeneity", fmt="{:.3f}")
+within_tab
+```
+
+#### B.5.16 Repeat enrolment
+
+**Method.** Timing of repeat enrolments against the same top debtor.
+
+**Data.** ICMS extract (1.3), CDAs of the firms in the top set, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Left: histogram of the interval in years between successive enrolments (up to 15 years); right: bars of new CDAs per top firm by year of enrolment.
+
+**Interpretation.** Mass near zero years indicates batch enrolment; a rising right panel indicates growing repeat delinquency.
+
+*Output:* Figure `fig_repeat_enrolment`.
+
+```{python}
+#| label: c167
+repeat = cda.filter(pl.col("CNPJ_ROOT").is_in(top_roots)).sort("CNPJ_ROOT", "DATA_INSCRICAO").with_columns(
+    ((pl.col("DATA_INSCRICAO") - pl.col("DATA_INSCRICAO").shift(1).over("CNPJ_ROOT")).dt.total_days() / 365.25).alias("gap_years"))
+gaps = repeat["gap_years"].drop_nulls().to_numpy()
+per_year = repeat.filter(pl.col("DATA_INSCRICAO").dt.year() >= YEARS[0]).group_by(pl.col("DATA_INSCRICAO").dt.year().alias("year")) \
+    .agg(pl.len().alias("new_cda"), pl.col("CNPJ_ROOT").n_unique().alias("firms")).sort("year")
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.15)
+fig.add_trace(go.Histogram(x=gaps[gaps <= 15], nbinsx=60, marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=per_year["year"], y=per_year["new_cda"] / per_year["firms"], marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_xaxes(title_text="Years between successive enrolments", row=1, col=1)
+fig.update_yaxes(title_text="Pairs of CDAs", row=1, col=1)
+fig.update_xaxes(title_text="Year of enrolment", row=1, col=2)
+fig.update_yaxes(title_text="New CDAs per top firm", row=1, col=2)
+save_fig(fig, "fig_repeat_enrolment", width="double")
+fig
+```
+
+#### Similarity and archetypes
+
+#### B.5.17 Feature vectors and memory budget
+
+**Method.** Construction of feature vectors and of a memory-bounded distance computation. Numerical features (log value, age, recovery rate, time to first payment, number of payments, programme response) are scaled by median and interquartile range; categorical features are origin, administrative situation and filing status. Distance matrices are computed in row blocks and written as single-precision memory-mapped files on the cache drive, so that only one block resides in memory at a time.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** One row per feature with summary statistics.
+
+**Interpretation.** Robust scaling prevents a few extreme values from dominating the distances.
+
+*Output:* Table `tab_feature_summary`.
+
+```{python}
+#| label: c170
+prog_top = collect(scan_gare().filter(pl.col("ID_DEBITO").is_in(list(top_ids)))
+                   .with_columns(pl.any_horizontal([pl.col("DATA_ARRECADACAO_GARE").is_between(pl.lit(a).str.to_date(), pl.lit(b).str.to_date())
+                                                    for _, a, b in PROGRAMMES]).alias("in_programme"))
+                   .group_by("ID_DEBITO").agg(pl.len().alias("n_payments"), pl.col("VALOR_RECEITA").filter(pl.col("in_programme")).sum().alias("paid_programme"),
+                                               pl.col("VALOR_RECEITA").sum().alias("paid_total")))
+features = (top.select("ID_DEBITO", "CNPJ_ROOT", "value", "age", "ICMS_ORIGIN", "SITUACAO_DEBITO", "STATUS_AJUIZAMENTO_DEBITO")
+            .join(cda.select("ID_DEBITO", "years_to_first_payment"), on="ID_DEBITO", how="left")
+            .join(prog_top, on="ID_DEBITO", how="left")
+            .with_columns(pl.col("n_payments").fill_null(0), pl.col("paid_total").fill_null(0), pl.col("paid_programme").fill_null(0))
+            .with_columns(pl.col("value").log10().alias("log_value"), (pl.col("paid_total") / pl.col("value")).alias("recovery"),
+                          (pl.col("paid_programme") / pl.col("paid_total")).fill_nan(0).fill_null(0).alias("programme_share"),
+                          pl.col("years_to_first_payment").fill_null(pl.col("age")).alias("time_to_payment"))
+            .sort("ID_DEBITO"))
+NUM = ["log_value", "age", "recovery", "time_to_payment", "n_payments", "programme_share"]
+CAT = ["ICMS_ORIGIN", "SITUACAO_DEBITO", "STATUS_AJUIZAMENTO_DEBITO"]
+X_raw = features.select(NUM).to_numpy().astype(np.float32)
+med, iqr = np.nanmedian(X_raw, axis=0), np.subtract(*np.nanpercentile(X_raw, [75, 25], axis=0))
+X_num = np.nan_to_num((X_raw - med) / np.where(iqr == 0, 1, iqr)).astype(np.float32)
+X_cat = np.column_stack([features[c].cast(pl.Categorical).to_physical().to_numpy() for c in CAT]).astype(np.int32)
+feature_summary = features.select(NUM).describe()
+save_tab(feature_summary, "tab_feature_summary", fmt="{:,.3f}")
+print(f"{X_num.shape[0]:,} CDAs; full distance matrix = {X_num.shape[0] ** 2 * 4 / 1e9:.2f} GB (float32)")
+feature_summary
+```
+
+#### B.5.18 Distance structure
+
+**Method.** Gower distance and low-dimensional views. Gower distance averages, over features, the range-normalised absolute difference for numerical features and a 0/1 mismatch for categorical ones, giving a dissimilarity between 0 and 1. The structure is shown by principal components of the numerical features and by t-SNE computed on the Gower distances of a random subsample of 5,000 CDAs.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Left: scatter of the first two principal components; right: t-SNE embedding; points coloured by origin, identified in the legend.
+
+**Interpretation.** Well-separated groups in t-SNE indicate distinct kinds of CDA. t-SNE preserves local neighbourhoods only: distances between groups and group sizes on the map carry no meaning.
+
+*Output:* Figure `fig_top_embedding`.
+
+:::{.callout-warning}
+## B.5.18: figura do paper e versão corrigida
+A figura abaixo é a do paper (PCA com escala mediana/IQR), apontada como errada na reunião de 23/10/2026.
+A versão corrigida (PCA na escala do Gower e t-SNE) está em [K-means no top 1%](../eda/2026-10-23_kmeans_top1.qmd) e está
+**a validar pelo Étore**.
+:::
+
+```{python}
+#| label: c172
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+
+def gower_blocks(num: np.ndarray, cat: np.ndarray, block: int = 512):
+    rng = num.max(axis=0) - num.min(axis=0)
+    rng[rng == 0] = 1.0
+    numr = (num / rng).astype(np.float32)
+    k = num.shape[1] + cat.shape[1]
+    def build(mm: np.memmap) -> None:
+        for start in range(0, numr.shape[0], block):
+            stop = min(start + block, numr.shape[0])
+            blk = np.abs(numr[start:stop, None, :] - numr[None, :, :]).sum(axis=2)
+            blk += (cat[start:stop, None, :] != cat[None, :, :]).sum(axis=2)
+            mm[start:stop] = blk / k
+    return build
+
+TOP_PARAMS = {"set": "top_1pct", "snapshot": EXTRACT, "features": NUM + CAT}
+D = cached_memmap("B.5.18:gower", X_num.shape[0], gower_blocks(X_num, X_cat), params=TOP_PARAMS)
+emb_pca = PCA(n_components=2, random_state=SEED).fit_transform(X_num)
+N_EMBED = 5000
+embed_idx = np.sort(np.random.default_rng(SEED).choice(D.shape[0], size=min(N_EMBED, D.shape[0]), replace=False))
+emb_tsne = collect(cached("B.5.18:tsne", lambda: pl.DataFrame(
+    TSNE(n_components=2, metric="precomputed", init="random", random_state=SEED).fit_transform(
+        np.asarray(D[np.ix_(embed_idx, embed_idx)])), schema=["x", "y"], orient="row"),
+    params={**TOP_PARAMS, "n_embed": N_EMBED}))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.08)
+origin = features["ICMS_ORIGIN"].to_numpy()
+for i, k in enumerate(features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()):
+    rows = np.where(origin == k)[0]
+    sub_rows = np.where(origin[embed_idx] == k)[0]
+    fig.add_trace(go.Scattergl(x=emb_pca[rows, 0], y=emb_pca[rows, 1], mode="markers", marker=dict(size=2, color=color(i)), name=k), 1, 1)
+    fig.add_trace(go.Scattergl(x=emb_tsne["x"].to_numpy()[sub_rows], y=emb_tsne["y"].to_numpy()[sub_rows], mode="markers",
+                               marker=dict(size=2, color=color(i)), showlegend=False), 1, 2)
+fig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08))
+fig.update_xaxes(title_text="PC1", row=1, col=1); fig.update_yaxes(title_text="PC2", row=1, col=1)
+fig.update_xaxes(title_text="t-SNE 1", row=1, col=2); fig.update_yaxes(title_text="t-SNE 2", row=1, col=2)
+save_fig(fig, "fig_top_embedding", width="double")
+fig
+```
+
+#### B.5.19 Clustering
+
+**Method.** Clustering on Gower distances. Agglomerative clustering with average linkage merges, at each step, the two clusters with the smallest average distance; HDBSCAN finds dense regions and labels sparse points as noise. Both are fitted on a random subsample of 5,000 CDAs and every other CDA receives the label of its nearest subsample member. The number of agglomerative clusters is chosen by the mean silhouette coefficient; stability is assessed by the adjusted Rand index over 20 pairs of independent subsamples.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** The horizontal axis gives the number of clusters; the vertical axis gives the mean silhouette coefficient (−1 to 1); the dotted line marks the selected number. The table gives stability and agreement indices.
+
+**Interpretation.** Higher silhouettes mean more compact, better-separated clusters. Adjusted Rand values near 1 indicate stable partitions; values near 0 indicate agreement no better than chance.
+
+*Output:* Figure `fig_cluster_selection`; Table `tab_cluster_stability`.
+
+:::{.callout-warning}
+## Escolha do k
+O paper escolhe o número de grupos do hierárquico automaticamente, pela maior silhueta (`K_STAR`). Isso só reproduz o
+paper: **o k fica para o Étore decidir**. O K-means com 100 inicializações por k, com perfis de k = 2, 3 e 4, está em
+[K-means no top 1%](../eda/2026-10-23_kmeans_top1.qmd).
+:::
+
+```{python}
+#| label: c174
+from sklearn.cluster import AgglomerativeClustering, HDBSCAN
+from sklearn.metrics import silhouette_score, adjusted_rand_score
+
+def agglomerative(M, k: int) -> np.ndarray:
+    return AgglomerativeClustering(n_clusters=k, metric="precomputed", linkage="average").fit_predict(M)
+
+def density(M, min_cluster_size: int = 50) -> np.ndarray:
+    return HDBSCAN(min_cluster_size=min_cluster_size, metric="precomputed").fit_predict(M)
+
+def submatrix(idx: np.ndarray) -> np.ndarray:
+    return np.asarray(D[np.ix_(idx, idx)])
+
+def choose_k(ks=range(2, 11), size: int = 5000) -> dict:
+    idx = np.sort(np.random.default_rng(SEED).choice(D.shape[0], size=min(size, D.shape[0]), replace=False))
+    Ds = submatrix(idx)
+    return {str(k): float(silhouette_score(Ds, agglomerative(Ds, k), metric="precomputed")) for k in ks}
+
+def subsample_stability(fit, n_rep: int = 20, size: int = 5000) -> list[float]:
+    rng, n, scores = np.random.default_rng(SEED), D.shape[0], []
+    for _ in range(n_rep):
+        a = np.sort(rng.choice(n, size=min(size, n), replace=False))
+        b = np.sort(rng.choice(n, size=min(size, n), replace=False))
+        la, lb = fit(submatrix(a)), fit(submatrix(b))
+        _, ia, ib = np.intersect1d(a, b, return_indices=True)
+        scores.append(float(adjusted_rand_score(la[ia], lb[ib])))
+    return scores
+
+sil = cached_json("B.5.19:silhouette", choose_k, params=TOP_PARAMS)
+K_STAR = int(max(sil, key=sil.get))
+N_FIT = 5000
+fit_idx = np.sort(np.random.default_rng(SEED + 1).choice(D.shape[0], size=min(N_FIT, D.shape[0]), replace=False))
+
+def extend_labels(fit_labels: np.ndarray, block: int = 1024) -> np.ndarray:
+    out = np.empty(D.shape[0], dtype=np.int64)
+    for start in range(0, D.shape[0], block):
+        stop = min(start + block, D.shape[0])
+        out[start:stop] = fit_labels[np.asarray(D[start:stop][:, fit_idx]).argmin(axis=1)]
+    out[fit_idx] = fit_labels
+    return out
+
+def full_labels() -> pl.DataFrame:
+    Ds = submatrix(fit_idx)
+    return pl.DataFrame({"ID_DEBITO": features["ID_DEBITO"],
+                         "agglomerative": extend_labels(agglomerative(Ds, K_STAR)),
+                         "hdbscan": extend_labels(density(Ds))})
+
+labels = collect(cached("B.5.19:labels", full_labels, params={**TOP_PARAMS, "k": K_STAR, "n_fit": N_FIT}))
+stab = cached_json("B.5.19:stability", lambda: {
+    "agglomerative": subsample_stability(lambda M: agglomerative(M, K_STAR)),
+    "hdbscan": subsample_stability(density)}, params={**TOP_PARAMS, "k": K_STAR})
+stability_tab = pl.DataFrame([{"method": m, "mean_ari": float(np.mean(v)), "sd_ari": float(np.std(v)),
+                               "p05_ari": float(np.percentile(v, 5))} for m, v in stab.items()]).with_columns(
+    pl.lit(float(adjusted_rand_score(labels["agglomerative"], labels["hdbscan"]))).alias("agreement_ari"),
+    pl.lit(K_STAR).alias("k_agglomerative"), pl.lit(int((labels["hdbscan"] == -1).sum())).alias("hdbscan_noise"))
+fig = go.Figure(go.Scatter(x=[int(k) for k in sil], y=list(sil.values()), mode="lines+markers", line_color=CEMEPI["deep_teal"]))
+fig.add_vline(x=K_STAR, line_dash="dot", line_color=CEMEPI["sand"], annotation_text=f"selected k = {K_STAR}",
+              annotation_position="top right")
+fig.update_layout(xaxis_title="Number of clusters (agglomerative, average linkage)", yaxis_title="Mean silhouette coefficient")
+save_fig(fig, "fig_cluster_selection")
+save_tab(stability_tab, "tab_cluster_stability", fmt="{:.3f}")
+fig
+```
+
+#### B.5.20 Archetypes
+
+**Method.** Profiles of the agglomerative clusters, interpreted as archetypes of large debt.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Heat map: rows are clusters, columns are numerical features; colour and printed value give the cluster median standardised across clusters (z-score), with teal above and sand below the average across clusters. Empty cells correspond to features without variation across cluster medians.
+
+**Interpretation.** Reading a row gives the profile of an archetype; the table adds size, share of the stock and modal categorical features.
+
+*Output:* Figure `fig_archetype_profiles`; Table `tab_archetypes`.
+
+```{python}
+#| label: c176
+clustered = features.join(labels, on="ID_DEBITO")
+medoids = {}
+for (c,), d in clustered.with_row_index().group_by("agglomerative"):
+    idx = d["index"].to_numpy()
+    sub = idx if idx.size <= 3000 else np.random.default_rng(SEED).choice(idx, 3000, replace=False)
+    medoids[c] = int(sub[np.asarray(D[np.ix_(sub, sub)]).sum(axis=1).argmin()])
+archetypes = clustered.group_by("agglomerative").agg(
+    pl.len().alias("n_cda"), (100 * pl.col("value").sum() / clustered["value"].sum()).alias("pct_stock"),
+    *[pl.col(c).median().alias(c) for c in NUM], *[pl.col(c).mode().first().alias(c) for c in CAT]).sort("agglomerative")
+prof = archetypes.select("agglomerative", *NUM)
+z = prof.select([((pl.col(c) - pl.col(c).mean()) / pl.col(c).std()).alias(c) for c in NUM]).with_columns(
+    pl.col("log_value").alias("log_value")).insert_column(0, prof["agglomerative"].map_elements(lambda c: f"Cluster {c}", return_dtype=pl.Utf8).alias("cluster"))
+fig = heatmap(z, "cluster", diverging=True, zmin=-2, zmax=2, colorbar_title="Cluster median<br>(z-score)")
+fig.update_layout(xaxis_title="Feature", yaxis_title="Agglomerative cluster")
+save_fig(fig, "fig_archetype_profiles", width="double")
+save_tab(archetypes, "tab_archetypes", fmt="{:,.3f}")
+fig
+```
+
+#### B.5.21 Similarity of recovery trajectories
+
+**Method.** Similarity of recovery trajectories. The main measure is the Euclidean distance between trajectories on a fixed grid of 0 to 10 years since enrolment. As a robustness check, dynamic time warping (DTW), which aligns trajectories that have similar shapes but different speeds, is computed for a stratified subsample of 1,000 trajectories. Trajectories are clustered hierarchically and a medoid is shown for each group.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** The horizontal axis gives years since enrolment; the vertical axis the accumulated recovery of each group's medoid trajectory in percent; group sizes appear in the legend. The annotation gives the Spearman correlation between grid and DTW distances.
+
+**Interpretation.** A correlation near 1 means that both distance measures rank pairs of trajectories alike, so the grouping does not depend on the measure. A group with very few members represents an atypical trajectory rather than a pattern.
+
+*Output:* Figure `fig_dtw_clusters`.
+
+```{python}
+#| label: c178
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
+
+T_wide = traj.pivot(on="h", index="ID_DEBITO", values="acc_rec").sort("ID_DEBITO")
+T_ids = T_wide["ID_DEBITO"]
+T_mat = T_wide.drop("ID_DEBITO").to_numpy().astype(np.float32)
+
+def grid_blocks(X: np.ndarray, block: int = 2048):
+    Xf = np.nan_to_num(X)
+    sq = (Xf ** 2).sum(axis=1)
+    def build(mm: np.memmap) -> None:
+        for start in range(0, Xf.shape[0], block):
+            stop = min(start + block, Xf.shape[0])
+            mm[start:stop] = np.sqrt(np.maximum(sq[start:stop, None] + sq[None, :] - 2 * Xf[start:stop] @ Xf.T, 0))
+    return build
+
+def dtw(a: np.ndarray, b: np.ndarray) -> float:
+    a, b = a[~np.isnan(a)], b[~np.isnan(b)]
+    acc = np.full((a.size + 1, b.size + 1), np.inf)
+    acc[0, 0] = 0.0
+    for i in range(1, a.size + 1):
+        for j in range(1, b.size + 1):
+            acc[i, j] = abs(a[i - 1] - b[j - 1]) + min(acc[i - 1, j], acc[i, j - 1], acc[i - 1, j - 1])
+    return float(acc[-1, -1])
+
+D_grid = cached_memmap("B.5.21:grid", T_mat.shape[0], grid_blocks(T_mat), params={**TOP_PARAMS, "grid": "0-10y"})
+traj_labels = labels.join(pl.DataFrame({"ID_DEBITO": T_ids}), on="ID_DEBITO", how="right")["agglomerative"].fill_null(-1).to_numpy()
+rng = np.random.default_rng(SEED)
+rep_idx = np.sort(np.concatenate([rng.choice(np.where(traj_labels == c)[0], size=min(int(1000 * (traj_labels == c).mean()) + 1, int((traj_labels == c).sum())), replace=False)
+                                  for c in np.unique(traj_labels)]))
+
+def dtw_matrix() -> list[list[float]]:
+    X = T_mat[rep_idx]
+    out = np.zeros((len(X), len(X)), dtype=np.float32)
+    for i in range(len(X)):
+        for j in range(i + 1, len(X)):
+            out[i, j] = out[j, i] = dtw(X[i], X[j])
+    return out.tolist()
+
+D_dtw = np.array(cached_json("B.5.21:dtw", dtw_matrix, params={**TOP_PARAMS, "n_rep": int(rep_idx.size)}), dtype=np.float32)
+D_grid_rep = np.asarray(D_grid[np.ix_(rep_idx, rep_idx)])
+traj_groups = fcluster(linkage(squareform(D_grid_rep, checks=False), method="average"), t=K_STAR, criterion="maxclust")
+corr_dtw_grid = stats.spearmanr(squareform(D_grid_rep, checks=False), squareform(D_dtw, checks=False))[0]
+fig = go.Figure()
+for i, g in enumerate(np.unique(traj_groups)):
+    members = np.where(traj_groups == g)[0]
+    med = members[D_grid_rep[np.ix_(members, members)].sum(axis=1).argmin()]
+    y = T_mat[rep_idx][med] * 100
+    fig.add_trace(go.Scatter(x=list(range(T_mat.shape[1])), y=y, mode="lines+markers", name=f"group {g} (n={members.size:,})",
+                             line=dict(color=color(i), dash=DASHES[i % 5])))
+fig.add_annotation(x=0.02, y=0.98, xref="paper", yref="paper", text=f"Spearman(grid, DTW) = {corr_dtw_grid:.2f}", showarrow=False, xanchor="left")
+fig.update_layout(xaxis_title="Years since enrolment", yaxis_title="Accumulated recovery, medoid (%)", showlegend=True,
+                  legend=dict(orientation="h", yanchor="top", y=-0.22, x=0.5, xanchor="center"))
+save_fig(fig, "fig_dtw_clusters", width="double")
+fig
+```
+
+#### Comparison with the tail
+
+#### B.5.22 Top set versus the rest of the portfolio
+
+**Method.** Comparison of the top set with the rest of the portfolio. Continuous variables use the Mann–Whitney *U* test and the rank-biserial correlation, defined as 1 − 2*U*/(*n*₁*n*₂) with the top set as the first group, so that negative values indicate larger values in the top set. Categorical variables use the chi-square test and Cramér's *V*. *p*-values are adjusted with the Benjamini–Hochberg procedure.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026]. Remainder represented by a random sample of 200,000 CDAs.
+
+**How to read.** Horizontal bars, one per variable; the horizontal axis gives the effect size; bars are coloured by type of effect size, identified in the legend.
+
+**Interpretation.** Longer bars indicate larger differences. Cramér's *V* is non-negative and measures strength only; the sign of the rank-biserial correlation gives the direction.
+
+*Output:* Figure `fig_top_vs_tail_effects`; Table `tab_top_vs_tail`.
+
+```{python}
+#| label: c181
+tail = raw_values.filter(~pl.col("ID_DEBITO").is_in(list(top_ids))).sample(n=200_000, seed=SEED)
+cmp = pl.concat([top.select(raw_values.columns).with_columns(pl.lit(True).alias("is_top")),
+                 tail.with_columns(pl.lit(False).alias("is_top"))]).join(
+    cda.select("ID_DEBITO", "years_to_first_payment", "ever_paid"), on="ID_DEBITO", how="left").join(
+    rate_cda.select("ID_DEBITO", "rate_cda"), on="ID_DEBITO", how="left")
+rows = []
+for var in ("value", "age", "rate_cda", "years_to_first_payment"):
+    a = cmp.filter(pl.col("is_top"))[var].drop_nulls().to_numpy().astype(float)
+    b = cmp.filter(~pl.col("is_top"))[var].drop_nulls().to_numpy().astype(float)
+    r = mann_whitney(a, b)
+    rows.append({"variable": var, "test": "Mann-Whitney", "effect": r["rank_biserial"], "effect_measure": "rank-biserial", "p_value": r["p_value"]})
+for var in ("ever_paid", "STATUS_AJUIZAMENTO_DEBITO", "ICMS_ORIGIN", "SITUACAO_DEBITO"):
+    ct = cmp.group_by("is_top", var).len().pivot(on=var, index="is_top", values="len").fill_null(0).drop("is_top").to_numpy()
+    r = chi2_table(ct)
+    rows.append({"variable": var, "test": "chi-square", "effect": r["cramers_v"], "effect_measure": "Cramér's V", "p_value": r["p_value"]})
+top_vs_tail = pl.DataFrame(rows).with_columns(pl.Series("p_bh", multipletests([r["p_value"] for r in rows], method="fdr_bh")[1]))
+d = top_vs_tail.sort("effect")
+VAR_NAMES = {"value": "Value", "age": "Age", "rate_cda": "Recovery rate", "years_to_first_payment": "Years to first payment",
+             "ever_paid": "Any payment", "STATUS_AJUIZAMENTO_DEBITO": "Filing status", "ICMS_ORIGIN": "ICMS origin",
+             "SITUACAO_DEBITO": "Administrative situation"}
+fig = go.Figure([go.Bar(y=[VAR_NAMES.get(v, v) for v in g["variable"]], x=g["effect"], orientation="h", marker_color=color(i), name=label,
+                        text=[f"{v:.2f}" for v in g["effect"]], textposition="outside", cliponaxis=False)
+                 for i, (m, label) in enumerate((("rank-biserial", "Rank-biserial correlation (continuous)"), ("Cramér's V", "Cramér's V (categorical)")))
+                 for g in [d.filter(pl.col("effect_measure") == m)]])
+fig.update_layout(xaxis_title="Effect size, top 1% versus remainder", showlegend=True, legend=dict(orientation="h", y=-0.3),
+                  yaxis=dict(categoryorder="array", categoryarray=[VAR_NAMES.get(v, v) for v in d["variable"]]),
+                  margin=dict(r=40))
+save_fig(fig, "fig_top_vs_tail_effects")
+save_tab(top_vs_tail, "tab_top_vs_tail", fmt="{:.4g}")
+fig
+```
+
+#### Optional linkage with firm revenue
+
+#### B.5.23 Linkage with masked revenue
+
+**Method.** Linkage of the top debtors with masked revenue records (`FATURAMENTO_MASCARADO`) through the debtor identifier.
+
+**Data.** CDAs in the top 1% by value in the December 2025 snapshot [lab: era março de 2026] (B.5.1), with their panel and payment records, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** The table reports linkage coverage.
+
+**Interpretation.** Ratios of debt to revenue are interpreted only if coverage is adequate.
+
+*Output:* Table `tab_revenue_linkage_coverage`.
+
+```{python}
+#| label: c184
+def revenue_coverage() -> pl.DataFrame:
+    con = duck()
+    try:
+        cols = [c for (c,) in con.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'FATURAMENTO_MASCARADO'").fetchall()]
+        id_col = next((c for c in cols if "CNPJ" in c.upper()), None)
+        if id_col is None:
+            return pl.DataFrame({"columns": [", ".join(cols)], "linkable": [False]})
+        roots = con.execute(f"SELECT DISTINCT LEFT(REGEXP_REPLACE(CAST({id_col} AS VARCHAR), '[^0-9]', '', 'g'), 8) AS root FROM FATURAMENTO_MASCARADO").pl()
+    finally:
+        con.close()
+    linked = pl.DataFrame({"root": top_roots}).join(roots, on="root", how="inner").height
+    return pl.DataFrame({"identifier_column": [id_col], "top_firms": [len(top_roots)], "linked_firms": [linked],
+                         "coverage_pct": [100 * linked / len(top_roots)], "linkable": [linked > 0]})
+
+coverage = collect(cached("B.5.23", revenue_coverage, params=TOP_PARAMS))
+save_tab(coverage, "tab_revenue_linkage_coverage", fmt="{:,.2f}")
+coverage
+```
+
+#### B.5.24 Anonymisation
+
+**Method.** Pseudonymisation of debtor identifiers with a salted SHA-256 hash; the salt is kept outside the repository.
+
+**Data.** CNPJ roots of the top debtors.
+
+**How to read.** The cell defines the hashing function used in all debtor-level outputs.
+
+**Interpretation.** No names or raw identifiers are written to figures or tables.
+
+```{python}
+#| label: c186
+SALT = secrets.token_hex(32)  # lab: sal efêmero por execução, nunca gravado; o sal do projeto não entra no kernel
+
+def anonymise(frame: pl.DataFrame, col: str = "CNPJ_ROOT") -> pl.DataFrame:
+    hashed = frame[col].map_elements(lambda v: hashlib.sha256((SALT + v).encode()).hexdigest()[:12], return_dtype=pl.Utf8)
+    return frame.with_columns(hashed.alias("debtor_hash")).drop([c for c in (col, "CNPJ") if c in frame.columns])
+
+archetype_members = anonymise(clustered.select("CNPJ_ROOT", "agglomerative", "value"))
+assert not any(c in archetype_members.columns for c in ("CNPJ", "CNPJ_ROOT"))
+# lab: só agregados (o paper mostrava as primeiras linhas com o hash)
+archetype_members.group_by("agglomerative").agg(pl.len().alias("rows"), (pl.col("value").sum() / 1e9).alias("value_bn")).sort("agglomerative")
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```

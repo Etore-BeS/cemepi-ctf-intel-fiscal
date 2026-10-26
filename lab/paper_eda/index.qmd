@@ -1,0 +1,43 @@
+---
+title: "EDA do paper (paper_eda_v1) no laboratório"
+subtitle: "The Enrolled ICMS Debt Portfolio of São Paulo: Stock, Recovery and Macroeconomic Conditions — material suplementar"
+date: 2026-10-26
+date-format: "DD/MM/YYYY"
+---
+
+Esta é a **entrada principal** do laboratório: o EDA inteiro do artigo (`paper_eda_v1.ipynb`, 337 células, partes A a E),
+portado para páginas Quarto com as mudanças decididas nas reuniões de outubro de 2026. O notebook original não foi
+rodado nem alterado; as páginas são geradas por `lab/paper_eda/_gerar_paginas.py` a partir das fontes das células.
+
+## Páginas
+
+| Página | Conteúdo do paper |
+|---|---|
+| [0–1. Ambiente e dados](01_dados.qmd) | Ambiente, cache, fontes, extrato ICMS, painel CDA × ano, séries mensais e macro; qualidade das fotos do DEBITO e recorte do laboratório |
+| [Parte A](02_parte_a.qmd) | A carteira por tributo (A.1–A.7) |
+| [Parte B (1/3)](03_parte_b1.qmd) | B.1 Evolução, B.2 Tipos de ICMS, B.3 Declarado × autuado, B.4 Concentração |
+| [Parte B (2/3)](04_parte_b2.qmd) | B.5 As CDAs mais concentradas (top 1%, distância de Gower, agrupamento, arquétipos) |
+| [Parte B (3/3)](05_parte_b3.qmd) | B.6 Idade, B.7 Recuperação, B.8 Pagamentos, B.9 Ajuizamento, B.10 Sazonalidade, B.11 Programas |
+| [Parte C](06_parte_c.qmd) | Distribuição, linearidade, estacionariedade e persistência |
+| [Parte D](07_parte_d.qmd) | Correlações mensais, trimestrais, anuais e de painel; significância; modelos |
+| [Parte E](08_parte_e.qmd) | Discussão e correspondência com o manuscrito (texto do Étore, sem reescrever) |
+
+## O que mudou em relação ao notebook
+
+- **Sem 2026.** Último ano completo: 2025. Onde o paper usava a foto de março de 2026, o laboratório usa a de
+  dezembro de 2025. O extrato e o painel do paper (até 2026-03) vêm do cache e são cortados na leitura.
+- **Selic over** (SGS 4189) no lugar da meta (SGS 432) em tudo que usa `selic` (seção 1.6, Parte D, modelos).
+- **Significância:** estrelas (* p ≤ 0,10; ** p ≤ 0,05; *** p ≤ 0,01) nos mapas de calor de correlação e nas
+  tabelas com coluna de p, com as linhas de p ≤ 0,10 destacadas (decisão com a Profª Lívia).
+- **Qualidade do DEBITO:** fotos ausentes (2018-12, 2020-10 a 12), arquivo de 2020 M10–12 que repete M04–06, 2018
+  M10–12 truncado e 2024-03 parcial são sinalizados. O estoque mensal soma uma linha por CDA e mês; nada mais é corrigido.
+- **Concentração por tipo e por devedor, B.8.5 em R$, 5.18 corrigido (a validar pelo Étore), K-means com várias
+  inicializações (k = 2, 3 e 4; o k é decisão do Étore) e checagem emprego × estoque:** ligados nas partes
+  correspondentes às páginas de 23/10/2026.
+- **Dados pessoais:** o laboratório não lê `CPF_DEVEDOR` nem `NOME_DEVEDOR`. Onde o paper separava CPF de CNPJ, a
+  separação é CNPJ × sem CNPJ. A amostra de linhas do A.1.4 virou o esquema da tabela, e o B.5.24 mostra só agregados.
+- **Nomes neutros:** figuras e tabelas exportadas (só sob pedido, `LAB_EXPORT_FIGS=1`) vão para
+  `interim/paper_eda_lab/` no HD, com os rótulos `fig_*`/`tab_*` do paper.
+
+Para ver localmente (fish):
+`cd ~/Code/cemepi-lab; and env QUARTO_PYTHON=(pwd)/.venv/bin/python ~/.local/bin/quarto preview lab`

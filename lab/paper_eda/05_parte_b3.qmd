@@ -1,0 +1,1039 @@
+---
+title: "Parte B (3/3). Idade, recuperação, pagamentos, ajuizamento, sazonalidade e programas"
+description: "Porte do paper EDA v1 (Parte B (3/3)) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+:::{.callout-important}
+## Qualidade do DEBITO (só sinalizado, nada corrigido)
+- Faltam as fotos de **2018-12** e de **2020-10 a 2020-12**. O arquivo de 2020 M10–M12 repete o de M04–M06, e o de
+  2018 M10–M12 está truncado (2018-11 parcial). A foto de **2024-03** está parcial.
+- Consequência no painel: o "fim de ano" de 2018 é a última foto em que cada CDA aparece (out. ou nov.), e o de 2020 é setembro.
+- No laboratório, o estoque mensal soma **uma linha por CDA e mês** (o paper somava as linhas repetidas). A tabela de
+  qualidade está na página [Dados](01_dados.qmd#lab-qualidade).
+:::
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+```{python}
+#| label: dep-85
+#| include: false
+annual = collect(panel.group_by("year").agg(
+    pl.len().alias("n_cda"), pl.col("stock").sum().alias("stock"), pl.col("paid").sum().alias("collected"),
+    pl.col("rate").filter(pl.col("stock") > 0).mean().alias("mean_cda_rate"),
+    pl.col("paid_flag").mean().alias("share_paying")).sort("year"))
+annual = annual.with_columns(pl.when(pl.col("stock") > 0).then(pl.col("collected") / pl.col("stock")).alias("portfolio_rate"),
+                             (pl.col("stock") / 1e9).alias("stock_bn"), (pl.col("collected") / 1e9).alias("collected_bn"))
+save_tab(annual.select("year", "n_cda", "stock_bn", "collected_bn",
+                       (100 * pl.col("portfolio_rate")).alias("portfolio_rate_pct"),
+                       (100 * pl.col("mean_cda_rate")).alias("mean_cda_rate_pct"),
+                       (100 * pl.col("share_paying")).alias("share_paying_pct")), "tab_serie_agregada_ano", fmt="{:,.3f}")
+annual
+```
+
+```{python}
+#| label: dep-98
+#| include: false
+snap_icms = (scan_icms().filter((pl.col("year") == SNAP_YEAR) & (pl.col("MES_EXTRACAO") == SNAP_MONTH))
+             .with_columns(((pl.date(SNAP_YEAR, SNAP_MONTH, 1) - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("age")))
+raw_summary = collect(snap_icms.group_by("TIPO_DEBITO").agg(
+    pl.len().alias("n_cda"), (pl.col("VALOR_SEM_HONORARIOS").sum() / 1e9).alias("stock_bn")).sort("n_cda", descending=True))
+raw_by_year = collect(panel.group_by("year", "TIPO_DEBITO").agg(pl.len().alias("n_cda"),
+                                                                (pl.col("stock").sum() / 1e9).alias("stock_bn")))
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.18)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["n_cda"], orientation="h", marker_color=CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(y=raw_summary["TIPO_DEBITO"], x=raw_summary["stock_bn"], orientation="h", marker_color=CEMEPI["sand"]), 1, 2)
+fig.update_xaxes(type="log", title_text="CDAs (log)", row=1, col=1)
+fig.update_xaxes(type="log", title_text="Stock, R$ bn (log)", row=1, col=2)
+fig.update_yaxes(showticklabels=False, row=1, col=2)
+save_fig(fig, "fig_icms_raw_counts_value", width="double")
+save_tab(raw_summary.join(raw_by_year.pivot(on="year", index="TIPO_DEBITO", values="n_cda"), on="TIPO_DEBITO", how="left"),
+         "tab_icms_raw_summary", fmt="{:,.2f}")
+fig
+```
+
+```{python}
+#| label: dep-100
+#| include: false
+raw_values = collect(snap_icms.select("TIPO_DEBITO", pl.col("VALOR_SEM_HONORARIOS").alias("value"), "age", "ICMS_ORIGIN",
+                                     "STATUS_AJUIZAMENTO_DEBITO", "SITUACAO_DEBITO", "ID_DEBITO", "CNPJ_ROOT"))
+ticket_raw = raw_values.group_by("TIPO_DEBITO").agg(
+    pl.col("value").mean().alias("mean"), pl.col("value").median().alias("median"),
+    pl.col("value").quantile(0.25).alias("q25"), pl.col("value").quantile(0.75).alias("q75")).sort("mean", descending=True)
+fig = ecdf(raw_values, "value", "TIPO_DEBITO", x_title="CDA value (R$, log scale)")
+save_fig(fig, "fig_icms_raw_value_ecdf", width="double")
+save_tab(ticket_raw, "tab_icms_raw_ticket", fmt="{:,.0f}")
+fig
+```
+
+```{python}
+#| label: dep-106
+#| include: false
+first_pay = collect(scan_gare().group_by("ID_DEBITO").agg(pl.col("DATA_ARRECADACAO_GARE").min().alias("first_payment"),
+                                                          pl.col("VALOR_RECEITA").sum().alias("paid_total")))
+cda = collect(attributes).join(first_pay, on="ID_DEBITO", how="left").with_columns(
+    ((pl.col("first_payment") - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("years_to_first_payment"),
+    pl.col("first_payment").is_not_null().alias("ever_paid"))
+pay_raw = cda.group_by("TIPO_DEBITO").agg(
+    (100 * pl.col("ever_paid").mean()).alias("pct_ever_paid"),
+    pl.col("years_to_first_payment").median().alias("median_years_to_first_payment"),
+    (pl.col("years_to_first_payment") < 1).mean().alias("share_first_payment_year0")).sort("pct_ever_paid", descending=True)
+fig = bars(pay_raw, "TIPO_DEBITO", "pct_ever_paid", val_title="CDAs with any payment (%)")
+save_fig(fig, "fig_icms_raw_payment", width="double")
+save_tab(pay_raw, "tab_icms_raw_payment", fmt="{:.3f}")
+fig
+```
+
+```{python}
+#| label: dep-127
+#| include: false
+values_now = raw_values["value"].drop_nulls().to_numpy()
+share, cum, gini = lorenz(values_now)
+idx = np.unique(np.geomspace(1, share.size, 400).astype(int)) - 1
+fig = go.Figure(go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", line_color=CEMEPI["deep_teal"]))
+for f in (0.1, 1, 10):
+    k = int(f / 100 * share.size)
+    fig.add_annotation(x=np.log10(f), y=cum[k] * 100, text=f"top {f:g}%: {cum[k] * 100:.0f}%", showarrow=True, arrowhead=0, ax=30, ay=20)
+fig.update_xaxes(type="log", title_text="Share of CDAs, ranked by value (%, log scale)")
+fig.update_yaxes(title_text="Cumulative share of the stock (%)")
+save_fig(fig, "fig_pareto_icms")
+k50 = int(np.searchsorted(cum, 0.5)) + 1
+concentration = pl.DataFrame([{"level": "CDA", "n": int(values_now.size), "gini": gini, **top_shares(values_now),
+                               "n_for_50pct": k50, "pct_for_50pct": 100 * k50 / values_now.size}])
+save_tab(concentration, "tab_concentration", fmt="{:,.4f}")
+fig
+```
+
+```{python}
+#| label: dep-131
+#| include: false
+thr = {f: np.quantile(values_now, 1 - f) for f in (0.001, 0.01)}
+strata = raw_values.join(cda.select("ID_DEBITO", "ever_paid"), on="ID_DEBITO", how="left").with_columns(
+    pl.when(pl.col("value") >= thr[0.001]).then(pl.lit("top 0.1%"))
+      .when(pl.col("value") >= thr[0.01]).then(pl.lit("top 0.1-1%")).otherwise(pl.lit("remainder")).alias("stratum"))
+large_vs_tail = strata.group_by("stratum").agg(
+    pl.len().alias("n_cda"), (pl.col("value").sum() / 1e9).alias("stock_bn"), pl.col("age").median().alias("median_age"),
+    (100 * pl.col("ever_paid").fill_null(False).mean()).alias("pct_ever_paid"),
+    (100 * (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").mean()).alias("pct_filed"),
+    (100 * (pl.col("ICMS_ORIGIN") == "assessed").mean()).alias("pct_assessed")).sort("stock_bn", descending=True)
+save_tab(large_vs_tail, "tab_large_vs_tail", fmt="{:,.2f}")
+large_vs_tail
+```
+
+```{python}
+#| label: dep-134
+#| include: false
+ranked = raw_values.sort("value", descending=True).with_columns(
+    (pl.col("value").cum_sum() / pl.col("value").sum()).alias("cum_share"), pl.int_range(1, pl.len() + 1).alias("rank"))
+N = ranked.height
+TOP_SETS = {"top_0.1pct": ranked["rank"] <= max(1, round(0.001 * N)),
+            "top_1pct": ranked["rank"] <= max(1, round(0.01 * N)),
+            "stock_50pct": ranked["cum_share"].shift(1, fill_value=0) < 0.5,
+            "stock_80pct": ranked["cum_share"].shift(1, fill_value=0) < 0.8}
+top_definitions = pl.DataFrame([{"set": k, "n_cda": int(m.sum()), "pct_cda": 100 * m.sum() / N,
+                                 "pct_stock": 100 * ranked.filter(m)["value"].sum() / ranked["value"].sum(),
+                                 "min_value": float(ranked.filter(m)["value"].min())} for k, m in TOP_SETS.items()])
+top = ranked.filter(TOP_SETS["top_1pct"])
+top_ids = set(top["ID_DEBITO"].to_list())
+save_tab(top_definitions, "tab_top_definitions", fmt="{:,.3f}")
+top_definitions
+```
+
+### B.6 Age of CDAs
+
+*Terms introduced in this section:* Age band. Definitions are given in the Glossary.
+
+#### B.6.1 Age bands
+
+**Method.** Distribution of CDAs and stock across age bands.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, year 2025 [lab: era 2026]; unit of observation: the CDA-year.
+
+**How to read.** Grouped vertical bars, one pair per age band (ordered from youngest to oldest); the vertical axis gives the share in percent; the legend distinguishes the share of CDAs from the share of stock.
+
+**Interpretation.** A band whose stock bar exceeds its count bar holds debts larger than average.
+
+*Output:* Figure `fig_age_bands`; Table `tab_age_bands`.
+
+```{python}
+#| label: c189
+AGE_BANDS = [1, 3, 5, 10]
+AGE_LABELS = ["<=1", "1-3", "3-5", "5-10", ">10"]
+def band(col: str = "age") -> pl.Expr:
+    return pl.col(col).cut(AGE_BANDS, labels=AGE_LABELS, left_closed=False).alias("age_band")
+
+age_bands = collect(panel.filter(pl.col("year") == SNAP_YEAR).with_columns(band()).group_by("age_band").agg(
+    pl.len().alias("n_cda"), (pl.col("stock").sum() / 1e9).alias("stock_bn"))).with_columns(
+    (100 * pl.col("n_cda") / pl.col("n_cda").sum()).alias("pct_cda"), (100 * pl.col("stock_bn") / pl.col("stock_bn").sum()).alias("pct_stock")
+).sort(pl.col("age_band").cast(pl.Utf8).replace_strict({l: i for i, l in enumerate(AGE_LABELS)}))
+fig = go.Figure([go.Bar(x=age_bands["age_band"].cast(pl.Utf8), y=age_bands[c], name=n, marker_color=color(i))
+                 for i, (c, n) in enumerate((("pct_cda", "CDAs"), ("pct_stock", "Stock")))])
+fig.update_layout(barmode="group", xaxis_title="Age band (years)", yaxis_title="Share (%)", showlegend=True, legend=dict(orientation="h", y=1.1))
+save_fig(fig, "fig_age_bands")
+save_tab(age_bands, "tab_age_bands")
+fig
+```
+
+#### B.6.2 Exposure by age
+
+**Method.** CDA-years at risk by age, used as denominators for age-specific rates.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** One row per year of age, with the number of CDA-years and total paid.
+
+**Interpretation.** Dividing by exposure ensures that differences across ages reflect behaviour rather than the number of CDAs at each age.
+
+*Output:* Table `tab_exposure_age`.
+
+```{python}
+#| label: c191
+exposure = collect(panel.with_columns(pl.col("age").floor().cast(pl.Int32).clip(0, 30).alias("age_year"))
+                   .group_by("age_year").agg(pl.len().alias("cda_years"), pl.col("paid_flag").sum().alias("cda_years_with_payment"),
+                                             pl.col("paid").sum().alias("paid"), pl.col("stock").sum().alias("stock"))
+                   .with_columns((pl.col("cda_years_with_payment") / pl.col("cda_years")).alias("payment_hazard"),
+                                 (pl.col("paid") / pl.col("stock")).alias("rate")).sort("age_year"))
+save_tab(exposure, "tab_exposure_age", fmt="{:,.4f}")
+exposure
+```
+
+#### B.6.3 Age and recovery
+
+**Method.** Pearson and Spearman correlations between age and recovery rate and between age and stock. Pearson measures linear association; Spearman is the Pearson correlation of ranks and measures monotone association, robust to outliers.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. A 20% random sample of CDA-years with positive stock.
+
+**How to read.** One row per pair of variables, with both coefficients.
+
+**Interpretation.** A large divergence between the coefficients indicates a nonlinear or outlier-driven relation; the formal choice is made in C.2.
+
+*Output:* Table `tab_corr_age`.
+
+```{python}
+#| label: c193
+pr = collect(panel.filter(pl.col("stock") > 0).select("age", "rate", "stock")).sample(fraction=0.2, seed=SEED)
+rows = []
+for y in ("rate", "stock"):
+    for m in ("pearson", "spearman"):
+        r, p = corr_pair(pr["age"].to_numpy().astype(float), pr[y].to_numpy().astype(float), m)
+        rows.append({"x": "age", "y": y, "method": m, "r": r, "p_value": p, "n": pr.height})
+corr_age = pl.DataFrame(rows)
+save_tab(corr_age, "tab_corr_age", fmt="{:.4g}")
+corr_age
+```
+
+### B.7 Recovery
+
+*Terms introduced in this section:* Enrolment cohort, recoverable stock. Definitions are given in the Glossary.
+
+#### B.7.1 Non-accumulated and accumulated recovery
+
+Two recovery measures are used throughout. The *non-accumulated* recovery rate of period $t$ is $r_t = P_t / S_t$, the amount paid in $t$ divided by the stock. The *accumulated* recovery of an enrolment cohort $c$ at horizon $h$ is $R_{c,h} = \sum_{k=0}^{h} P_{c,k} / S_{c,0}$, the cumulative amount paid up to $h$ divided by the stock at enrolment. The first describes the yearly performance of the portfolio; the second describes how much of a cohort's debt is eventually recovered. Axis titles state which measure is shown.
+
+#### B.7.2 Annual portfolio recovery rate
+
+**Method.** Annual non-accumulated recovery rate of the portfolio.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis the rate in percent on a logarithmic scale; labelled points mark the programme years.
+
+**Interpretation.** On a log axis, equal vertical distances correspond to equal proportional changes; the final year covers January to March only.
+
+*Output:* Figure `fig_taxa_recuperacao_anual`.
+
+```{python}
+#| label: c197
+fig = go.Figure(go.Scatter(x=annual["year"], y=annual["portfolio_rate"] * 100, mode="lines+markers", line_color=CEMEPI["deep_teal"]))
+for name, a, _ in PROGRAMMES:
+    y = int(a[:4])
+    v = annual.filter(pl.col("year") == y)["portfolio_rate"]
+    if v.len():
+        fig.add_annotation(x=y, y=np.log10(v[0] * 100), text=name, showarrow=True, arrowhead=0, ay=-25)
+fig.update_yaxes(type="log", title_text="Non-accumulated recovery rate (%, log scale)")
+save_fig(fig, "fig_taxa_recuperacao_anual")
+fig
+```
+
+#### B.7.3 Recovery by age
+
+**Method.** Annual non-accumulated recovery rate by age band.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. CDA-years with a valid age.
+
+**How to read.** The horizontal axis gives the year; the vertical axis the rate in percent on a logarithmic scale; one line per age band, identified in the legend.
+
+**Interpretation.** If recovery declines with age, the lines are ordered from the youngest band at the top to the oldest at the bottom.
+
+*Output:* Figure `fig_recovery_age_log`.
+
+```{python}
+#| label: c199
+rec_age = collect(panel.with_columns(band()).group_by("year", "age_band").agg(
+    (100 * pl.col("paid").sum() / pl.col("stock").sum()).alias("rate_pct"))).with_columns(pl.col("age_band").cast(pl.Utf8))
+fig = lines(rec_age.filter((pl.col("rate_pct") > 0) & pl.col("age_band").is_not_null()), "year", "rate_pct", "age_band", log_y=True,
+            y_title="Non-accumulated recovery rate (%, log scale)", order=AGE_LABELS,
+            names={l: f"{l} years" for l in AGE_LABELS})
+save_fig(fig, "fig_recovery_age_log", width="double")
+fig
+```
+
+#### B.7.4 Accumulated recovery by cohort
+
+**Method.** Accumulated recovery curves by enrolment cohort.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. Cohorts enrolled from 2016 onward.
+
+**How to read.** The horizontal axis gives years since enrolment; the vertical axis the cumulative amount paid as a percentage of the enrolled value, on a logarithmic scale; one line per cohort, identified in the legend.
+
+**Interpretation.** Curves that flatten indicate that additional recovery becomes rare after a few years; later cohorts have shorter curves because fewer horizons are observed.
+
+*Output:* Figure `fig_recovery_cumulative_log`.
+
+```{python}
+#| label: c201
+def cohort_curves() -> pl.DataFrame:
+    enrolled = attributes.filter(pl.col("DATA_INSCRICAO").dt.year() >= YEARS[0]).select(
+        "ID_DEBITO", pl.col("DATA_INSCRICAO").dt.year().alias("cohort"), "max_value")
+    base = enrolled.group_by("cohort").agg(pl.col("max_value").sum().alias("enrolled_value"))
+    paid = (scan_gare().join(enrolled, on="ID_DEBITO")
+            .with_columns((pl.col("DATA_ARRECADACAO_GARE").dt.year() - pl.col("cohort")).alias("h"))
+            .filter(pl.col("h") >= 0).group_by("cohort", "h").agg(pl.col("VALOR_RECEITA").sum().alias("paid")))
+    return collect(paid.join(base, on="cohort").sort("cohort", "h").with_columns(
+        (pl.col("paid").cum_sum().over("cohort") / pl.col("enrolled_value")).alias("acc_rec")))
+
+curves = collect(cached("B.7.4", cohort_curves, params=EXTRACT_PARAMS)).with_columns(pl.col("cohort").cast(pl.Utf8))
+fig = lines(curves.with_columns(pl.col("acc_rec") * 100), "h", "acc_rec", "cohort", log_y=True,
+            y_title="Accumulated recovery (% of enrolled value, log scale)", x_title="Years since enrolment")
+save_fig(fig, "fig_recovery_cumulative_log", width="double")
+fig
+```
+
+#### B.7.5 Distribution of CDA recovery rates
+
+**Method.** Descriptive statistics of CDA-level recovery.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** One row per variable (recovery rate, amount paid, payment indicator) with moments, quantiles and share of zeros.
+
+**Interpretation.** A large share of zeros means that recovery is a mixture of non-paying CDAs and a skewed distribution among payers, which motivates modelling the probability of payment separately (D.6.1).
+
+*Output:* Table `tab_descriptives`.
+
+```{python}
+#| label: c203
+descriptives = collect(panel.filter(pl.col("stock") > 0).select(
+    *[pl.struct(variable=pl.lit(c), n=pl.col(c).count(), mean=pl.col(c).mean(), median=pl.col(c).median(),
+                sd=pl.col(c).std(), p90=pl.col(c).quantile(0.9), max=pl.col(c).max(), share_zero=(pl.col(c) == 0).mean()).alias(c)
+      for c in ("rate", "paid", "paid_flag", "stock", "age")])).transpose().unnest("column_0")
+save_tab(descriptives, "tab_descriptives", fmt="{:,.4f}")
+descriptives
+```
+
+#### B.7.6 Recovered over recoverable stock
+
+**Method.** Recovery relative to two denominators: total year-end stock and recoverable stock. Recoverable stock keeps only debts in the enrolled administrative situation and excludes those older than ten years that have never recorded a payment.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis the amount recovered as a percentage of each denominator, on a logarithmic scale; one line per denominator, identified in the legend.
+
+**Interpretation.** The ratio to recoverable stock is always the higher one; the vertical distance between the lines reflects the share of stock classified as irrecoverable. The indicator depends on the criterion adopted.
+
+*Output:* Figure `fig_recoverable_ratio`.
+
+```{python}
+#| label: c205
+RECOVERABLE_MAX_AGE = 10
+def recoverable_ratio() -> pl.DataFrame:
+    ever_paid_ids = scan_gare().select("ID_DEBITO").unique()
+    flagged = panel.join(ever_paid_ids.with_columns(pl.lit(True).alias("has_paid")), on="ID_DEBITO", how="left").with_columns(
+        (~((pl.col("age") > RECOVERABLE_MAX_AGE) & pl.col("has_paid").is_null()) &
+         (pl.col("SITUACAO_DEBITO") == "Inscrito")).alias("recoverable"))
+    return collect(flagged.group_by("year").agg(pl.col("paid").sum(), pl.col("stock").sum().alias("stock"),
+                                                pl.col("stock").filter(pl.col("recoverable")).sum().alias("recoverable_stock")).sort("year"))
+
+rr = collect(cached("B.7.6", recoverable_ratio, params={**EXTRACT_PARAMS, "max_age": RECOVERABLE_MAX_AGE})).with_columns(
+    (100 * pl.col("paid") / pl.col("stock")).alias("recovered_over_stock"),
+    (100 * pl.col("paid") / pl.col("recoverable_stock")).alias("recovered_over_recoverable"))
+long = rr.unpivot(index="year", on=["recovered_over_stock", "recovered_over_recoverable"], variable_name="measure", value_name="pct")
+fig = lines(long, "year", "pct", "measure", log_y=True, y_title="Amount recovered (% of denominator, log scale)",
+            names={"recovered_over_stock": "Over total year-end stock", "recovered_over_recoverable": "Over recoverable stock"})
+save_fig(fig, "fig_recoverable_ratio", width="double")
+fig
+```
+
+### B.8 Payments over the life of the debt
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### B.8.1 Open and paid CDAs
+
+**Method.** Cross-tabulation of payment in the current year and payment since enrolment.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, year 2025 [lab: era 2026]; unit of observation: the CDA-year. Payment history from GARE.
+
+**How to read.** Rows combine the two payment indicators; columns give CDA counts and stock.
+
+**Interpretation.** CDAs never paid but still in the stock form the core of non-recovery.
+
+*Output:* Table `tab_open_paid`.
+
+```{python}
+#| label: c208
+open_paid = collect(panel.filter(pl.col("year") == SNAP_YEAR).join(
+    scan_gare().select("ID_DEBITO").unique().with_columns(pl.lit(True).alias("ever_paid")), on="ID_DEBITO", how="left")
+    .with_columns(pl.col("ever_paid").fill_null(False))
+    .group_by(pl.col("paid_flag").cast(pl.Boolean).alias("paid_this_year"), "ever_paid")
+    .agg(pl.len().alias("n_cda"), (pl.col("stock").sum() / 1e9).alias("stock_bn")).sort("paid_this_year", "ever_paid"))
+save_tab(open_paid, "tab_open_paid", fmt="{:,.2f}")
+open_paid
+```
+
+#### B.8.2 Open and paid CDAs by enrolment year
+
+**Method.** Size and payment experience of enrolment cohorts.
+
+**Data.** ICMS extract (1.3), CDAs enrolled from 1990 onward; unit of observation: the enrolment year.
+
+**How to read.** Bars (left axis) give CDAs enrolled per year in thousands; the line (right axis) gives the percentage with any payment; the legend states which axis each series uses.
+
+**Interpretation.** Read the shape of the line rather than its height relative to the bars; recent cohorts have had less time to pay, so their percentage is mechanically lower.
+
+*Output:* Figure `fig_open_paid_by_cohort`.
+
+```{python}
+#| label: c210
+by_cohort = cda.filter(pl.col("DATA_INSCRICAO").dt.year() >= 1990).group_by(pl.col("DATA_INSCRICAO").dt.year().alias("cohort")).agg(
+    pl.len().alias("n_cda"), (100 * pl.col("ever_paid").mean()).alias("pct_ever_paid")).sort("cohort")
+fig = make_subplots(specs=[[{"secondary_y": True}]])
+fig.add_trace(go.Bar(x=by_cohort["cohort"], y=by_cohort["n_cda"] / 1e3, marker_color="rgba(21,76,86,0.35)",
+                     name="CDAs enrolled (left axis)"), secondary_y=False)
+fig.add_trace(go.Scatter(x=by_cohort["cohort"], y=by_cohort["pct_ever_paid"], mode="lines+markers", line_color=CEMEPI["sand"],
+                         name="CDAs with any payment, % (right axis)"), secondary_y=True)
+fig.update_yaxes(title_text="CDAs (thousand)", secondary_y=False, rangemode="tozero")
+fig.update_yaxes(title_text="With any payment (%)", secondary_y=True, showgrid=False, rangemode="tozero", tickformat=".0f")
+fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.3))
+fig.update_xaxes(title_text="Year of enrolment")
+save_fig(fig, "fig_open_paid_by_cohort", width="double")
+fig
+```
+
+#### B.8.3 Paying population by age
+
+**Method.** Paying population by age band.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per age band with numbers of CDAs, of paying CDAs and the share paying.
+
+**Interpretation.** A declining share with age indicates that older debts are less likely to have ever been paid.
+
+*Output:* Table `tab_payers_age`.
+
+```{python}
+#| label: c212
+payers_age = cda.with_columns(((pl.date(SNAP_YEAR, SNAP_MONTH, 1) - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("age")) \
+    .with_columns(band()).group_by("age_band").agg(pl.len().alias("n_cda"), pl.col("ever_paid").sum().alias("n_paid")) \
+    .with_columns((100 * pl.col("n_paid") / pl.col("n_cda")).alias("pct_paid"), pl.col("age_band").cast(pl.Utf8)).sort("age_band")
+save_tab(payers_age, "tab_payers_age", fmt="{:,.2f}")
+payers_age
+```
+
+#### B.8.4 Time to first payment
+
+**Method.** Delay between enrolment and first payment among paying CDAs.
+
+**Data.** ICMS extract (1.3), CDAs enrolled from 2016 onward with at least one payment.
+
+**How to read.** Vertical bars by whole years from enrolment to first payment, the last grouping ten years or more; the vertical axis gives the share of paying CDAs, printed above each bar.
+
+**Interpretation.** Mass in the first bar means that, among CDAs that are paid at all, payment usually starts soon after enrolment.
+
+*Output:* Figure `fig_delay_first_gare`.
+
+```{python}
+#| label: c214
+delay = cda.filter(pl.col("ever_paid") & (pl.col("DATA_INSCRICAO") >= pl.date(YEARS[0], 1, 1))) \
+    .with_columns(pl.col("years_to_first_payment").floor().cast(pl.Int32).clip(0, 10).alias("delay")).group_by("delay").len().sort("delay")
+delay = delay.with_columns((100 * pl.col("len") / pl.col("len").sum()).alias("pct"))
+fig = go.Figure(go.Bar(x=delay["delay"], y=delay["pct"], marker_color=CEMEPI["deep_teal"], text=[f"{v:.0f}%" for v in delay["pct"]], textposition="outside"))
+fig.update_layout(xaxis_title="Years from enrolment to first payment (10 = 10 or more)", yaxis_title="Share of paying CDAs (%)")
+save_fig(fig, "fig_delay_first_gare")
+fig
+```
+
+#### B.8.5 Time to settlement
+
+**Method.** Time to settlement, approximated by the exit of a CDA from the snapshots after at least one payment, because settlement is not recorded.
+
+**Data.** ICMS extract (1.3), CDAs with a payment that left the snapshots before December 2025 [lab: era março de 2026].
+
+**How to read.** Histogram; the horizontal axis gives years from enrolment to exit, the vertical axis numbers of CDAs.
+
+**Interpretation.** Exits can also result from cancellation, so the proxy is an upper bound on settlement times.
+
+*Output:* Figure `fig_settlement_proxy`.
+
+:::{.callout-note}
+## B.8.5 com valor no eixo Y
+Além do histograma do paper (número de CDAs), a célula abaixo mostra o valor inscrito em R$ bilhões por ano até a saída.
+A versão com valor pago está em [Concentração e liquidação](../eda/2026-10-23_concentracao_e_liquidacao.qmd).
+:::
+
+```{python}
+#| label: c216
+last_snap = SNAP_YEAR * 100 + SNAP_MONTH
+settled = cda.filter((pl.col("last_snapshot") < last_snap) & pl.col("ever_paid")).with_columns(
+    ((pl.date(pl.col("last_snapshot") // 100, pl.col("last_snapshot") % 100, 1) - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("years_to_exit"))
+fig = go.Figure(go.Histogram(x=settled["years_to_exit"].clip(0, 20), nbinsx=40, marker_color=CEMEPI["deep_teal"]))
+fig.update_layout(xaxis_title="Years from enrolment to exit after payment (settlement proxy)", yaxis_title="CDAs")
+save_fig(fig, "fig_settlement_proxy")
+# lab: o mesmo recorte com o valor no eixo Y (R$ bilhões), pedido na reunião de 23/10/2026
+_vcol = "max_value" if "max_value" in settled.columns else None
+_set = settled.with_columns(pl.col("years_to_exit").clip(0, 20).floor().alias("years_bin"))
+_agg = [pl.len().alias("cdas")] + ([(pl.col(_vcol).sum() / 1e9).alias("value_bn")] if _vcol else [])
+_val = _set.group_by("years_bin").agg(*_agg).sort("years_bin")
+fig.show()
+fig_val = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.65, 0.35], vertical_spacing=0.06)
+if _vcol:
+    fig_val.add_trace(go.Bar(x=_val["years_bin"], y=_val["value_bn"], marker_color=CEMEPI["deep_teal"], name="Enrolled value (max., R$ bn)"), 1, 1)
+fig_val.add_trace(go.Bar(x=_val["years_bin"], y=_val["cdas"], marker_color=CEMEPI["sand"], name="CDAs"), 2, 1)
+fig_val.update_yaxes(title_text="R$ billion", row=1, col=1)
+fig_val.update_yaxes(title_text="CDAs", row=2, col=1)
+fig_val.update_xaxes(title_text="Years from enrolment to exit after payment", row=2, col=1)
+fig_val.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08))
+fig_val
+```
+
+#### B.8.6 Age windows of payments
+
+**Method.** Distribution of payments by age of the CDA at the time of payment, and the payment hazard per exposed CDA-year.
+
+**Data.** GARE payments linked to ICMS CDAs, 2016–2025 [lab: era 2016–2026]; exposure from the panel.
+
+**How to read.** Grouped bars by age band (youngest to oldest); the vertical axis gives the share of payment records and of the amount paid, identified in the legend. The table adds the hazard.
+
+**Interpretation.** A band whose value bar exceeds its count bar receives fewer but larger payments.
+
+*Output:* Figure `fig_gare_window_life`; Table `tab_gare_window`.
+
+```{python}
+#| label: c218
+def gare_windows() -> pl.DataFrame:
+    g = scan_gare().join(attributes.select("ID_DEBITO", "DATA_INSCRICAO"), on="ID_DEBITO").with_columns(
+        ((pl.col("DATA_ARRECADACAO_GARE") - pl.col("DATA_INSCRICAO")).dt.total_days() / 365.25).alias("age"))
+    g = g.with_columns(band())
+    pay = collect(g.group_by("age_band").agg(pl.len().alias("payments"), pl.col("ID_DEBITO").n_unique().alias("cda_paying"),
+                                             pl.col("VALOR_RECEITA").sum().alias("value")))
+    expo = collect(panel.with_columns(band()).group_by("age_band").agg(pl.len().alias("cda_years")))
+    return pay.join(expo, on="age_band").with_columns(
+        (100 * pl.col("payments") / pl.col("payments").sum()).alias("pct_payments"),
+        (100 * pl.col("value") / pl.col("value").sum()).alias("pct_value"),
+        (pl.col("cda_paying") / pl.col("cda_years")).alias("hazard"), pl.col("age_band").cast(pl.Utf8))
+
+windows = collect(cached("B.8.6", gare_windows, params=EXTRACT_PARAMS)).sort("age_band")
+fig = go.Figure([go.Bar(x=windows["age_band"], y=windows[c], name=n, marker_color=color(i)) for i, (c, n) in
+                 enumerate((("pct_payments", "Payments"), ("pct_value", "Value paid")))])
+fig.update_layout(barmode="group", xaxis_title="Age of CDA at payment (years)", yaxis_title="Share (%)", showlegend=True, legend=dict(orientation="h", y=1.1))
+save_fig(fig, "fig_gare_window_life")
+save_tab(windows, "tab_gare_window", fmt="{:,.4f}")
+fig
+```
+
+#### B.8.7 Cohort by horizon
+
+**Method.** Cumulative share of CDAs with a payment by cohort and horizon.
+
+**Data.** ICMS extract (1.3), cohorts 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Heat map: rows are enrolment cohorts, columns years since enrolment; colour and printed values give the percentage with any payment, as shown by the colour bar.
+
+**Interpretation.** Read along a row for the speed of payment of a cohort and down a column to compare cohorts at the same horizon; the triangle arises because later cohorts are observed for fewer years.
+
+*Output:* Figure `fig_cohort_horizon`.
+
+```{python}
+#| label: c220
+horizon = (cda.filter(pl.col("DATA_INSCRICAO").dt.year() >= YEARS[0])
+           .with_columns(pl.col("DATA_INSCRICAO").dt.year().alias("cohort"),
+                         (pl.col("first_payment").dt.year() - pl.col("DATA_INSCRICAO").dt.year()).alias("h")))
+size = horizon.group_by("cohort").len()
+cells = []
+for h in range(0, SNAP_YEAR - YEARS[0] + 1):
+    c = horizon.group_by("cohort").agg((pl.col("h") <= h).sum().alias("n")).with_columns(pl.lit(h).alias("h"))
+    cells.append(c)
+grid = pl.concat(cells).join(size, on="cohort").with_columns(
+    pl.when(pl.col("cohort") + pl.col("h") <= SNAP_YEAR).then(100 * pl.col("n") / pl.col("len")).alias("pct"))
+mat = grid.pivot(on="h", index="cohort", values="pct").sort("cohort").with_columns(pl.col("cohort").cast(pl.Utf8))
+fig = heatmap(mat, "cohort", diverging=False, zmin=0, fmt="{:.0f}", colorbar_title="% with payment")
+fig.update_layout(xaxis_title="Years since enrolment", yaxis_title="Enrolment cohort")
+save_fig(fig, "fig_cohort_horizon", width="double")
+fig
+```
+
+#### B.8.8 Annual collection
+
+**Method.** Annual GARE collection on ICMS CDAs.
+
+**Data.** GARE payments linked to ICMS CDAs, 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Vertical bars by year; the vertical axis gives R$ billion, printed above each bar.
+
+**Interpretation.** The final year covers January to March only and is not comparable with full years.
+
+*Output:* Figure `fig_gare_annual`.
+
+```{python}
+#| label: c222
+gare_annual = collect(scan_gare().group_by(pl.col("DATA_ARRECADACAO_GARE").dt.year().alias("year"))
+                      .agg((pl.col("VALOR_RECEITA").sum() / 1e9).alias("collected_bn")).sort("year"))
+fig = go.Figure(go.Bar(x=gare_annual["year"], y=gare_annual["collected_bn"], marker_color=CEMEPI["deep_teal"],
+                       text=[f"{v:.2f}" for v in gare_annual["collected_bn"]], textposition="outside"))
+fig.update_layout(yaxis_title="GARE collection on ICMS CDAs (R$ bn)")
+save_fig(fig, "fig_gare_annual")
+fig
+```
+
+### B.9 Judicial filing
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### B.9.1 Filing status of the portfolio
+
+**Method.** Composition of the stock by judicial filing status. The Portuguese categories are translated; records whose status code does not match a documented category are grouped as *unrecognised code*.
+
+**Data.** Year-end snapshots of the ICMS extract, 2016–2025 [lab: era 2016–2026]; unit of observation: the status-year.
+
+**How to read.** The horizontal axis gives the year; the vertical axis the share of year-end stock in percent; one line per status, identified in the legend.
+
+**Interpretation.** A stable dominant share for *filed* indicates that most of the stock is under judicial collection.
+
+*Output:* Figure `fig_filing_status`; Table `tab_filing_status`.
+
+```{python}
+#| label: c225
+filing_year = collect(year_end.with_columns(filing_label()).group_by("year", "STATUS_AJUIZAMENTO_DEBITO").agg(
+    pl.len().alias("n_cda"), (pl.col("stock").sum() / 1e9).alias("stock_bn"))).with_columns(
+    (100 * pl.col("stock_bn") / pl.col("stock_bn").sum().over("year")).alias("pct_stock")).sort("year")
+fig = lines(filing_year, "year", "pct_stock", "STATUS_AJUIZAMENTO_DEBITO", y_title="Share of year-end stock (%)",
+            order=list(FILING_LABELS.values()) + ["Unrecognised code"])
+save_fig(fig, "fig_filing_status", width="double")
+save_tab(filing_year.filter(pl.col("year") == SNAP_YEAR), "tab_filing_status", fmt="{:,.2f}")
+fig
+```
+
+#### B.9.2 Filing by age and value
+
+**Method.** Filing by age band and by value decile.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** Left: bars of the share of CDAs filed by age band. Right: bars of the share of CDAs filed by value decile (1 = smallest tenth, 10 = largest) and a line for the share of stock filed within each decile; the legend identifies the series.
+
+**Interpretation.** Rising bars indicate that older and larger debts are more likely to be filed.
+
+*Output:* Figure `fig_filing_age_value`.
+
+```{python}
+#| label: c227
+fv = raw_values.with_columns(band(), (pl.col("value").rank() * 10 / pl.len()).ceil().cast(pl.Int32).alias("decile"),
+                             (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").alias("filed"))
+by_age = fv.group_by("age_band").agg((100 * pl.col("filed").mean()).alias("pct")).with_columns(pl.col("age_band").cast(pl.Utf8)).sort("age_band")
+by_dec = fv.group_by("decile").agg((100 * pl.col("filed").mean()).alias("pct"),
+                                   (100 * pl.col("value").filter(pl.col("filed")).sum() / pl.col("value").sum()).alias("pct_value")).sort("decile")
+fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.12)
+fig.add_trace(go.Bar(x=by_age["age_band"], y=by_age["pct"], marker_color=CEMEPI["deep_teal"], name="Share of CDAs filed", legendgroup="n"), 1, 1)
+fig.add_trace(go.Bar(x=by_dec["decile"], y=by_dec["pct"], marker_color=CEMEPI["deep_teal"], name="Share of CDAs filed", legendgroup="n",
+                     showlegend=False), 1, 2)
+fig.add_trace(go.Scatter(x=by_dec["decile"], y=by_dec["pct_value"], mode="lines+markers", line_color=CEMEPI["sand"],
+                         name="Share of stock filed"), 1, 2)
+fig.update_yaxes(title_text="Filed in court (%)", row=1, col=2)
+fig.update_xaxes(tickmode="array", tickvals=list(range(1, 11)), row=1, col=2)
+fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.3))
+fig.update_xaxes(title_text="Age band (years)", row=1, col=1)
+fig.update_xaxes(title_text="Value decile", row=1, col=2)
+fig.update_yaxes(title_text="Filed in court (%)", row=1, col=1)
+save_fig(fig, "fig_filing_age_value", width="double")
+fig
+```
+
+#### B.9.3 Time to filing
+
+**Method.** Time from enrolment to filing for CDAs whose status changes to filed during the observation window.
+
+**Data.** ICMS extract (1.3), 2016–2025 [lab: era 2016–2026].
+
+**How to read.** Histogram; the horizontal axis gives years from enrolment to the first snapshot as filed (capped at 15), the vertical axis numbers of CDAs.
+
+**Interpretation.** CDAs already filed at their first observation are excluded, so the distribution describes recent filing practice.
+
+*Output:* Figure `fig_time_to_filing`.
+
+```{python}
+#| label: c229
+filed_later = cda.filter(pl.col("first_filed_snapshot").is_not_null() & (pl.col("first_filed_snapshot") > pl.col("first_snapshot"))) \
+    .with_columns(((pl.date(pl.col("first_filed_snapshot") // 100, pl.col("first_filed_snapshot") % 100, 1) - pl.col("DATA_INSCRICAO"))
+                   .dt.total_days() / 365.25).alias("years_to_filing"))
+fig = go.Figure(go.Histogram(x=filed_later["years_to_filing"].clip(0, 15), nbinsx=45, marker_color=CEMEPI["deep_teal"]))
+fig.update_layout(xaxis_title="Years from enrolment to judicial filing", yaxis_title="CDAs")
+save_fig(fig, "fig_time_to_filing")
+fig
+```
+
+#### B.9.4 Payments and recovery by filing status
+
+**Method.** Amount paid by age band and filing status.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year.
+
+**How to read.** Stacked vertical bars by age band (youngest to oldest); the vertical axis gives the amount paid 2016–2025 [lab: era 2016–2026] in R$ billion; segments correspond to filing statuses, identified in the legend.
+
+**Interpretation.** If payments on older debts come mainly from filed CDAs, this is consistent with judicial collection supporting recovery at advanced ages; the table adds payment shares and rates.
+
+*Output:* Figure `fig_recovery_by_filing`; Table `tab_recovery_by_filing`.
+
+```{python}
+#| label: c231
+rec_filing = collect(panel.with_columns(band(), filing_label()).group_by("STATUS_AJUIZAMENTO_DEBITO", "age_band").agg(
+    pl.len().alias("cda_years"), (100 * pl.col("paid_flag").mean()).alias("pct_paying"),
+    (100 * pl.col("paid").sum() / pl.col("stock").sum()).alias("rate_pct"), (pl.col("paid").sum() / 1e9).alias("paid_bn"))
+    .with_columns(pl.col("age_band").cast(pl.Utf8)).sort("STATUS_AJUIZAMENTO_DEBITO", "age_band"))
+fig = go.Figure([go.Bar(x=d["age_band"], y=d["paid_bn"], name=k[0], marker_color=color(i))
+                 for i, (k, d) in enumerate(rec_filing.group_by("STATUS_AJUIZAMENTO_DEBITO", maintain_order=True))])
+fig.update_layout(barmode="stack", xaxis_title="Age band (years)", yaxis_title="Amount paid 2016-2025 (R$ bn)", showlegend=True, legend=dict(orientation="h", y=1.12))
+save_fig(fig, "fig_recovery_by_filing", width="double")
+save_tab(rec_filing, "tab_recovery_by_filing", fmt="{:,.3f}")
+fig
+```
+
+#### B.9.5 Payments around the filing date
+
+**Method.** Event-time profile of payments around filing: CDAs are aligned on the month in which their status changes to filed (month 0).
+
+**Data.** ICMS extract (1.3) and GARE payments, CDAs filed during the window.
+
+**How to read.** The horizontal axis gives months relative to filing (−12 to 12); the vertical axis the percentage of CDAs with a payment in that month; the dotted line marks month 0.
+
+**Interpretation.** A rise after month 0 is consistent with filing prompting payment, but alignment alone does not establish causation, since filing may target debts likely to pay.
+
+*Output:* Figure `fig_payment_around_filing`.
+
+```{python}
+#| label: c233
+ev = filed_later.select("ID_DEBITO", (pl.col("first_filed_snapshot") // 100 * 12 + pl.col("first_filed_snapshot") % 100).alias("filed_m"))
+pay_m = collect(scan_gare().join(ev.lazy(), on="ID_DEBITO").with_columns(
+    (pl.col("DATA_ARRECADACAO_GARE").dt.year() * 12 + pl.col("DATA_ARRECADACAO_GARE").dt.month() - pl.col("filed_m")).alias("k"))
+    .filter(pl.col("k").is_between(-12, 12)).group_by("k").agg(pl.col("ID_DEBITO").n_unique().alias("paying")))
+pay_m = pay_m.with_columns((100 * pl.col("paying") / ev.height).alias("hazard")).sort("k")
+fig = go.Figure(go.Scatter(x=pay_m["k"], y=pay_m["hazard"], mode="lines+markers", line_color=CEMEPI["deep_teal"]))
+fig.add_vline(x=0, line_dash="dot", line_color=CEMEPI["sand"])
+fig.update_layout(xaxis_title="Months relative to judicial filing", yaxis_title="CDAs with a payment (%)")
+save_fig(fig, "fig_payment_around_filing")
+fig
+```
+
+#### B.9.6 Filing by origin and debtor size
+
+**Method.** Filing by origin and by concentration stratum.
+
+**Data.** ICMS extract (1.3), December 2025 snapshot [lab: era março de 2026], legal entities only; unit of observation: the CDA.
+
+**How to read.** One row per origin and stratum (top 0.1%, top 1%, remainder), with shares of CDAs and stock filed.
+
+**Interpretation.** Differences indicate whether filing priorities depend on origin or debt size.
+
+*Output:* Table `tab_filing_origin_size`.
+
+```{python}
+#| label: c235
+filing_origin_size = strata.group_by("ICMS_ORIGIN", "stratum").agg(
+    pl.len().alias("n_cda"), (100 * (pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").mean()).alias("pct_filed"),
+    (100 * pl.col("value").filter(pl.col("STATUS_AJUIZAMENTO_DEBITO") == "Ajuizado").sum() / pl.col("value").sum()).alias("pct_stock_filed")
+).sort("ICMS_ORIGIN", "stratum")
+save_tab(filing_origin_size, "tab_filing_origin_size", fmt="{:,.2f}")
+filing_origin_size
+```
+
+### B.10 Seasonality
+
+*Terms introduced in this section:* Seasonality, STL. Definitions are given in the Glossary.
+
+#### B.10.1 Seasonality of enrolments
+
+**Method.** Seasonality of enrolments: mean number of new CDAs by calendar month across years, with a 95% interval (1.96 standard errors across years).
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Full years only.
+
+**How to read.** Vertical bars by calendar month; the vertical axis gives new CDAs in thousands; error bars give the interval; the dotted line marks the overall monthly mean.
+
+**Interpretation.** Months whose interval lies entirely above or below the line show a systematic seasonal deviation.
+
+*Output:* Figure `fig_seasonality_enrolment`.
+
+```{python}
+#| label: c238
+season = monthly_all.with_columns(pl.col("month").dt.month().alias("m"), pl.col("month").dt.year().alias("y")) \
+    .filter(pl.col("y") <= LAB_LAST_YEAR).group_by("m").agg(pl.col("n_new").mean().alias("mean"), pl.col("n_new").std().alias("sd"),
+                                                      pl.len().alias("n")).sort("m")
+season = season.with_columns((1.96 * pl.col("sd") / pl.col("n").sqrt()).alias("ci"))
+fig = go.Figure(go.Bar(x=season["m"], y=season["mean"] / 1e3, marker_color=CEMEPI["deep_teal"],
+                       error_y=dict(type="data", array=(season["ci"] / 1e3).to_list(), color=CEMEPI["sand"])))
+fig.add_hline(y=season["mean"].mean() / 1e3, line_dash="dot", line_color=CEMEPI["grey"])
+fig.update_layout(xaxis=dict(title="Calendar month", tickmode="array", tickvals=list(range(1, 13))), yaxis_title="New ICMS CDAs (thousand, mean)")
+save_fig(fig, "fig_seasonality_enrolment")
+fig
+```
+
+#### B.10.2 Monthly collection
+
+**Method.** Monthly collection with peaks highlighted.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** The horizontal axis gives the month; the vertical axis collection in R$ billion; months above the 95th percentile are labelled with their date; cream bands mark programme windows.
+
+**Interpretation.** Peaks inside the bands are associated with programmes; isolated peaks outside them point to other events.
+
+*Output:* Figure `fig_monthly_collection`.
+
+```{python}
+#| label: c240
+coll = monthly_all.select("month", "collection").with_columns(bn(pl.col("collection")).alias("bn"))
+p95 = coll["bn"].quantile(0.95)
+fig = go.Figure(go.Scatter(x=coll["month"], y=coll["bn"], mode="lines", line_color=CEMEPI["deep_teal"]))
+for j, r in enumerate(coll.filter(pl.col("bn") > p95).iter_rows(named=True)):
+    fig.add_annotation(x=r["month"], y=r["bn"], text=r["month"].strftime("%b %Y"), showarrow=False, yshift=8, font_size=9,
+                       xanchor="right" if j % 2 == 0 else "left")
+shade_programmes(fig)
+fig.update_layout(yaxis_title="Monthly collection (R$ bn)")
+save_fig(fig, "fig_monthly_collection", width="double")
+fig
+```
+
+#### B.10.3 Seasonal decomposition
+
+**Method.** Robust STL decomposition (Seasonal-Trend decomposition using Loess; Cleveland et al., 1990) of log monthly collection into trend, a twelve-month seasonal component that may evolve slowly, and a remainder. The robust version down-weights outliers so that programme peaks do not distort trend and seasonality.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Full years only.
+
+**How to read.** Decomposition figure: panels from top to bottom give the observed series, trend, seasonal component and remainder. Sub-series figure: one panel per calendar month, with that month's values across years and a horizontal line at their mean; the legend identifies the two elements.
+
+**Interpretation.** Differences between the monthly means describe the seasonal pattern; trends within panels show whether it changes over time; large spikes in the remainder are irregular events.
+
+*Output:* Figures `fig_stl`, `fig_seasonal_subseries`.
+
+```{python}
+#| label: c242
+from statsmodels.tsa.seasonal import STL
+
+y = monthly_all.filter(pl.col("month") <= pl.date(LAB_LAST_YEAR, 12, 1))  # lab: 2025 completo entra.select("month", "collection")
+stl = STL(np.log(y["collection"].to_numpy()), period=12, robust=True).fit()
+fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03)
+for r, (series, name) in enumerate(((stl.observed, "log collection"), (stl.trend, "trend"), (stl.seasonal, "seasonal"), (stl.resid, "remainder")), start=1):
+    fig.add_trace(go.Scatter(x=y["month"], y=series, mode="lines", line_color=color(r - 1)), r, 1)
+    fig.update_yaxes(title_text=name, row=r, col=1)
+save_fig(fig, "fig_stl", width="double", ratio=0.9)
+fig.show()
+
+sub = y.with_columns(pl.col("month").dt.month().alias("m"), pl.col("month").dt.year().alias("yr"), pl.col("collection").log().alias("lc"))
+fig = make_subplots(rows=1, cols=12, shared_yaxes=True, horizontal_spacing=0.005)
+for m in range(1, 13):
+    d = sub.filter(pl.col("m") == m).sort("yr")
+    fig.add_trace(go.Scatter(x=d["yr"], y=d["lc"], mode="lines", line_color=CEMEPI["deep_teal"], name="Collection in that month, by year",
+                             legendgroup="y", showlegend=m == 1), 1, m)
+    fig.add_trace(go.Scatter(x=[d["yr"].min(), d["yr"].max()], y=[d["lc"].mean()] * 2, mode="lines", line_color=CEMEPI["sand"],
+                             name="Mean across years", legendgroup="m", showlegend=m == 1), 1, m)
+    fig.update_xaxes(showticklabels=False, title_text=str(m), row=1, col=m)
+fig.update_yaxes(title_text="Monthly collection (log R$)", row=1, col=1)
+fig.update_layout(showlegend=True, legend=dict(orientation="h", y=-0.3),
+                  annotations=[*fig.layout.annotations, dict(text="Calendar month", x=0.5, y=-0.12, xref="paper", yref="paper", showarrow=False)])
+save_fig(fig, "fig_seasonal_subseries", width="double")
+fig
+```
+
+#### B.10.4 Seasonality by origin
+
+**Method.** Seasonal profile of enrolments by origin, normalised by each origin's monthly mean.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month. Declared and assessed debts.
+
+**How to read.** The horizontal axis gives the calendar month; the vertical axis enrolments relative to the origin's mean (1 = average month); one line per origin, identified in the legend.
+
+**Interpretation.** Different profiles would be consistent with assessed debts following the calendar of administrative appeals rather than that of declarations.
+
+*Output:* Figure `fig_seasonality_by_type`.
+
+```{python}
+#| label: c244
+season_origin = monthly.filter(pl.col("ICMS_ORIGIN").is_in(["declared", "assessed"])).with_columns(
+    pl.col("month").dt.month().alias("m")).group_by("ICMS_ORIGIN", "m").agg(pl.col("n_new").mean()).with_columns(
+    (pl.col("n_new") / pl.col("n_new").mean().over("ICMS_ORIGIN")).alias("index"))
+fig = lines(season_origin, "m", "index", "ICMS_ORIGIN", y_title="Enrolments relative to origin mean", x_title="Calendar month")
+fig.update_xaxes(tickmode="array", tickvals=list(range(1, 13)))
+save_fig(fig, "fig_seasonality_by_type")
+fig
+```
+
+### B.11 Settlement programmes
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### B.11.1 Programme calendar
+
+**Method.** Calendar of settlement programmes.
+
+**Data.** Programme regulations.
+
+**How to read.** One row per programme, with dates and main terms.
+
+**Interpretation.** The windows defined here are used throughout the notebook.
+
+*Output:* Table `tab_editais`.
+
+```{python}
+#| label: c247
+editais = pl.DataFrame([
+    ("PEP 2019", "Programa Especial de Parcelamento do ICMS", "2019", "Reduced fines and interest; instalments for ICMS debts"),
+    ("Acordo Paulista 2024", "Transação tributária (Lei 17.843/2023)", "2024", "Negotiated settlements with discounts by recoverability class"),
+], schema=["programme", "instrument", "year", "main_terms"], orient="row").with_columns(
+    pl.Series("window_start", [p[1] for p in PROGRAMMES]), pl.Series("window_end", [p[2] for p in PROGRAMMES]))
+save_tab(editais, "tab_editais")
+editais
+```
+
+#### B.11.2 Programme windows
+
+**Method.** Collection around programme start, indexed to the pre-programme mean.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** The horizontal axis gives months relative to the start (0 = first month, dotted line); the vertical axis collection indexed so that the pre-programme mean equals 100; one line per programme, identified in the legend.
+
+**Interpretation.** Indexing removes differences in level, so the curves compare the relative size and timing of each programme's effect.
+
+*Output:* Figure `fig_edital_windows`.
+
+```{python}
+#| label: c249
+rows = []
+for name, start, _ in PROGRAMMES:
+    s = np.datetime64(start, "M")
+    d = monthly_all.with_columns(((pl.col("month").dt.year() - int(start[:4])) * 12 + pl.col("month").dt.month() - int(start[5:7])).alias("k")) \
+        .filter(pl.col("k").is_between(-12, 12))
+    base = d.filter(pl.col("k") < 0).select(pl.col("collection").mean(), pl.col("n_payers").mean())
+    rows.append(d.with_columns((100 * pl.col("collection") / base["collection"][0]).alias("collection_idx"),
+                               (100 * pl.col("n_payers") / base["n_payers"][0]).alias("payers_idx"), pl.lit(name).alias("programme")))
+win = pl.concat(rows)
+fig = lines(win, "k", "collection_idx", "programme", y_title="Collection (pre-programme mean = 100)", x_title="Months relative to programme start")
+fig.add_vline(x=0, line_dash="dot", line_color=CEMEPI["grey"])
+save_fig(fig, "fig_edital_windows", width="double")
+fig
+```
+
+#### B.11.3 Arrears before programmes
+
+**Method.** New enrolments before each programme, indexed to months −24 to −13.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** The horizontal axis gives months before the start; the vertical axis new enrolments indexed so that the mean of months −24 to −13 equals 100; one line per programme, identified in the legend.
+
+**Interpretation.** A rise in the final months would be consistent with arrears building up in anticipation of favourable terms; isolated spikes may reflect batch enrolments.
+
+*Output:* Figure `fig_pre_programme`.
+
+```{python}
+#| label: c251
+pre = []
+for name, start, _ in PROGRAMMES:
+    d = monthly_all.with_columns(((pl.col("month").dt.year() - int(start[:4])) * 12 + pl.col("month").dt.month() - int(start[5:7])).alias("k")) \
+        .filter(pl.col("k").is_between(-24, 0))
+    base = d.filter(pl.col("k") <= -13)["n_new"].mean()
+    pre.append(d.with_columns((100 * pl.col("n_new") / base).alias("new_idx"), pl.lit(name).alias("programme")))
+fig = lines(pl.concat(pre), "k", "new_idx", "programme", y_title="New enrolments (months -24 to -13 = 100)", x_title="Months before programme start")
+save_fig(fig, "fig_pre_programme", width="double")
+fig
+```
+
+#### B.11.4 The 2024 peak
+
+**Method.** Decomposition of the change in collection from 2023 to 2024 by origin, age band and debtor size.
+
+**Data.** ICMS CDA × year panel (1.4), legal entities only, 2016–2025 [lab: era 2016–2026]; unit of observation: the CDA-year. Years 2023 and 2024.
+
+**How to read.** One row per category within each dimension, with the increase in R$ billion and its share of the total increase within the dimension.
+
+**Interpretation.** Categories with large shares drive the 2024 peak; negative shares indicate categories whose collection fell.
+
+*Output:* Table `tab_2024_peak`.
+
+```{python}
+#| label: c253
+peak = collect(panel.filter(pl.col("year").is_in([2023, 2024])).with_columns(band()).with_columns(pl.col("age_band").cast(pl.Utf8))
+               .join(pl.DataFrame({"ID_DEBITO": list(top_ids)}).lazy().with_columns(pl.lit("top 1%").alias("size")), on="ID_DEBITO", how="left")
+               .with_columns(pl.col("size").fill_null("remainder")))
+rows = []
+for dim in ("ICMS_ORIGIN", "age_band", "size"):
+    g = peak.group_by(dim, "year").agg(pl.col("paid").sum()).pivot(on="year", index=dim, values="paid").rename({dim: "category"})
+    rows.append(g.select(pl.col("category").cast(pl.Utf8), pl.col("2023"), pl.col("2024")).with_columns(pl.lit(dim).alias("dimension")))
+peak_tab = pl.concat(rows).with_columns(((pl.col("2024") - pl.col("2023")) / 1e9).alias("increase_bn"))
+peak_tab = peak_tab.with_columns((100 * pl.col("increase_bn") / pl.col("increase_bn").sum().over("dimension")).alias("pct_of_increase"))
+save_tab(peak_tab.select("dimension", "category", "increase_bn", "pct_of_increase"), "tab_2024_peak", fmt="{:,.3f}")
+peak_tab
+```
+
+#### B.11.5 Peaks of the observed series
+
+**Method.** Monthly collection as a scatter with peaks highlighted.
+
+**Data.** Monthly ICMS series (1.5), January 2016 to December 2025 [lab: era até março de 2026]; unit of observation: the month.
+
+**How to read.** Each point is one month; the vertical axis gives collection in R$ billion; highlighted points above the 95th percentile (dotted line) are labelled with their date; cream bands mark programme windows.
+
+**Interpretation.** The proportion of highlighted points inside the bands indicates how much of the extreme collection is programme-driven.
+
+*Output:* Figure `fig_peaks_scatter`.
+
+```{python}
+#| label: c255
+peaks = coll.with_columns((pl.col("bn") > p95).alias("peak"))
+fig = go.Figure([go.Scatter(x=peaks.filter(~pl.col("peak"))["month"], y=peaks.filter(~pl.col("peak"))["bn"], mode="markers",
+                            marker=dict(size=5, color=CEMEPI["grey"])),
+                 go.Scatter(x=peaks.filter(pl.col("peak"))["month"], y=peaks.filter(pl.col("peak"))["bn"], mode="markers+text",
+                            marker=dict(size=8, color=CEMEPI["sand"]), text=[m.strftime("%b %Y") for m in peaks.filter(pl.col("peak"))["month"]],
+                            textposition="top center", textfont_size=9)])
+fig.add_hline(y=p95, line_dash="dot", line_color=CEMEPI["deep_teal"], annotation_text="95th percentile")
+shade_programmes(fig)
+fig.update_layout(yaxis_title="Monthly collection (R$ bn)")
+save_fig(fig, "fig_peaks_scatter", width="double")
+fig
+```
+
+#### lab: uso do cache nesta página
+
+```{python}
+#| label: lab-cache
+#| echo: false
+pl.DataFrame(CACHE_LOG, schema=["etapa", "status"], orient="row").group_by("status").len().sort("status")
+```
