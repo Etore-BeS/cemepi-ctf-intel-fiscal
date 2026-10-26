@@ -1,18 +1,21 @@
 <!-- lab: sumário lateral da página única do EDA do paper (incluído só em paper_eda/index.qmd).
      O sumário sai de dentro da coluna do Quarto e fica em position: fixed (nada de sticky, que depende de cada
      ancestral e some quando o Quarto esconde a coluna abaixo de 992 px). Telas >= 992 px: fixo sobre a coluna da
-     esquerda, logo abaixo da navbar, com rolagem própria. Telas menores: botão "Sumário" que abre o mesmo sumário
-     como painel. A navbar fica sempre visível (o Quarto a escondia ao rolar). Cada tópico com subtópicos tem uma
+     esquerda, no topo (top 0, altura da tela), com rolagem própria. Telas menores: botão "Sumário" que abre o mesmo sumário
+     como painel. A navbar do site não aparece nesta página. Cada tópico com subtópicos tem uma
      setinha que abre/fecha por clique; a seção atual (a.active) abre sozinha os tópicos que a contêm, salvo os
      que você fechou à mão. -->
 <style>
-#quarto-header, #quarto-header.headroom--unpinned { transform: none !important; }
+/* sem navbar nesta página (pedido do Étore): o sumário é a navegação */
+#quarto-header { display: none !important; }
+body, body.nav-fixed { padding-top: 0 !important; }
+#quarto-content { margin-top: 0 !important; }
 #lab-toc-fixo {
   position: fixed !important; z-index: 1020; overflow-y: auto; overscroll-behavior: contain;
   background: var(--bs-body-bg, #fff); padding: .25rem .5rem .75rem 0; margin: 0; box-sizing: border-box;
   height: auto !important; visibility: visible !important;
   /* o quarto-nav.js mexe no top/max-height de todo .sidebar ao esconder a navbar; aqui manda o valor do lab */
-  top: var(--lab-top, 4.25rem) !important; max-height: var(--lab-maxh, calc(100vh - 5rem)) !important;
+  top: var(--lab-top, 0px) !important; max-height: var(--lab-maxh, 100vh) !important;
 }
 #lab-toc-botao {
   display: none; position: fixed; left: .75rem; bottom: .75rem; z-index: 1031; padding: .4rem .9rem;
@@ -67,9 +70,9 @@ document.addEventListener("DOMContentLoaded", function () {
     if (e.target.closest("a") && innerWidth < 992) document.body.classList.remove("lab-toc-aberto");
   });
   function place() {
-    var top = Math.max(0, nav ? nav.getBoundingClientRect().bottom : 0) + 8;
+    var top = (nav && nav.offsetParent !== null) ? Math.max(0, nav.getBoundingClientRect().bottom) : 0;   // sem navbar: 0
     wrap.style.setProperty("--lab-top", top + "px");
-    wrap.style.setProperty("--lab-maxh", (innerHeight - top - 8) + "px");
+    wrap.style.setProperty("--lab-maxh", (innerHeight - top) + "px");
     if (innerWidth >= 992) {
       var r = col.getBoundingClientRect();
       wrap.style.left = Math.max(0, r.left) + "px";

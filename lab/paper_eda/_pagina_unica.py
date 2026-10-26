@@ -268,8 +268,22 @@ def externalize_figs(md: str, state: dict) -> str:
     return pat.sub(_ext, md)
 
 
+MJ3_SRC = '<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js"></script>'
+MJ3_CFG = re.compile(r"<script>if \(window\.MathJax && window\.MathJax\.Hub[^<]*</script>")
+
+
+def drop_plotly_mathjax(md: str) -> str:
+    """As saídas do plotly trazem MathJax 3 (uma cópia por figura) e o Quarto já carrega o MathJax 4: os dois juntos
+    dão erro de JS e as fórmulas não aparecem. Fica só o do Quarto."""
+    return MJ3_CFG.sub("", md.replace(MJ3_SRC, ""))
+
+
 def header(state: dict, includes: list[str]) -> str:
     inc = "\n".join(dict.fromkeys(includes)).strip()
+    # includes do plotly: sem MathJax 3 e sem o import de módulo sem extensão (404); o plotly.js vem com cada figura
+    inc = "\n".join(l for l in inc.split("\n")
+                    if not l.lstrip().startswith("if (window.MathJax") and 'import "https://cdn.plot.ly' not in l
+                    and "tex-svg.min.js" not in l)
     inc_yaml = "\n".join("      " + l for l in inc.split("\n"))
     return f"""---
 title: "EDA do paper (v1) no laboratório"
@@ -366,6 +380,7 @@ def main() -> int:
         md = sectionize(md, state)
         bodies.append(f"<!-- parte: {name} -->\n\n{md}")
     body = "\n\n".join(bodies)
+    body = drop_plotly_mathjax(body)
     # scattergl (WebGL) -> scatter (SVG): alguns navegadores/máquinas não têm WebGL e o plot some com
     # "WebGL is not supported". Só o tipo do trace muda; os dados vêm do _freeze, que não é alterado.
     state["n_gl"] = body.count('"type":"scattergl"')
