@@ -174,14 +174,16 @@ fig.update_layout(height=420)
 fig.show()
 ```
 
-## k = 2 contra k = 4
+## k = 2, 3 e 4
+
+O k é decisão do Étore: a página mostra as três partições lado a lado, sem escolher.
 
 ```{python}
 #| label: tbl-k2-k4-perfis
-#| tbl-cap: "Perfis agregados das partições de menor inércia, k = 2 e k = 4 (base dez/2025): tamanho, parcela do valor, medianas das variáveis numéricas e categoria mais frequente (com a sua parcela)."
+#| tbl-cap: "Perfis agregados das partições de menor inércia, k = 2, 3 e 4 (base dez/2025): tamanho, parcela do valor, medianas das variáveis numéricas e categoria mais frequente (com a sua parcela)."
 r = R["2025-12"]
 f = r["f"]
-lab = {k: np.array(r["km"]["best"][str(k)]) for k in (2, 4)}
+lab = {k: np.array(r["km"]["best"][str(k)]) for k in (2, 3, 4)}
 def perfil(k):
     d = f.with_columns(pl.Series("grupo", lab[k]))
     out = d.group_by("grupo").agg(
@@ -190,7 +192,7 @@ def perfil(k):
         *[pl.col(c).mode().first().alias(f"{c} (moda)") for c in K.CAT],
         *[(100 * (pl.col(c) == pl.col(c).mode().first()).mean()).alias(f"{c} (% moda)") for c in K.CAT])
     return out.with_columns(pl.lit(k).alias("k")).sort("grupo")
-pl.concat([perfil(2), perfil(4)]).select("k", "grupo", pl.exclude("k", "grupo")).to_pandas().round(3)
+pl.concat([perfil(2), perfil(3), perfil(4)]).select("k", "grupo", pl.exclude("k", "grupo")).to_pandas().round(3)
 ```
 
 ```{python}
