@@ -155,8 +155,22 @@ CACHE_VERSION = "v2"
 FORCE_ALL = os.environ.get("CEMEPI_FORCE_REFRESH", "0") == "1"
 FORCE_STEPS = {s.strip() for s in os.environ.get("CEMEPI_FORCE_STEPS", "").split(",") if s.strip()}
 
+# lab (26/10/2026): assinatura do macro.duckdb fixável por variável de ambiente.
+# Motivo: a chave do cache inclui tamanho e mtime do cemepi.duckdb e do macro.duckdb. Em 26/10/2026 (21:55 BRT) a
+# série SGS 4189 foi acrescentada ao macro.duckdb (798.720 -> 1.060.864 bytes), o que invalidava as 128 etapas do
+# cache (DEBITO inclusive) sem nenhum dado usado ter mudado. Verificação feita antes de fixar (read_only, 26/10/2026):
+# as 16 séries do banco antigo (backup ~/Backups/macro.duckdb.2026-10-26_pre4189, sha256 a87429ea…fe95) são idênticas
+# às do novo (sha256 1a5a5759…) por EXCEPT ALL nos dois sentidos, código a código; a única diferença é a 4189, que o lab
+# não lê do banco (usa o JSON do BCB). Uso, só ao executar localmente (o CI não executa nada, só lê o _freeze):
+#   fish: set -x CEMEPI_MACRO_FP_PIN 798720:1790442383
+# Sem a variável, o comportamento é o de antes (tamanho e mtime atuais do arquivo).
 def source_fingerprint() -> dict:
-    return {f.name: [f.stat().st_size, int(f.stat().st_mtime)] for f in (DUCKDB_MAIN, DUCKDB_MACRO)}
+    fp = {f.name: [f.stat().st_size, int(f.stat().st_mtime)] for f in (DUCKDB_MAIN, DUCKDB_MACRO)}
+    pin = os.environ.get("CEMEPI_MACRO_FP_PIN", "").strip()
+    if pin:
+        size, mtime = (int(x) for x in pin.split(":"))
+        fp[DUCKDB_MACRO.name] = [size, mtime]
+    return fp
 
 SOURCE_FP = source_fingerprint()
 

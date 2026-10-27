@@ -82,6 +82,15 @@ CSS, JS, plotly.js, MathJax, fontes e as 4 figuras pesadas num único HTML (cerc
 sem internet. Na primeira vez ele baixa os arquivos da CDN e guarda em `~/.cache/cemepi-lab/cdn/`. Esse arquivo não
 é publicado (o CI não roda este script).
 
+**Assinatura do `macro.duckdb` (desde 26/10/2026).** A chave do cache inclui tamanho e data do `cemepi.duckdb` e do
+`macro.duckdb`. A série SGS 4189 entrou no `macro.duckdb` em 26/10/2026 sem mudar nenhuma das outras 16 séries
+(conferido por EXCEPT ALL contra o backup), e o lab não lê a 4189 do banco. Para reaproveitar o cache, exporte antes de
+executar qualquer parte ou entrada (o CI não precisa disso, porque não executa):
+
+```fish
+set -x CEMEPI_MACRO_FP_PIN 798720:1790442383   # assinatura do macro.duckdb anterior à 4189
+```
+
 Reexecutar uma parte (só quando a fonte dela mudar; o código roda e usa o cache do HD):
 
 ```fish
