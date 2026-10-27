@@ -335,7 +335,10 @@ fig""", """save_fig(fig, "fig_settlement_proxy")""" + B85_EXTRA),
 ]
 
 # Trocas de texto em todo o código fora do prelúdio (rótulos de período)
-CODE_GLOBAL = [("2016-2026", "2016-2025"), ("2016–2026", "2016–2025")]
+CODE_GLOBAL = [("2016-2026", "2016-2025"), ("2016–2026", "2016–2025"),
+               # CTF-03 (26/10/2026): sem WebGL. O B.5.18 vira mapa de densidade (_agrega_plotly), mas o código mostrado
+               # também deixa de pedir scattergl
+               ("go.Scattergl(", "go.Scatter(")]
 
 # Trocas em markdown (texto do Étore): só datas e Selic, sempre com marcador visível
 MD_GLOBAL = [

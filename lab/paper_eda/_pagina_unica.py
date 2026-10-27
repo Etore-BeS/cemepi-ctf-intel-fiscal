@@ -372,6 +372,11 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
 12. **Todas as análises do laboratório nesta página (CTF-03).** As entradas de `lab/eda/` e `lab/dados/` estão inteiras em
     [L. Análises do laboratório](#s-lab), com subtópicos no sumário: [L.1 K-means](#lab-km) · [L.2 Concentração](#lab-conc) ·
     [L.3 Selic over e checagem macro](#lab-macro) · [L.4 Enriquecimento CNPJ](#lab-cnpj-rfb) · [L.5 EDA completo](#lab-edac).
+13. **Gráficos agregados antes de publicar (DADOS-14).** Nenhuma figura leva mais um valor por CDA ou por devedor: os
+    histogramas viram barras com a contagem por faixa (B.5.4, B.5.5, B.5.16, B.8.5 em R$, B.9.3), as caixas do B.2.3 são
+    desenhadas com quartis, cercas e média já calculados, sem pontos individuais, as nuvens de pontos do B.5.18 e do
+    [L.1](#lab-km) viram mapa de densidade 2D (60 × 60 células; contorno de cada grupo na cor dele) e as curvas longas
+    (B.5.9, Lorenz do B.5.13) ficam com 500 pontos. Nada usa WebGL.
 :::
 
 ::: {{.callout-warning title="Qualidade do DEBITO (só sinalizado, nada corrigido)"}}
@@ -433,11 +438,24 @@ def load_lab_page(src: str):
     return d["result"]["markdown"], d["result"].get("includes", {}).get("include-in-header", [])
 
 
+def escape_reais(md: str) -> str:
+    """"R$" no texto vira "R\\$": com dois "R$" na mesma linha o pandoc lia o trecho entre eles como fórmula
+    (MathJax: "macro parameter character #" depois que os links viraram âncoras). Código e HTML bruto não mudam."""
+    out = []
+    for k, bloco in enumerate(re.split(r"(```.*?```)", md, flags=re.S)):
+        if k % 2:
+            out.append(bloco); continue
+        out.append("\n".join(l if l.lstrip().startswith("<") else re.sub(r"(?<!\\)R\$", r"R\\$", l)
+                             for l in bloco.split("\n")))
+    return "".join(out)
+
+
 def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, state: dict) -> tuple[str, list[str]]:
     md, inc = load_lab_page(src)
     m = re.match(r"\A---\n(.*?)\n---\n", md, flags=re.S)
     yml = m.group(1) if m else ""
     md = md[m.end():] if m else md
+    md = escape_reais(md)
     desc = re.search(r'^description:\s*"(.*)"\s*$', yml, flags=re.M)
     title = re.search(r'^title:\s*"(.*)"\s*$', yml, flags=re.M)
     # ids internos com prefixo da página (fig-x -> fig-km-x; cell-fig-x -> cell-fig-km-x; setup -> km-setup)

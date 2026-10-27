@@ -80,7 +80,7 @@ pl.DataFrame([{"base": n, "CDAs": r["f"].height, "valor mínimo (R$ mi)": float(
 
 ```{python}
 #| label: fig-b518
-#| fig-cap: "Top 1%, base dez/2025. Esquerda: PCA como no paper (escala mediana/IQR). Centro: PCA corrigido (escala do Gower). Direita: t-SNE sobre a distância de Gower. Subamostra de 5.000 CDAs, cores por origem."
+#| fig-cap: "Top 1%, base dez/2025. Esquerda: PCA como no paper (escala mediana/IQR). Centro: PCA corrigido (escala do Gower). Direita: t-SNE sobre a distância de Gower. Subamostra de 5.000 CDAs em mapa de densidade 2D (60 × 60 células; tom = CDAs por célula) com o contorno de cada origem na cor dela (DADOS-14: sem um ponto por CDA)."
 r = R["2025-12"]
 X_km = K.kmeans_design(r["X_raw"], r["X_cat"])
 r["X_km"] = X_km
@@ -238,7 +238,7 @@ pl.DataFrame([{"base": n, "grupo": int(g), "CDAs": int(c), "% das CDAs": round(1
 
 ```{python}
 #| label: fig-tsne-k
-#| fig-cap: "t-SNE da base dez/2025 (mesma subamostra do B.5.18), colorido pelos grupos do K-means com k = 2 (esquerda) e k = 4 (direita)."
+#| fig-cap: "t-SNE da base dez/2025 (mesma subamostra do B.5.18), em mapa de densidade 2D (tom = CDAs por célula) com o contorno de cada grupo do K-means, k = 2 (esquerda) e k = 4 (direita) (DADOS-14: sem um ponto por CDA)."
 r = R["2025-12"]
 fig = make_subplots(rows=1, cols=2, subplot_titles=("K-means k = 2", "K-means k = 4"), horizontal_spacing=0.08)
 for c, k in enumerate((2, 4), start=1):

@@ -746,8 +746,8 @@ origin = features["ICMS_ORIGIN"].to_numpy()
 for i, k in enumerate(features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()):
     rows = np.where(origin == k)[0]
     sub_rows = np.where(origin[embed_idx] == k)[0]
-    fig.add_trace(go.Scattergl(x=emb_pca[rows, 0], y=emb_pca[rows, 1], mode="markers", marker=dict(size=2, color=color(i)), name=k), 1, 1)
-    fig.add_trace(go.Scattergl(x=emb_tsne["x"].to_numpy()[sub_rows], y=emb_tsne["y"].to_numpy()[sub_rows], mode="markers",
+    fig.add_trace(go.Scatter(x=emb_pca[rows, 0], y=emb_pca[rows, 1], mode="markers", marker=dict(size=2, color=color(i)), name=k), 1, 1)
+    fig.add_trace(go.Scatter(x=emb_tsne["x"].to_numpy()[sub_rows], y=emb_tsne["y"].to_numpy()[sub_rows], mode="markers",
                                marker=dict(size=2, color=color(i)), showlegend=False), 1, 2)
 fig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08))
 fig.update_xaxes(title_text="PC1", row=1, col=1); fig.update_yaxes(title_text="PC2", row=1, col=1)

@@ -451,3 +451,13 @@ PROGRAMMES = [("PEP 2019", "2019-07-01", "2019-12-31"), ("Acordo Paulista 2024",
 
 def fmt_brl_bi(x: float) -> str:
     return f"R$ {x / 1e9:,.1f} bi".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+# DADOS-14 (26/10/2026): o _freeze vai para o git público, e um histograma/box/scatter do plotly levava um valor por
+# CDA ou por devedor para o HTML. Daqui em diante toda figura mostrada por uma página do lab passa por
+# _agrega_plotly.aggregate (contagens por faixa, estatísticas da caixa, mapa de densidade 2D; nada em WebGL).
+import sys as _sys_agrega  # noqa: E402
+_sys_agrega.path.insert(0, str(Path(__file__).resolve().parent))
+import _agrega_plotly  # noqa: E402
+
+_agrega_plotly.install()
