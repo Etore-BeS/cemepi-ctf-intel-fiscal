@@ -1,6 +1,7 @@
 # ESTRUTURA — ontologia, workflows e regras do repositório
 
-> Versão 1.0 — decisões D1–D11 aprovadas em **23/10/2026** pelo mantenedor (Étore Braga e Santos).
+> Versão 1.1 — decisões D1–D11 aprovadas em **23/10/2026** pelo mantenedor (Étore Braga e Santos);
+> D12 em **27/10/2026**.
 > Destino: `docs/ESTRUTURA.md`. Este documento **substitui** a spec MECE local
 > (`docs/superpowers/specs/2026-09-10-monorepo-mece-design.md`), cujo conteúdo está na §3.1.
 > **[interp.]** marca uma decisão de projeto que a fonte não diz.
@@ -14,7 +15,8 @@
    sempre esse alguém é você daqui a alguns meses. Tudo será refeito em algum momento. [NOB09]
 2. **A análise é um grafo acíclico (DAG).** O dado bruto é imutável e cada passo tem entrada e
    saída explícitas. [CCDS] [GS14 cap. 4]
-3. **Notebook serve para explorar e comunicar; código-fonte, para repetir.** [CCDS] [RUL19 regras 4 e 7]
+3. **Notebook serve para explorar, comunicar e, no artigo, gerar os resultados (D12); código
+   reutilizado vira função testada em L3.** [CCDS] [RUL19 regras 4 e 7]
 4. **Todo resultado publicado sai de código, sem passo manual:** figuras, tabelas e os números
    citados no texto. [SAN13 regras 1, 2 e 9] [AEA]
 5. **Cada artigo é um compendium:** estrutura convencional; dados, métodos e saídas separados;
@@ -33,32 +35,32 @@
 | L2 | **Derivados versionados** | Painéis limpos com versão fixa (`painel_icms/v2026-10-23`) | Parquet no HD em `$DATA_ROOT/derived/<painel>/<versao>/`; manifest em `data_manifests/` | Manifest sim; Parquet não (**D6**) | [GS14 cap. 4 "fixed revisions"] [WIL17] |
 | L3 | **Pacote comum** | Leitura, de-para, painéis, filtros, tema de figuras | `pipelines/divida_ativa/src/divida_ativa/` (**D5**) | Sim, com testes | [CCDS] [RUL19 r4] [PIM19 bp3] |
 | L4 | **Laboratório / EDA** | Caderno de laboratório datado, publicado no GitHub Pages | `lab/` (**D1**), Quarto com freeze (**D2**) | Fontes `.qmd` + `lab/_freeze/` | [NOB09] [RUL19 r1, r2] |
-| L5 | **Análise por artigo** | Scripts finos que geram exatamente o que o artigo usa | `projects/<frente>/analysis/<slug>/` | Sim | [GS14 `analysis/`] [AEA] |
-| L6 | **Manuscrito** | LaTeX que só inclui `figures/`, `tables/` e `numeros.tex` gerados por L5 | `projects/<frente>/manuscript/<slug>/` | Sim; PDF e auxiliares não | [WIL17] [SAN13 r9] |
-| L7 | **Pacote de replicação** | L5 + L3 congelado + README SSDE + declaração de dados confidenciais | Tag git + depósito (Zenodo/openICPSR) | Sim (tag) | [AEA] [SSDE] [TIER] [MAR18] |
+| L5 | **Análise por artigo** | Notebook que gera exatamente o que o artigo usa (`figures/`, `tables/`, `numeros.tex`); sem scripts `.py` (**D12**) | `projects/<frente>/notebooks/articles/<slug>.ipynb` | Sim, sem saídas (**D8**) | [RUL19 r7, r9] [AEA] |
+| L6 | **Manuscrito** | LaTeX que só inclui `figures/`, `tables/` e `numeros.tex` gerados pelo notebook L5 | `projects/<frente>/manuscript/<slug>/` | Sim; PDF e auxiliares não | [WIL17] [SAN13 r9] |
+| L7 | **Pacote de replicação** | Notebook L5 + L3 congelado + README SSDE + declaração de dados confidenciais | Tag git + depósito (Zenodo/openICPSR) | Sim (tag) | [AEA] [SSDE] [TIER] [MAR18] |
 
 ### 2.1 Direção das dependências
 
 ```
 L0 → L1 → L2 → L3 ─┬─> L4  lab/  (Pages)
-                   └─> L5  analysis/<slug>/ → L6  manuscript/<slug>/ → L7  tag + depósito
+                   └─> L5  notebooks/articles/<slug>.ipynb → L6  manuscript/<slug>/ → L7  tag + depósito
 ```
 
-- **L5 nunca importa nem lê nada de L4.** O que o lab descobrir e o artigo precisar sobe para L3 e
-  o artigo importa de lá. [CCDS] [RUL19 r7] [interp.]
+- **L5 (o notebook do artigo) nunca importa nem lê nada de L4.** O que o lab descobrir e o artigo
+  precisar sobe para L3 e o notebook importa de lá. [CCDS] [RUL19 r7] [interp.]
 - **L4 importa de L3 e lê L2; nunca lê L0 direto.** A exceção são as páginas de validação, que são
   L1. [interp., a partir de GS14 cap. 4]
 - **L3 não importa de L4 nem de L5.** [interp.]
-- **L6 não roda código**: só inclui o que L5 gerou. [AEA "no manual modifications"] [SAN13 r2]
-- **Cada L5 fixa a versão de L2 em `config.yaml`**, para que um painel novo não altere um artigo
-  já submetido. [GS14 cap. 4]
+- **L6 não roda código**: só inclui o que o notebook L5 gerou. [AEA "no manual modifications"] [SAN13 r2]
+- **Cada notebook L5 fixa a versão de L2 na célula de parâmetros do topo**, para que um painel novo
+  não altere um artigo já submetido. [GS14 cap. 4] [interp.: célula no lugar de `config.yaml`, D12]
 
 ### 2.2 Quem lê o quê
 
 | Leitor | Lê | Não precisa ler |
 |---|---|---|
 | Orientadores | Site do lab (L4) e PDF do manuscrito (L6) | Código |
-| Coautores e pareceristas | README do artigo (L5), L6, L7 | Lab |
+| Coautores e pareceristas | Notebook do artigo (L5), L6, L7 | Lab |
 | Quem for replicar | L7 (README SSDE) | Outras frentes |
 | Mantenedor e agentes | `AGENTS.md`, este documento, SoT dos pipelines | — |
 
@@ -97,12 +99,12 @@ L0 → L1 → L2 → L3 ─┬─> L4  lab/  (Pages)
 └── projects/<frente>/               # litigancia | monitoramento | macro | garantias
     ├── README.md  CONTEXT.md  docs/  references/
     ├── notebooks/playground/        # rascunhos (sem saídas no git)
-    ├── analysis/<slug>/             # L5: README SSDE, config.yaml, run_all.py, 0N_*.py, results/
-    └── manuscript/<slug>/           # L6: main.tex, sections/, figures/, tables/ (gerados por L5)
+    ├── notebooks/articles/<slug>.ipynb  # L5 (D12): análise do artigo; gera figures/, tables/, numeros.tex
+    └── manuscript/<slug>/           # L6: main.tex, sections/, figures/, tables/, numeros.tex (gerados por L5)
 ```
 
 O artigo declarado vs. autuado fica em `projects/macro/` (**D9**):
-`analysis/icms_declarado_autuado/` + `manuscript/icms_declarado_autuado/`.
+`notebooks/articles/icms_declarado_autuado.ipynb` + `manuscript/icms_declarado_autuado/`.
 
 ### 3.1 Os três andares de documentação (absorvidos da spec MECE, D7)
 
@@ -127,8 +129,8 @@ gitignored** (`docs/planos/`, `docs/superpowers/`, `.local/`). [NOB09] [GS14 cap
    um artigo. Vira função testada em `divida_ativa` e o lab passa a importá-la. [CCDS] [RUL19 r4] [PIM19 bp3]
 4. **Derivado novo:** o painel vai para `build.py` e gera a versão `vAAAA-MM-DD` com manifest.
    [WIL17 §1] [SAN13 r5]
-5. **Artigo:** criar `analysis/<slug>/` e `manuscript/<slug>/`; o artigo fixa a versão de L2.
-   [GS14] [AEA]
+5. **Artigo:** criar `notebooks/articles/<slug>.ipynb` e `manuscript/<slug>/`; o notebook fixa a
+   versão de L2 (**D12**). [GS14] [AEA]
 6. **Ligar cada afirmação do texto ao resultado**, nas notas e no manuscrito: caminho do arquivo ou
    chave de `numeros.tex`. [SAN13 r9]
 
@@ -139,12 +141,12 @@ gitignored** (`docs/planos/`, `docs/superpowers/`, `.local/`). [NOB09] [GS14 cap
 | Passo | Regra | Ref. |
 |---|---|---|
 | Ramo | **Trunk-based (D10):** trabalho na `main`, com commits pequenos e frequentes. Ramos curtos só para mudanças arriscadas | [WIL17 §5c] [interp.] |
-| `run_all` | Apaga `figures/`, `tables/` e `results/` do artigo e regenera tudo. Rodar antes de cada commit que mexa em resultado | [GS14 cap. 2 e 3B] [TIER] |
-| Números | `results/numeros.tex` com `\newcommand{\nCDAicms}{…}`. Nunca digitar número no texto | [SAN13 r9] [AEA] |
-| Figuras | Plotly + Kaleido por script, CSV com os dados ao lado e nenhum retoque manual. **Uma cópia**, em `manuscript/<slug>/figures/` | [SAN13 r7] [RUL19 r2] [interp.] |
-| Aleatoriedade | Seeds em `config.yaml` (K-means, bootstrap) | [SAN13 r6] |
-| Ambiente (D4) | **Hoje:** `pyproject.toml` único com base enxuta e dependency groups (`dev`, `lab`, `litigancia`, `forecast`, `nlp`), Python fixado em `.python-version`. **Na submissão:** `analysis/<slug>/` vira projeto uv próprio (`pyproject.toml` + `uv.lock`) com path dependency para `pipelines/divida_ativa` | [PIM19 bp4 e bp5] [SAN13 r3] [CCDS] [AEA] |
-| Submissão (D10) | Tag `<slug>-submit-AAAAMMDD`; `run_all` num ambiente limpo; README SSDE preenchido | [AEA "re-run"] [SSDE] |
+| Execução | O notebook do artigo, rodado de cima a baixo num kernel limpo, apaga `figures/`, `tables/` e `numeros.tex` do manuscrito e regenera tudo. Rodar antes de cada commit que mexa em resultado (**D12**) | [GS14 cap. 2 e 3B] [TIER] |
+| Números | `manuscript/<slug>/numeros.tex` com `\newcommand{\nCDAicms}{…}`, escrito pelo notebook. Nunca digitar número no texto | [SAN13 r9] [AEA] |
+| Figuras | Plotly + Kaleido pelo notebook, CSV com os dados ao lado e nenhum retoque manual. **Uma cópia**, em `manuscript/<slug>/figures/` | [SAN13 r7] [RUL19 r2] [interp.] |
+| Aleatoriedade | Seeds na célula de parâmetros do notebook (K-means, bootstrap) | [SAN13 r6] |
+| Ambiente (D4) | **Hoje:** `pyproject.toml` único com base enxuta e dependency groups (`dev`, `lab`, `litigancia`, `forecast`, `nlp`), Python fixado em `.python-version`. **Na submissão:** o pacote de replicação (L7) leva um projeto uv próprio (`pyproject.toml` + `uv.lock`) que roda o notebook, com path dependency para `pipelines/divida_ativa` | [PIM19 bp4 e bp5] [SAN13 r3] [CCDS] [AEA] |
+| Submissão (D10) | Tag `<slug>-submit-AAAAMMDD`; notebook rodado de cima a baixo num ambiente limpo; README SSDE preenchido | [AEA "re-run"] [SSDE] |
 | Dados confidenciais | O pacote leva todo o código, a declaração de disponibilidade, a lista do que exige dados restritos e, se possível, uma amostra sintética | [AEA "confidential data"] |
 | Suplemento (D3) | Na tag de submissão, o EDA do artigo é copiado para `lab/suplementos/<slug>/` com `freeze: true` e não muda mais | [MAR18] [TTW] [interp.] |
 
@@ -206,7 +208,7 @@ de pesquisa.
 
 ---
 
-## 8. Registro de decisões (23/10/2026)
+## 8. Registro de decisões (D1–D11 em 23/10/2026; D12 em 27/10/2026)
 
 | # | Decisão | Ref. |
 |---|---|---|
@@ -221,6 +223,7 @@ de pesquisa.
 | D9 | Artigo declarado vs. autuado em `projects/macro/` [interp.] | — |
 | D10 | Trunk + tag por submissão | [WIL17 §5c] [AEA] |
 | D11 | Seção datada "Questões para discussão"; nomes só em `.local/` | [RUL19 r1] [NOB09] |
+| D12 | 27/10/2026: a análise de cada artigo fica só no notebook `projects/<frente>/notebooks/articles/<slug>.ipynb`, sem a camada `analysis/<slug>/` com `.py`; o notebook gera `figures/`, `tables/` e `numeros.tex` que `manuscript/<slug>/` inclui | [RUL19 r7, r9] [AEA] |
 
 ## 9. Manifest de derivado (formato, D6)
 
