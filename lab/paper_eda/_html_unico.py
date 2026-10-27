@@ -39,7 +39,6 @@ DESKTOP = Path.home() / "Desktop" / "EDA_paper_CEMEPI.html"
 CACHE = Path.home() / ".cache" / "cemepi-lab" / "cdn"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 MATHJAX = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js"
-SITE_URL = "https://etore-bes.github.io/cemepi-ctf-intel-fiscal/"
 
 
 def fetch(url: str, integrity: str | None = None) -> bytes:
@@ -193,13 +192,18 @@ def build() -> tuple[str, dict]:
     h = re.sub(r'<iframe src="paper_eda_figs/([\w-]+)\.html"[^>]*></iframe>\s*<p class="small text-muted">.*?</p>', _fig, h, flags=re.S)
     h = h.replace("</body>", js_block(LAZY_JS) + "\n</body>", 1)
 
-    # 4) links para outras páginas do lab: endereço do site publicado; a própria página vira âncora local
+    # 4) CTF-03 (26/10/2026): todo o conteúdo do lab está neste arquivo (seção L), então não sobra link para o site
+    #    publicado. Saem da barra o "Início" e os "Suplementos" (outras páginas); a própria página vira âncora local.
+    #    Qualquer outro link relativo para .html é erro.
+    h = re.sub(r'<li class="nav-item">\s*<a class="nav-link" href="\.\./(?:index|suplementos/index)\.html">.*?</li>',
+               "", h, flags=re.S)
+
     def _href(m):
         rel = m.group(1)
         st["links"] += 1
-        if rel in ("../paper_eda/index.html", "./index.html", "index.html"):
+        if rel in ("../paper_eda/index.html", "./index.html", "index.html", "../index.html"):
             return 'href="#"'
-        return f'href="{SITE_URL}{rel.removeprefix("../").removeprefix("./")}"'
+        sys.exit(f"link para conteúdo fora do arquivo: {rel}")
     h = re.sub(r'href="((?:\.\./|\./)[^"#]*\.html)', _href, h)
     h = h.replace('<div id="quarto-search" class="" title="Procurar"></div>', "")   # a busca precisa de servidor
     h = h.replace('"type":"scattergl"', '"type":"scatter"')
@@ -218,6 +222,8 @@ def main() -> int:
     left = [u for u in re.findall(r'<(?:script|link|img|iframe)[^>]+(?:src|href)="(https?://[^"]+)"', h)]
     if left:
         sys.exit(f"sobrou recurso externo: {left[:5]}")
+    if "etore-bes.github.io" in h:
+        sys.exit("sobrou link para o site publicado (etore-bes.github.io)")
     OUT.write_text(h, encoding="utf-8")
     msg = (f"{OUT.relative_to(LAB.parent)}: {OUT.stat().st_size / 1e6:.1f} MB; CSS {st['css']}, JS locais {st['js']}, "
            f"CDN embutidos {st['cdn']}, figuras pesadas {st['figs']}, links do lab {st['links']}")

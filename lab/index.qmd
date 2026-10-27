@@ -3,17 +3,6 @@ title: "Laboratório — dívida ativa de São Paulo"
 subtitle: "Exploração viva, datada, para discussão de pesquisa"
 date: 2026-10-23
 date-format: "DD/MM/YYYY"
-listing:
-  id: entradas
-  contents: ["eda/*.{qmd,ipynb}", "dados/*.qmd", "!eda/2026-10-23_eda_completo.ipynb"]  # o .ipynb é cópia local não versionada; a entrada é o .qmd
-  type: table
-  fields: [date, title, description]
-  sort: "date desc"
-  date-format: "DD/MM/YYYY"
-  field-display-names:
-    date: "Data"
-    title: "Entrada"
-    description: "Pergunta"
 ---
 
 ## Entrada principal: o EDA do paper
@@ -22,7 +11,7 @@ listing:
 A a E) numa página só, com sumário lateral e, no topo, o [quadro de novidades](paper_eda/index.qmd#novidades) com
 links para cada seção alterada: sem 2026, Selic over, estrelas de significância (p ≤ 0,10), B.8.5 em R$, concentração
 por tributo e devedor, emprego × estoque, figura 5.18, K-means k = 2/3/4, avisos de qualidade do DEBITO, CNPJ × sem
-CNPJ e só agregados. As entradas datadas abaixo detalham cada mudança.
+CNPJ e só agregados. As entradas datadas, inteiras, estão na mesma página, na seção L.
 
 ## O que é este site
 
@@ -38,7 +27,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 ## O que mudou nesta versão
 
 - *(2026-10-26)* **[EDA do paper inteiro numa página](paper_eda/index.qmd):** `paper_eda_v1` numa página só, gerada do notebook sem rodá-lo, com sumário lateral, quadro de novidades e avisos “Novo no lab” / “Alterado no lab” em cada seção mudada (no lugar dos marcadores `[lab: ...]`). Corte em 2025, Selic over, estrelas de significância e qualidade do DEBITO sinalizada (inclui 2024-12 parcial e linhas repetidas em 2025-06/07). O K-means passa a mostrar perfis de k = 2, 3 e 4.
-- *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](dados/2026-10-26_cnpj_enrich.qmd):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
+- *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](paper_eda/index.qmd#lab-cnpj-rfb):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
 - *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.
 - *(2026-10-23)* **K-means no top 1% das CDAs ICMS:** 100 inicializações por k, de k=2 a k=8, com cotovelo e silhueta; k=2 e k=4 comparados por estabilidade entre sementes, ARI, tamanhos e perfis agregados; a figura da seção 5.18 refeita.
 - *(2026-10-23)* **Selic over e checagem das correlações macro:** a Selic meta (SGS 432) trocada pela Selic over (SGS 4189); fonte, unidade, frequência, defasagem, cobertura e valores atípicos das séries conferidos; a correlação entre emprego e estoque decomposta.
@@ -47,7 +36,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 ## Questões para discussão (2026-10-23)
 
 1. **Pergunta:** quantos grupos usar no top 1%: k=2 ou k=4?
-   **Evidência:** [K-means no top 1%](eda/2026-10-23_kmeans_top1.qmd). As três leituras não apontam o mesmo k:
+   **Evidência:** [K-means no top 1%](paper_eda/index.qmd#lab-km). As três leituras não apontam o mesmo k:
    - o cotovelo da inércia, pela curvatura, aponta k=3;
    - a silhueta do K-means é maior em k=4 do que em k=2 na base de dez/2025;
    - a silhueta do agrupamento hierárquico (Gower) é maior em k=2, mas esse k=2 só separa 93 CDAs (0,4%) do resto, nas duas bases. Não é a mesma divisão do K-means (ARI perto de zero).
@@ -56,19 +45,25 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
    **Opções:** (a) k=2, mais estável entre bases; (b) k=4, mais informativo e com estabilidade aceitável; (c) mostrar os dois.
    **Proposta:** a decidir. A página não escolhe k.
 2. **Pergunta:** a correção da figura 5.18 é a pedida?
-   **Evidência:** [K-means no top 1%](eda/2026-10-23_kmeans_top1.qmd), seção 5.18. No artigo, o primeiro componente do PCA era dominado pelo número de pagamentos, por causa da escala robusta com IQR zero, e as cores de dois grupos eram quase iguais. A página refaz o PCA com a escala usada na distância de Gower e com uma paleta distinta.
+   **Evidência:** [K-means no top 1%](paper_eda/index.qmd#lab-km), seção 5.18. No artigo, o primeiro componente do PCA era dominado pelo número de pagamentos, por causa da escala robusta com IQR zero, e as cores de dois grupos eram quase iguais. A página refaz o PCA com a escala usada na distância de Gower e com uma paleta distinta.
    **Opções:** (a) a correção é essa; (b) o pedido era outro (eixo, rótulo, tipo de gráfico).
    **Proposta:** confirmar o que se esperava da figura.
 3. **Pergunta:** a correlação entre emprego e estoque fica no texto?
-   **Evidência:** [Selic over e checagem](eda/2026-10-23_macro_selic_over_checagem.qmd), seção 2.5. Em primeira diferença, a correlação depende do ano de 2020, quando o estoque e a contagem de CDAs do painel caem juntos.
+   **Evidência:** [Selic over e checagem](paper_eda/index.qmd#lab-macro), seção 2.5. Em primeira diferença, a correlação depende do ano de 2020, quando o estoque e a contagem de CDAs do painel caem juntos.
    **Opções:** (a) retirar até conferir o estoque de 2020 na tabela DEBITO corrigida; (b) manter só em diferença ou desvio da tendência, com a ressalva.
    **Proposta:** (a).
 4. **Pergunta:** o EDA completo deve ser refeito com o corte em 2025?
-   **Evidência:** [EDA completo](eda/2026-10-23_eda_completo.qmd). A conversão mantém 2026 parcial para ficar fiel ao notebook.
+   **Evidência:** [EDA completo](paper_eda/index.qmd#lab-edac). A conversão mantém 2026 parcial para ficar fiel ao notebook.
    **Opções:** (a) manter como registro e usar as páginas corrigidas; (b) refazer o corte nesta página também.
    **Proposta:** (a).
 
 ## Entradas
 
-::: {#entradas}
-:::
+Todas as entradas estão dentro da página única, na seção **L. Análises do laboratório** (pedido de 26/10/2026: toda
+análise num HTML só, com navegação pelo sumário lateral):
+
+- [L.1 K-means no top 1% e figura B.5.18 corrigida](paper_eda/index.qmd#lab-km) (2026-10-23)
+- [L.2 Concentração por tributo e por devedor; saída em R$](paper_eda/index.qmd#lab-conc) (2026-10-23)
+- [L.3 Selic over e checagem das correlações macro](paper_eda/index.qmd#lab-macro) (2026-10-23; correções MAC-07 em 26/10)
+- [L.4 Enriquecimento CNPJ (RFB ref. 2026-03)](paper_eda/index.qmd#lab-cnpj-rfb) (2026-10-26)
+- [L.5 EDA completo (conversão fiel do notebook)](paper_eda/index.qmd#lab-edac) (2026-10-23)

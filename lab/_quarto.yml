@@ -6,12 +6,10 @@ project:
   render:
     # Atenção: um padrão sem "/" (ex.: "*.qmd") casa em qualquer subpasta e trazia de volta as 8 partes do paper.
     - "index.qmd"
-    - "eda/*.qmd"
-    - "eda/*.ipynb"
-    - "!eda/2026-10-23_eda_completo.ipynb"   # cópia local não versionada; a entrada é o .qmd de mesmo nome
-    - "dados/*.qmd"
-    - "paper_eda/index.qmd"   # a página única do EDA do paper. As 8 partes (paper_eda/0*.qmd) NÃO são páginas:
-                              # o _freeze delas alimenta esta página (ver lab/README.md, "EDA do paper")
+    - "paper_eda/index.qmd"   # a página única: o EDA do paper E todas as entradas do lab (seção "L"). As 8 partes
+                              # (paper_eda/0*.qmd) e as entradas (eda/*.qmd, dados/*.qmd) NÃO são páginas: o _freeze
+                              # delas alimenta esta página (CTF-03, 26/10/2026). Para executar uma delas e atualizar o
+                              # _freeze: quarto render <arquivo> --profile partes (ver _quarto-partes.yml)
     - "suplementos/**/*.qmd"
     - "!README.md"          # instruções para quem mantém, não é página do site
 

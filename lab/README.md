@@ -6,7 +6,11 @@ Site: `https://etore-bes.github.io/cemepi-ctf-intel-fiscal/` (depois do primeiro
 ## Como funciona
 
 1. Você escreve/edita uma entrada em `lab/eda/AAAA-MM-DD_<tema>.qmd` (modelo: `eda/_modelo_entrada.qmd`).
-2. **Renderiza localmente**, com o HD montado: o Quarto executa o código e grava os resultados em `lab/_freeze/`.
+2. **Renderiza localmente**, com o HD montado: `uv run --no-sync quarto render lab/eda/<entrada>.qmd --profile partes`
+   executa o código e grava os resultados em `lab/_freeze/`. Depois, `uv run --no-sync python
+   lab/paper_eda/_pagina_unica.py` põe a entrada na página única (seção "L. Análises do laboratório"; inclua a
+   entrada nova em `LAB_PAGES` de `_pagina_unica.py`). Desde 26/10/2026 (CTF-03) as entradas **não são páginas
+   do site**: todo o conteúdo fica num HTML só, com navegação pelo sumário lateral.
 3. Faz commit da fonte **e** de `lab/_freeze/`, e push na `main`.
 4. O workflow `.github/workflows/lab-pages.yml` confere o freeze, roda o PII check, monta o site **sem executar
    código** e publica no Pages.
@@ -52,9 +56,9 @@ git add lab/ && git commit -m "lab: <tema> (AAAA-MM-DD)" && git push
 
 Atenção:
 
-- Renderize **o projeto** (`quarto render lab`). Renderizar um arquivo solto ou uma subpasta
-  (`quarto render lab/eda/x.qmd`) sempre reexecuta o código desse arquivo. Isso também atualiza
-  o freeze dele, mas não vale como render do site.
+- Renderize **o projeto** (`quarto render lab`) para montar o site. Para executar uma entrada ou parte e
+  atualizar o freeze dela, use `quarto render <arquivo> --profile partes` (sem o perfil, o arquivo fica fora do
+  projeto e o freeze não muda). Apague depois o HTML solto que esse comando deixa em `lab/_site/`.
 - **Não** use `--no-execute`: no Quarto 1.10 ele ignora o `_freeze/` e gera páginas sem figuras
   (testado em 23/10/2026).
 - Dados de entrada mudaram (novo painel, nova extração)? Apague o freeze da entrada

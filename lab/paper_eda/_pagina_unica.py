@@ -32,9 +32,23 @@ FIGS = HERE / "paper_eda_figs"
 PARTS = ["01_dados", "02_parte_a", "03_parte_b1", "04_parte_b2", "05_parte_b3", "06_parte_c", "07_parte_d", "08_parte_e"]
 BIG_FIG = 1_000_000  # bytes de HTML por figura acima dos quais ela vai para arquivo à parte
 
-LINK_KM = "../eda/2026-10-23_kmeans_top1.qmd"
-LINK_CONC = "../eda/2026-10-23_concentracao_e_liquidacao.qmd"
-LINK_MACRO = "../eda/2026-10-23_macro_selic_over_checagem.qmd"
+# Páginas do laboratório trazidas inteiras para dentro desta página (CTF-03, 26/10/2026: "toda análise dentro de 1 HTML
+# só"). Cada uma vira uma subseção de "L. Análises do laboratório", montada do _freeze dela, sem executar nada.
+# (fonte relativa a lab/, número, título curto, âncora, prefixo dos ids internos)
+LAB_PAGES = [
+    ("eda/2026-10-23_kmeans_top1", "L.1", "K-means no top 1% e figura B.5.18 corrigida (CTF-03, IMP-11)", "lab-km", "km"),
+    ("eda/2026-10-23_concentracao_e_liquidacao", "L.2", "Concentração por tributo e por devedor; saída em R$ (IMP-09, IMP-10)",
+     "lab-conc", "conc"),
+    ("eda/2026-10-23_macro_selic_over_checagem", "L.3", "Selic over e checagem das correlações macro (MAC-03, MAC-07)",
+     "lab-macro", "mac"),
+    ("dados/2026-10-26_cnpj_enrich", "L.4", "Enriquecimento CNPJ (RFB ref. 2026-03)", "lab-cnpj-rfb", "rfb"),
+    ("eda/2026-10-23_eda_completo", "L.5", "EDA completo (conversão fiel do notebook, com 2026 parcial)", "lab-edac", "edac"),
+]
+LAB_ANCHOR = {src.split("/")[-1]: anc for src, _, _, anc, _ in LAB_PAGES}
+LAB_PREFIX = {src.split("/")[-1]: pfx for src, _, _, _, pfx in LAB_PAGES}
+LINK_KM = "#lab-km"
+LINK_CONC = "#lab-conc"
+LINK_MACRO = "#lab-macro"
 
 # Avisos que _gerar_paginas.py já põe nas partes (título -> âncora, rótulo, código da decisão)
 CALLOUT_MAP = {
@@ -341,9 +355,12 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
 4. **B.8.5 com valor em R$ no eixo Y (IMP-09).** [B.8.5 Time to settlement](#lab-b885).
 5. **Concentração por tipo de tributo e por devedor (IMP-10).** [B.4 Concentration](#lab-concentracao) · [página de
    concentração]({LINK_CONC}).
-6. **Emprego × estoque (MAC-07).** A correlação anual é guiada pela tendência comum e por 2020.
-   [D.3 Annual correlations](#lab-emprego).
-7. **Figura 5.18 corrigida, a validar (IMP-11).** [B.5.18 Distance structure](#lab-b518) · [K-means no top 1%]({LINK_KM}).
+6. **Correlações macro corrigidas (MAC-07).** Uma convenção de defasagem (macro em t − k), sem 2026, PIB mensal e
+   crédito PJ deflacionados pelo IPCA (R$ de dez/2025) e PNAD Contínua em trimestres civis no trimestre e no ano.
+   **Aviso:** a correlação anual emprego × estoque vem da tendência comum e da queda de 2020, que parece efeito da
+   extração do DEBITO (EQ-02/EQ-05), e não deve ir para o texto. [1.6](#lab-selic) · [D.3 Annual correlations](#lab-emprego) ·
+   [antes e depois](#lab-macro).
+7. **Figura 5.18 corrigida, a validar (IMP-11).** [B.5.18 Distance structure](#lab-b518) · [L.1 K-means no top 1%]({LINK_KM}).
 8. **K-means com k = 2, 3 e 4 (CTF-03).** O k fica para decisão da equipe. [B.5.19 Clustering](#lab-k) ·
    [K-means no top 1%]({LINK_KM}).
 9. **Qualidade do DEBITO sinalizada, sem correção.** Fotos ausentes (2018-12; 2020-10 a 12), parciais (2018-11, 2024-03,
@@ -352,6 +369,9 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
 10. **CNPJ × sem CNPJ no lugar de CPF × CNPJ.** A coluna de CPF não é lida. [1.2](#lab-cnpj-1-2) ·
     [1.3.1 Debtor identification](#lab-cnpj).
 11. **Só agregados.** Nada por CPF, nome ou CDA individual. [A.1.4](#lab-agregados) · [B.5.24](#lab-agregados-b524).
+12. **Todas as análises do laboratório nesta página (CTF-03).** As entradas de `lab/eda/` e `lab/dados/` estão inteiras em
+    [L. Análises do laboratório](#s-lab), com subtópicos no sumário: [L.1 K-means](#lab-km) · [L.2 Concentração](#lab-conc) ·
+    [L.3 Selic over e checagem macro](#lab-macro) · [L.4 Enriquecimento CNPJ](#lab-cnpj-rfb) · [L.5 EDA completo](#lab-edac).
 :::
 
 ::: {{.callout-warning title="Qualidade do DEBITO (só sinalizado, nada corrigido)"}}
@@ -374,6 +394,104 @@ para `interim/paper_eda_lab/` no HD, com os rótulos `fig_*`/`tab_*` do paper.
 """
 
 
+
+LAB_LINK_RE = re.compile(r"\]\((?:(?:\.\./)?(?:eda|dados)/)?(2026-[\w-]+?)\.(?:qmd|html)(#[\w-]+)?\)")
+SITE_LINK_RE = re.compile(r"\]\((?:\.\./)?paper_eda/(?:index\.qmd|index\.html)?(#[\w-]+)?\)")
+
+
+def lab_links(md: str) -> str:
+    """Links para as páginas do lab (e para /paper_eda/) viram âncoras desta página."""
+    def _r(m):
+        slug, frag = m.group(1), m.group(2)
+        if slug not in LAB_ANCHOR:
+            sys.exit(f"link para página do lab que não está na página única: {slug}")
+        if frag:
+            return f"](#{LAB_PREFIX[slug]}-{frag[1:]})"
+        return f"](#{LAB_ANCHOR[slug]})"
+    md = LAB_LINK_RE.sub(_r, md)
+    return SITE_LINK_RE.sub(lambda m: f"]({m.group(1) or '#novidades'})", md)
+
+
+def _slug(t: str) -> str:
+    """Como o identificador automático do pandoc (minúsculas, acentos mantidos, tudo até a primeira letra sai)."""
+    t = re.sub(r"\{.*?\}", "", t)
+    t = re.sub(r"[`*_\[\]()]", "", t).strip().lower()
+    t = "".join(ch for ch in t if ch.isalnum() or ch in "_-. ")
+    t = re.sub(r"\s+", "-", t)
+    t = re.sub(r"^[^a-zà-ÿ]+", "", t)
+    return t or "secao"
+
+
+def load_lab_page(src: str):
+    fj = LAB / "_freeze" / src / "execute-results" / "html.json"
+    qmd = LAB / f"{src}.qmd"
+    if not fj.exists():
+        sys.exit(f"{src}: sem _freeze. Renderize antes (ver lab/README.md)")
+    d = json.loads(fj.read_text(encoding="utf-8"))
+    if d["hash"] != md5(qmd):
+        sys.exit(f"{src}: _freeze desatualizado em relação a {qmd.name}. Renderize antes.")
+    return d["result"]["markdown"], d["result"].get("includes", {}).get("include-in-header", [])
+
+
+def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, state: dict) -> tuple[str, list[str]]:
+    md, inc = load_lab_page(src)
+    m = re.match(r"\A---\n(.*?)\n---\n", md, flags=re.S)
+    yml = m.group(1) if m else ""
+    md = md[m.end():] if m else md
+    desc = re.search(r'^description:\s*"(.*)"\s*$', yml, flags=re.M)
+    title = re.search(r'^title:\s*"(.*)"\s*$', yml, flags=re.M)
+    # ids internos com prefixo da página (fig-x -> fig-km-x; cell-fig-x -> cell-fig-km-x; setup -> km-setup)
+    ids = set(re.findall(r"\{#([\w-]+)", md)) | set(re.findall(r"\bid=\"([\w-]+)\"", md))
+    def newid(i):
+        mm = re.match(r"^(cell-)?(fig-|tbl-)?(.*)$", i)
+        return f"{mm.group(1) or ''}{mm.group(2) or ''}{pfx}-{mm.group(3)}"
+    def _id(m):
+        return "{#" + newid(m.group(1))
+    md = re.sub(r"\{#([\w-]+)", _id, md)
+    md = re.sub(r"@((?:fig|tbl)-[\w-]+)", lambda m: "@" + newid(m.group(1)), md)
+    md = re.sub(r"\]\(#([\w-]+)\)", lambda m: f"](#{newid(m.group(1))})" if m.group(1) in ids or True else m.group(0), md)
+    # títulos: ## -> ####, ### -> #####, #### -> ###### (fora das cercas de código); todo título ganha id fixo
+    out, fence, seen = [], False, set()
+    for ln in md.split("\n"):
+        if ln.lstrip().startswith("```"):
+            fence = not fence
+        hm = None if fence else re.match(r"^(#{2,4}) (.+?)\s*$", ln)
+        if hm:
+            t = hm.group(2)
+            if "{#" not in t:
+                base = f"{pfx}-{_slug(t)}"
+                sid, k = base, 2
+                while sid in seen:
+                    sid = f"{base}-{k}"; k += 1
+                seen.add(sid)
+                t = f"{t} {{#{sid}}}"
+            ln = "#" * (len(hm.group(1)) + 2) + " " + t
+        out.append(ln)
+    md = "\n".join(out)
+    md = lab_links(md)
+    head = (f"### {num} {short} {{#{anchor}}}\n\n"
+            f"::: {{.callout-tip appearance=\"simple\" title=\"Novo no lab: {title.group(1) if title else short}\"}}\n"
+            f"{desc.group(1) if desc else ''} Conteúdo completo da entrada do laboratório `lab/{src}.qmd`, montado do "
+            f"_freeze dela (nada é executado aqui).\n:::\n\n")
+    state["anchors"].add(anchor)
+    state["lab_pages"].append((num, short, anchor))
+    return head + md.strip("\n") + "\n", inc
+
+
+def lab_block(state: dict) -> tuple[str, list[str]]:
+    bodies, incs = [], []
+    for src, num, short, anchor, pfx in LAB_PAGES:
+        b, inc = lab_section(src, num, short, anchor, pfx, state)
+        bodies.append(f"<!-- lab: {src} -->\n\n{b}")
+        incs += inc
+    intro = ("## L. Análises do laboratório {#s-lab}\n\n"
+             "As análises novas do laboratório, inteiras, nesta mesma página. Cada uma é uma entrada datada em `lab/eda/` ou "
+             "`lab/dados/`, com a pergunta, os dados, o que foi encontrado e o que **não** concluir. Os avisos “Novo no "
+             "lab” e “Alterado no lab” nas seções do paper levam até aqui.\n\n"
+             + "\n".join(f"- [{n} {t}](#{a})" for n, t, a in state["lab_pages"]) + "\n")
+    return intro + "\n\n" + "\n\n".join(bodies), incs
+
+
 def main() -> int:
     state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": []}
     bodies, includes = [], []
@@ -383,7 +501,11 @@ def main() -> int:
         md = transform(strip_part(md), state)
         md = sectionize(md, state)
         bodies.append(f"<!-- parte: {name} -->\n\n{md}")
+    state["lab_pages"] = []
+    lab_md, lab_inc = lab_block(state)
+    includes += lab_inc
     body = "\n\n".join(bodies)
+    body = lab_links(body) + "\n\n" + lab_md
     body = drop_plotly_mathjax(body)
     # scattergl (WebGL) -> scatter (SVG): alguns navegadores/máquinas não têm WebGL e o plot some com
     # "WebGL is not supported". Só o tipo do trace muda; os dados vêm do _freeze, que não é alterado.
@@ -392,6 +514,15 @@ def main() -> int:
     assert "scattergl" not in body, "sobrou scattergl em outra forma"
     body = externalize_figs(body, state)
     page = header(state, includes) + "\n" + novidades(state) + "\n" + body
+    # ids únicos (CTF-03): uma célula com o mesmo rótulo de um título (ex.: lab-recorte) vira cell-<rótulo>;
+    # os links continuam indo para o título.
+    heads = set(re.findall(r"^#+ .*\{#([\w-]+)[\s}]", page, flags=re.M))
+    page = re.sub(r"^(:{3,} \{#)([\w-]+)( \.cell)", lambda m: f"{m.group(1)}cell-{m.group(2)}{m.group(3)}"
+                  if m.group(2) in heads else m.group(0), page, flags=re.M)
+    ids = re.findall(r"\{#([\w-]+)[\s}]", re.sub(r"```.*?```", "", page, flags=re.S))
+    dup = sorted({i for i in ids if ids.count(i) > 1}) if len(ids) != len(set(ids)) else []
+    if dup:
+        sys.exit(f"ids repetidos: {dup[:20]}")
     # todo link #âncora interno precisa existir
     targets = set(re.findall(r"\]\(#([\w-]+)\)", page))
     defined = set(re.findall(r"\{#([\w-]+)[\s}]", page)) | {"novidades"}
