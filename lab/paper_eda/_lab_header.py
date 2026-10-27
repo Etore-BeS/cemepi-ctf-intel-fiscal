@@ -31,7 +31,7 @@ def _selic_over_raw(schema):
         _pl.col("valor").cast(_pl.Float64).alias("valor"))
     return d.with_columns([_pl.col(c).cast(t) for c, t in schema.items()])
 
-# Significância: estrelas e destaque de p <= 0,10 (decisão com a Profª Lívia)
+# Significância: estrelas e linhas em negrito com p <= 0,10 (decisão com a Profª Lívia; negrito no lugar do fundo amarelo, 26/10/2026)
 def stars(p) -> str:
     try:
         p = float(p)
@@ -48,23 +48,31 @@ def _p_columns(df):
     import polars as _pl
     return [c for c in df.columns if _PCOL.match(c) and not _NOT_P.match(c) and df.schema[c] in (_pl.Float64, _pl.Float32)]
 
+_SIG_LEG = "* p ≤ 0,10; ** p ≤ 0,05; *** p ≤ 0,01"
+_MAX_ROWS_SIG = 400  # acima disso a tabela sai como o polars mostra (só as primeiras e últimas linhas): sem estrelas nem negrito
+
 def _df_html(df):
     import polars as _pl
     pcs = _p_columns(df)
-    if not pcs or df.height > 400:
+    if not pcs:
         return df._repr_html_()
+    if df.height > _MAX_ROWS_SIG:
+        note = (f"<p class='lab-sig-legenda' style='font-size:0.8em;margin-bottom:.25rem'>Tabela longa ({df.height} linhas): "
+                f"mostrada resumida, sem estrelas nem negrito. Significância pela coluna {pcs[0]}: {_SIG_LEG}.</p>")
+        return note + df._repr_html_()
     pd_ = df.to_pandas()
     for c in pcs[::-1]:
         pd_.insert(list(pd_.columns).index(c) + 1, f"{c} (sig.)", [stars(v) for v in pd_[c]])
     main = pcs[0]
-    def _hl(row):
+    def _bold(row):
         v = row[main]
         on = v == v and v is not None and v <= 0.10
-        return ["background-color: #FFF4E5; font-weight: 600" if on else "" for _ in row]
-    sty = pd_.style.apply(_hl, axis=1).format(precision=4, na_rep="")
-    note = (f"<p style='font-size:0.8em'>Estrelas pela coluna de p: * p ≤ 0,10; ** p ≤ 0,05; *** p ≤ 0,01. "
-            f"Linhas destacadas: {main} ≤ 0,10.</p>")
-    return sty.to_html() + note
+        return ["font-weight: 700" if on else "" for _ in row]
+    sty = pd_.style.apply(_bold, axis=1).format(precision=4, na_rep="")
+    outras = f" Estrelas em todas as colunas de p ({', '.join(pcs)})." if len(pcs) > 1 else ""
+    note = (f"<p class='lab-sig-legenda' style='font-size:0.8em;margin-bottom:.25rem'><b>Negrito</b> = linha com "
+            f"{main} ≤ 0,10. Coluna “(sig.)”: {_SIG_LEG}.{outras}</p>")
+    return note + sty.to_html()
 
 try:
     get_ipython().display_formatter.formatters["text/html"].for_type_by_name("polars.dataframe.frame", "DataFrame", _df_html)

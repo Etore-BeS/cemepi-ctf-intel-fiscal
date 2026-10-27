@@ -17,7 +17,7 @@ Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (f
 nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
 **[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
 foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
-*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+*** p ≤ 0,01) e linhas em negrito quando p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
 :::
 
 :::{.callout-important}

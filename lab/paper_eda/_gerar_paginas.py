@@ -198,8 +198,10 @@ PATCHES = [
     return fig""",
       """                      meta={"min_height": 80 + 26 * len(z)})
     if _starred:  # lab: estrelas de significância (decisão com a Profª Lívia)
-        fig.add_annotation(text="* p ≤ 0.10  ** p ≤ 0.05  *** p ≤ 0.01 (no multiple-testing correction)", x=0, y=-0.3,
-                           xref="paper", yref="paper", showarrow=False, xanchor="left", font_size=9)
+        fig.add_annotation(text="Cor = sinal e força da correlação; estrelas = significância: * p ≤ 0,10  ** p ≤ 0,05  "
+                                "*** p ≤ 0,01 (sem correção para testes múltiplos)", x=0, y=1.0, yanchor="bottom",
+                           xref="paper", yref="paper", showarrow=False, xanchor="left", font_size=10)
+        fig.update_layout(margin=dict(t=40))
     return fig"""),
     # 0.6: corr_pair registra p para as estrelas
     P(15, """    return float(r[0]), float(r[1])""",
@@ -534,7 +536,7 @@ Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (f
 nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
 **[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
 foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
-*** p ≤ 0,01) com destaque de p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+*** p ≤ 0,01) e linhas em negrito quando p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
 :::
 """
 

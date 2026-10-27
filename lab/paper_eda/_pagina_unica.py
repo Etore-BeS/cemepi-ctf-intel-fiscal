@@ -69,8 +69,11 @@ EXTRA = {
     "s-b-5-24": ("lab-agregados-b524", "Alterado no lab", "Só agregados: o paper mostrava as primeiras linhas com o hash."),
 }
 STAR_TEXT = ("Estrelas de significância nas tabelas e nos mapas de correlação: \\* p ≤ 0,10; \\*\\* p ≤ 0,05; \\*\\*\\* "
-             "p ≤ 0,01 (sem correção para testes múltiplos), com destaque de p ≤ 0,10. Nas tabelas, cada coluna de p "
-             "ganha ao lado uma coluna “(sig.)”.")
+             "p ≤ 0,01 (sem correção para testes múltiplos). Nas tabelas, cada coluna de p ganha ao lado uma coluna "
+             "“(sig.)” com as estrelas, e as linhas com p ≤ 0,10 na primeira coluna de p ficam em **negrito** (sem cor de "
+             "fundo). A legenda acima de cada tabela diz qual coluna define o negrito. Tabelas com mais de 400 linhas saem "
+             "resumidas, sem estrelas nem negrito, e a legenda avisa. Nos mapas de calor, a cor é o sinal e a força da "
+             "correlação e as estrelas são a significância.")
 
 HEAD_RE = re.compile(r"^(#{2,4}) (.+?)\s*$")
 NUM_RE = re.compile(r"^(Part [A-E]|[0-9A-E](?:\.\d+)*)\b")
@@ -332,7 +335,8 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
    {state['n_era_sections']} seções, cada uma com um aviso “Alterado no lab (IMP-12)”.
 2. **Selic over no lugar da meta (MAC-03).** A variável `selic` passa a ser a Selic over (SGS 4189), não a meta (SGS 432).
    [1.6 Séries macroeconômicas](#lab-selic) · [Parte D](#s-part-d) · [página de checagem]({LINK_MACRO}).
-3. **Estrelas de significância e destaque de p ≤ 0,10 (MAC-05/06).** \\* p ≤ 0,10; \\*\\* p ≤ 0,05; \\*\\*\\* p ≤ 0,01, em
+3. **Estrelas de significância e linhas significativas em negrito (MAC-05/06).** \\* p ≤ 0,10; \\*\\* p ≤ 0,05;
+   \\*\\*\\* p ≤ 0,01; negrito = p ≤ 0,10 na coluna indicada na legenda de cada tabela; em
    {len(stars)} seções: {star_links}.
 4. **B.8.5 com valor em R$ no eixo Y (IMP-09).** [B.8.5 Time to settlement](#lab-b885).
 5. **Concentração por tipo de tributo e por devedor (IMP-10).** [B.4 Concentration](#lab-concentracao) · [página de

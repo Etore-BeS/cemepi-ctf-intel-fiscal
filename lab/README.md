@@ -96,7 +96,8 @@ Reexecutar uma parte (só quando a fonte dela mudar; o código roda e usa o cach
 ```fish
 cd ~/Code/cemepi-lab
 uv run --no-sync python lab/paper_eda/_gerar_paginas.py        # regera as partes a partir do notebook (só leitura)
-uv run --no-sync quarto render lab/paper_eda/04_parte_b2.qmd   # executa a parte e atualiza lab/_freeze/paper_eda/04_parte_b2/
+uv run --no-sync quarto render lab/paper_eda/04_parte_b2.qmd --profile partes   # executa a parte e atualiza lab/_freeze/paper_eda/04_parte_b2/
+# (sem --profile partes a parte é renderizada como arquivo solto, fora do projeto, e o _freeze NÃO muda)
 uv run --no-sync python lab/paper_eda/_pagina_unica.py         # remonta lab/paper_eda/index.qmd (avisa se um freeze estiver velho)
 rm -f lab/_site/paper_eda/0*.html                              # o render solto da parte deixa um HTML que não é página do site
 uv run --no-sync quarto render lab                             # site inteiro, sem reexecutar nada
