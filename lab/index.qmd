@@ -43,7 +43,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
    O k=2 separa autuação e declarado. O k=4 subdivide a autuação por situação (suspensa, inscrita, liberada para ajuizamento) e tem um grupo pequeno.
    **Opções:** (a) k=2, mais estável entre bases; (b) k=4, mais informativo e com estabilidade aceitável; (c) mostrar os dois.
-   **Proposta:** a decidir. A página não escolhe k.
+   **Decisão (27/10/2026, IMP-13):** k=4, por decisão do autor. A página do K-means passa a mostrar k=4 como solução principal e k=2 a 8 como diagnóstico.
 2. **Pergunta:** a correção da figura 5.18 é a pedida?
    **Evidência:** [K-means no top 1%](paper_eda/index.qmd#lab-km), seção 5.18. No artigo, o primeiro componente do PCA era dominado pelo número de pagamentos, por causa da escala robusta com IQR zero, e as cores de dois grupos eram quase iguais. A página refaz o PCA com a escala usada na distância de Gower e com uma paleta distinta.
    **Opções:** (a) a correção é essa; (b) o pedido era outro (eixo, rótulo, tipo de gráfico).

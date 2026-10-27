@@ -385,8 +385,8 @@ A versão corrigida (PCA na escala do Gower e t-SNE) está em [K-means no top 1%
     173: f""":::{{.callout-warning}}
 ## Escolha do k
 O paper escolhe o número de grupos do hierárquico automaticamente, pela maior silhueta (`K_STAR`). Isso só reproduz o
-paper: **o k fica para o Étore decidir**. O K-means com 100 inicializações por k, com perfis de k = 2, 3 e 4, está em
-[K-means no top 1%]({LINK_KM}).
+paper. **No laboratório, a solução principal é o K-means com k = 4, por decisão do autor (IMP-13, 27/10/2026).** O K-means
+com 100 inicializações por k, com os perfis de k = 4 e o diagnóstico de k = 2 a 8, está em [K-means no top 1%]({LINK_KM}).
 :::""",
     215: f""":::{{.callout-note}}
 ## B.8.5 com valor no eixo Y
