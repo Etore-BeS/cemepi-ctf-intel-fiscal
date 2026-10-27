@@ -74,13 +74,14 @@ pl.DataFrame([{"base": n, "CDAs": r["f"].height, "valor mínimo (R$ mi)": float(
 
 ## B.5.18 Estrutura de distância (corrigida)
 
-**O que estava errado no gráfico do paper.** No painel de componentes principais (PCA) do paper, o primeiro componente é dominado pelo **número de pagamentos**. Essa variável fica na escala bruta porque o IQR dela é zero (75% das CDAs não têm pagamento), e por isso quase todos os pontos se amontoam em PC1 ≈ 0. Além disso, as cores de "declarado" e "outro" eram dois tons de verde-petróleo quase iguais.
+**O que estava errado no gráfico do paper.** No painel de componentes principais (PCA) do paper, o primeiro componente é dominado pelo **número de pagamentos**. Essa variável fica na escala bruta porque o IQR dela é zero (mais de 75% das CDAs não têm pagamento; o número exato está no "Como ler" da figura), e por isso quase todos os pontos se amontoam em PC1 ≈ 0. Além disso, as cores de "declarado" e "outro" eram dois tons de verde-petróleo quase iguais.
 
 **O que foi corrigido:** o PCA passa a ser calculado na mesma escala do Gower e do K-means (amplitude e one-hot), as três origens recebem cores bem distintas e a tabela mostra a variância explicada e as cargas. O t-SNE continua calculado sobre o Gower de uma subamostra de 5.000 CDAs. Os três painéis usam a mesma subamostra.
 
 ```{python}
 #| label: fig-b518
-#| fig-cap: "Top 1%, base dez/2025. Esquerda: PCA como no paper (escala mediana/IQR). Centro: PCA corrigido (escala do Gower). Direita: t-SNE sobre a distância de Gower. Subamostra de 5.000 CDAs em mapa de densidade 2D (60 × 60 células; tom = CDAs por célula) com o contorno de cada origem na cor dela (DADOS-14: sem um ponto por CDA)."
+#| fig-cap: "Top 1%, base dez/2025, subamostra de 5.000 CDAs. Colunas: PCA como no paper (escala mediana/IQR; eixo horizontal em log), PCA corrigido (escala do Gower) e t-SNE sobre a distância de Gower. Linhas: todas as origens e cada origem com pelo menos 5 CDAs. Tom = CDAs por célula (grade 50 × 50, escala log); contorno cinza = todas as origens (DADOS-14: sem um ponto por CDA)."
+import _b518
 r = R["2025-12"]
 X_km = K.kmeans_design(r["X_raw"], r["X_cat"])
 r["X_km"] = X_km
@@ -94,20 +95,30 @@ emb_tsne = B.collect(B.cached("B.5.18:tsne", lambda: pl.DataFrame(
 r["tsne"] = emb_tsne
 origem = r["f"]["ICMS_ORIGIN"].to_numpy()
 ROT = {"declared": "declarado", "assessed": "autuado", "other": "outro"}
-fig = make_subplots(rows=1, cols=3, horizontal_spacing=0.07,
-                    subplot_titles=("PCA do paper (mediana/IQR)", "PCA corrigido (escala Gower)", "t-SNE (Gower)"))
-for i, o in enumerate(["declared", "assessed", "other"]):
-    m = origem[r["sub"]] == o
-    rows = r["sub"][m]
-    kw = dict(mode="markers", marker=dict(size=3, color=B.color(i), opacity=0.6), legendgroup=o)
-    fig.add_trace(go.Scatter(x=emb_old[rows, 0], y=emb_old[rows, 1], name=ROT[o], **kw), 1, 1)
-    fig.add_trace(go.Scatter(x=emb_new[rows, 0], y=emb_new[rows, 1], showlegend=False, **kw), 1, 2)
-    fig.add_trace(go.Scatter(x=emb_tsne["x"].to_numpy()[m], y=emb_tsne["y"].to_numpy()[m], showlegend=False, **kw), 1, 3)
-for c, (a, b) in enumerate((("PC1", "PC2"), ("PC1", "PC2"), ("t-SNE 1", "t-SNE 2")), start=1):
-    fig.update_xaxes(title_text=a, row=1, col=c); fig.update_yaxes(title_text=b, row=1, col=c)
-fig.update_layout(height=470, margin=dict(t=50, b=90),
-                  legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.16, yanchor="top"))
+ORDEM = ["declared", "assessed", "other"]
+old_x = np.column_stack([_b518.log_shift(emb_old[:, 0]), emb_old[:, 1]])
+sub = r["sub"]
+fig, omit = _b518.fig_por_origem(
+    [dict(titulo="PCA do paper (mediana/IQR)", xy=old_x[sub], idx=sub, eixo_x="PC1 − mínimo (escala log)", eixo_y="PC2", log_x=True),
+     dict(titulo="PCA corrigido (escala Gower)", xy=emb_new[sub], idx=sub, eixo_x="PC1", eixo_y="PC2"),
+     dict(titulo="t-SNE (Gower)", xy=np.column_stack([emb_tsne["x"].to_numpy(), emb_tsne["y"].to_numpy()]), idx=sub,
+          eixo_x="t-SNE 1", eixo_y="t-SNE 2")],
+    origem, ORDEM, ROT, {o: B.color(i) for i, o in enumerate(ORDEM)})
 fig.show()
+```
+
+```{python}
+#| label: b518-como-ler
+#| output: asis
+_np0 = float(np.mean(r["f"]["n_payments"].to_numpy() == 0))
+_cont = {ROT[o]: int((origem == o).sum()) for o in ORDEM}
+print(f"**Como ler.** Cada coluna é uma projeção e cada linha mostra só as CDAs de uma origem, na mesma janela da coluna; o "
+      f"tom é o número de CDAs na célula (mais escuro, mais CDAs) e o contorno cinza é o total, para comparar onde cada origem "
+      f"se concentra. No PCA do paper o PC1 é quase só o número de pagamentos ({100 * _np0:.0f}% das CDAs do top 1% não têm "
+      f"pagamento e ficam empilhadas no mínimo), por isso o eixo está em log de (PC1 − mínimo + 1). "
+      f"Base: " + ", ".join(f"{k} {_b518._br(v)}" for k, v in _cont.items()) + " CDAs"
+      + (f". {', '.join(omit).capitalize()} tem menos de {_b518.MIN_N} CDAs e não ganha linha própria (nem contorno): mostrar a "
+         f"posição de tão poucas CDAs seria mostrar CDAs individuais." if omit else "."))
 ```
 
 ```{python}

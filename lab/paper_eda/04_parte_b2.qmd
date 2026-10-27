@@ -709,9 +709,14 @@ feature_summary
 
 :::{.callout-warning}
 ## B.5.18: figura do paper e versão corrigida
-A figura abaixo é a do paper (PCA com escala mediana/IQR), apontada como errada na reunião de 23/10/2026.
-A versão corrigida (PCA na escala do Gower e t-SNE) está em [K-means no top 1%](../eda/2026-10-23_kmeans_top1.qmd) e está
-**a validar pelo Étore**.
+A figura abaixo usa as projeções do paper (PCA na escala mediana/IQR e t-SNE sobre o Gower), **redesenhadas no lab para
+ficarem legíveis (IMP-11, 27/10/2026)**: uma linha com todas as origens e uma por origem da CDA, contagem de CDAs por
+célula no lugar de pontos, e o PC1 em escala log de (PC1 − mínimo + 1), porque a maior parte das CDAs (as sem pagamento)
+fica empilhada no mínimo do PC1.
+
+**Como ler:** cada coluna é uma projeção, com a mesma janela em todas as linhas; o tom é o número de CDAs na célula (mais
+escuro, mais CDAs) e o contorno cinza é o total de todas as origens, para comparar onde cada origem se concentra. Origens
+com menos de 5 CDAs não ganham linha própria. O PCA corrigido (escala do Gower) está em [K-means no top 1%](../eda/2026-10-23_kmeans_top1.qmd).
 :::
 
 ```{python}
@@ -741,17 +746,19 @@ emb_tsne = collect(cached("B.5.18:tsne", lambda: pl.DataFrame(
     TSNE(n_components=2, metric="precomputed", init="random", random_state=SEED).fit_transform(
         np.asarray(D[np.ix_(embed_idx, embed_idx)])), schema=["x", "y"], orient="row"),
     params={**TOP_PARAMS, "n_embed": N_EMBED}))
-fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.08)
+# lab (IMP-11, 27/10/2026): a figura do paper era ilegível (o PC1 é quase só o nº de pagamentos e a maior parte das CDAs
+# fica empilhada no mínimo; as origens se sobrepunham). Mesmas projeções, redesenhadas: uma linha por origem (e todas),
+# contagem de CDAs por célula (sem ponto por CDA), PC1 em log de (PC1 − mínimo + 1). Ver lab/eda/_b518.py.
+import _b518
 origin = features["ICMS_ORIGIN"].to_numpy()
-for i, k in enumerate(features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()):
-    rows = np.where(origin == k)[0]
-    sub_rows = np.where(origin[embed_idx] == k)[0]
-    fig.add_trace(go.Scatter(x=emb_pca[rows, 0], y=emb_pca[rows, 1], mode="markers", marker=dict(size=2, color=color(i)), name=k), 1, 1)
-    fig.add_trace(go.Scatter(x=emb_tsne["x"].to_numpy()[sub_rows], y=emb_tsne["y"].to_numpy()[sub_rows], mode="markers",
-                               marker=dict(size=2, color=color(i)), showlegend=False), 1, 2)
-fig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08))
-fig.update_xaxes(title_text="PC1", row=1, col=1); fig.update_yaxes(title_text="PC2", row=1, col=1)
-fig.update_xaxes(title_text="t-SNE 1", row=1, col=2); fig.update_yaxes(title_text="t-SNE 2", row=1, col=2)
+_ord = features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()
+_rot = {"declared": "declarado", "assessed": "autuado", "other": "outro"}
+fig, _omit = _b518.fig_por_origem(
+    [dict(titulo="PCA do paper (mediana/IQR)", xy=np.column_stack([_b518.log_shift(emb_pca[:, 0]), emb_pca[:, 1]]),
+          idx=np.arange(len(origin)), eixo_x="PC1 − mínimo (escala log)", eixo_y="PC2", log_x=True),
+     dict(titulo="t-SNE (Gower)", xy=np.column_stack([emb_tsne["x"].to_numpy(), emb_tsne["y"].to_numpy()]), idx=embed_idx,
+          eixo_x="t-SNE 1", eixo_y="t-SNE 2")],
+    origin, _ord, {k: _rot.get(k, k) for k in _ord}, {k: color(i) for i, k in enumerate(_ord)})
 save_fig(fig, "fig_top_embedding", width="double")
 fig
 ```

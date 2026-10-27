@@ -360,7 +360,7 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
    **Aviso:** a correlação anual emprego × estoque vem da tendência comum e da queda de 2020, que parece efeito da
    extração do DEBITO (EQ-02/EQ-05), e não deve ir para o texto. [1.6](#lab-selic) · [D.3 Annual correlations](#lab-emprego) ·
    [antes e depois](#lab-macro).
-7. **Figura 5.18 corrigida, a validar (IMP-11).** [B.5.18 Distance structure](#lab-b518) · [L.1 K-means no top 1%]({LINK_KM}).
+7. **Figura 5.18 legível (IMP-11, 27/10/2026):** um painel por origem, contagem de CDAs por célula e PC1 em escala log, no B.5.18 e no L.1. [B.5.18 Distance structure](#lab-b518) · [L.1 K-means no top 1%]({LINK_KM}).
 8. **K-means com k = 4 como solução principal (IMP-13, CTF-03).** k = 4 por decisão do autor (27/10/2026); k = 2 a 8 ficam como diagnóstico. [B.5.19 Clustering](#lab-k) ·
    [K-means no top 1%]({LINK_KM}).
 9. **Qualidade do DEBITO sinalizada, sem correção.** Fotos ausentes (2018-12; 2020-10 a 12), parciais (2018-11, 2024-03,

@@ -292,6 +292,9 @@ def macro_monthly() -> pl.DataFrame:'''),
       '''    [pl.col(c).last() if c in LOG_VARS
      else pl.col(c).filter(pl.col("month").dt.month().is_in([3, 6, 9, 12])).mean() if c in PNAD_VARS  # lab: 4 trimestres civis
      else pl.col(c).mean() for c in MACRO_VARS]).sort("year")'''),
+    # B.5.18 (IMP-11, 27/10/2026): figura legível, um painel por origem, só contagens por célula
+    P(172, 'fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.08)\norigin = features["ICMS_ORIGIN"].to_numpy()\nfor i, k in enumerate(features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()):\n    rows = np.where(origin == k)[0]\n    sub_rows = np.where(origin[embed_idx] == k)[0]\n    fig.add_trace(go.Scattergl(x=emb_pca[rows, 0], y=emb_pca[rows, 1], mode="markers", marker=dict(size=2, color=color(i)), name=k), 1, 1)\n    fig.add_trace(go.Scattergl(x=emb_tsne["x"].to_numpy()[sub_rows], y=emb_tsne["y"].to_numpy()[sub_rows], mode="markers",\n                               marker=dict(size=2, color=color(i)), showlegend=False), 1, 2)\nfig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08))\nfig.update_xaxes(title_text="PC1", row=1, col=1); fig.update_yaxes(title_text="PC2", row=1, col=1)\nfig.update_xaxes(title_text="t-SNE 1", row=1, col=2); fig.update_yaxes(title_text="t-SNE 2", row=1, col=2)',
+      '# lab (IMP-11, 27/10/2026): a figura do paper era ilegível (o PC1 é quase só o nº de pagamentos e a maior parte das CDAs\n# fica empilhada no mínimo; as origens se sobrepunham). Mesmas projeções, redesenhadas: uma linha por origem (e todas),\n# contagem de CDAs por célula (sem ponto por CDA), PC1 em log de (PC1 − mínimo + 1). Ver lab/eda/_b518.py.\nimport _b518\norigin = features["ICMS_ORIGIN"].to_numpy()\n_ord = features["ICMS_ORIGIN"].unique(maintain_order=True).to_list()\n_rot = {"declared": "declarado", "assessed": "autuado", "other": "outro"}\nfig, _omit = _b518.fig_por_origem(\n    [dict(titulo="PCA do paper (mediana/IQR)", xy=np.column_stack([_b518.log_shift(emb_pca[:, 0]), emb_pca[:, 1]]),\n          idx=np.arange(len(origin)), eixo_x="PC1 − mínimo (escala log)", eixo_y="PC2", log_x=True),\n     dict(titulo="t-SNE (Gower)", xy=np.column_stack([emb_tsne["x"].to_numpy(), emb_tsne["y"].to_numpy()]), idx=embed_idx,\n          eixo_x="t-SNE 1", eixo_y="t-SNE 2")],\n    origin, _ord, {k: _rot.get(k, k) for k in _ord}, {k: color(i) for i, k in enumerate(_ord)})'),
     # A.1.4: no lugar da amostra de 10 linhas (registro individual), só o esquema da tabela
     P(43, None, '''# lab: no lugar da amostra de 10 linhas da foto (registros individuais), o esquema da tabela DEBITO,
 # sem as colunas de pessoa. O laboratório só mostra agregados.
@@ -378,9 +381,14 @@ dezembro de 2025, está na página [Concentração e liquidação]({LINK_CONC}).
 :::""",
     171: f""":::{{.callout-warning}}
 ## B.5.18: figura do paper e versão corrigida
-A figura abaixo é a do paper (PCA com escala mediana/IQR), apontada como errada na reunião de 23/10/2026.
-A versão corrigida (PCA na escala do Gower e t-SNE) está em [K-means no top 1%]({LINK_KM}) e está
-**a validar pelo Étore**.
+A figura abaixo usa as projeções do paper (PCA na escala mediana/IQR e t-SNE sobre o Gower), **redesenhadas no lab para
+ficarem legíveis (IMP-11, 27/10/2026)**: uma linha com todas as origens e uma por origem da CDA, contagem de CDAs por
+célula no lugar de pontos, e o PC1 em escala log de (PC1 − mínimo + 1), porque a maior parte das CDAs (as sem pagamento)
+fica empilhada no mínimo do PC1.
+
+**Como ler:** cada coluna é uma projeção, com a mesma janela em todas as linhas; o tom é o número de CDAs na célula (mais
+escuro, mais CDAs) e o contorno cinza é o total de todas as origens, para comparar onde cada origem se concentra. Origens
+com menos de 5 CDAs não ganham linha própria. O PCA corrigido (escala do Gower) está em [K-means no top 1%]({LINK_KM}).
 :::""",
     173: f""":::{{.callout-warning}}
 ## Escolha do k
