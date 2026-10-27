@@ -85,8 +85,8 @@ EXTRA = {
 STAR_TEXT = ("Estrelas de significância nas tabelas e nos mapas de correlação: \\* p ≤ 0,10; \\*\\* p ≤ 0,05; \\*\\*\\* "
              "p ≤ 0,01 (sem correção para testes múltiplos). Nas tabelas, cada coluna de p ganha ao lado uma coluna "
              "“(sig.)” com as estrelas, e as linhas com p ≤ 0,10 na primeira coluna de p ficam em **negrito** (sem cor de "
-             "fundo). A legenda acima de cada tabela diz qual coluna define o negrito. Tabelas com mais de 400 linhas saem "
-             "resumidas, sem estrelas nem negrito, e a legenda avisa. Nos mapas de calor, a cor é o sinal e a força da "
+             "fundo). A legenda acima de cada tabela diz qual coluna define o negrito. Todas as tabelas saem completas, "
+             "com estrelas e negrito em todas as linhas; as com mais de 25 linhas ficam numa caixa rolável. Nos mapas de calor, a cor é o sinal e a força da "
              "correlação e as estrelas são a significância.")
 
 HEAD_RE = re.compile(r"^(#{2,4}) (.+?)\s*$")

@@ -49,17 +49,33 @@ def _p_columns(df):
     return [c for c in df.columns if _PCOL.match(c) and not _NOT_P.match(c) and df.schema[c] in (_pl.Float64, _pl.Float32)]
 
 _SIG_LEG = "* p ≤ 0,10; ** p ≤ 0,05; *** p ≤ 0,01"
-_MAX_ROWS_SIG = 400  # acima disso a tabela sai como o polars mostra (só as primeiras e últimas linhas): sem estrelas nem negrito
+# Tabelas completas (27/10/2026, pedido do Étore: "todas as linhas pra demonstrar todo o dado das tabelas"): nenhuma tabela
+# é cortada e as estrelas/negrito valem para todas. Acima de _MAX_VISIVEL linhas, a tabela vai para uma caixa rolável
+# (só CSS, funciona offline no HTML único), com o cabeçalho fixo. Tabela com coluna identificadora (CDA, CNPJ, CPF, nome,
+# hash) NÃO é expandida: sai como o polars mostra, com aviso (o laboratório só mostra agregados).
+_MAX_VISIVEL = 25
+_IDCOL = _re.compile(r"^(ID_DEBITO|ID_CDA|CDA|NUMERO_CDA|CNPJ.*|CPF.*|NOME.*|.*_hash|hash.*|raiz_cnpj.*)$", _re.I)
+_ROLAVEL_CSS = ("<style>.lab-tabela-rolavel{max-height:34em;overflow:auto;border:1px solid #d9d9d9;margin-bottom:.25rem}"
+                ".lab-tabela-rolavel thead th{position:sticky;top:0;background:#fff;z-index:1}</style>")
+
+def _rolavel(html: str, n: int) -> str:
+    if n <= _MAX_VISIVEL:
+        return html
+    return (_ROLAVEL_CSS + f"<div class='lab-tabela-rolavel'>{html}</div>"
+            f"<p class='lab-sig-legenda' style='font-size:0.8em'>Tabela completa: {n} linhas (role dentro da caixa).</p>")
 
 def _df_html(df):
     import polars as _pl
+    # só conta como identificador se for texto (colunas "CNPJ"/"CPF" com contagens por ano são agregados)
+    ids = [c for c in df.columns if _IDCOL.match(c) and df.schema[c] in (_pl.Utf8, _pl.Categorical)]
+    if ids:
+        note = (f"<p class='lab-sig-legenda' style='font-size:0.8em;margin-bottom:.25rem'>Tabela com coluna identificadora "
+                f"({', '.join(ids)}): não expandida.</p>")
+        return note + df._repr_html_()
     pcs = _p_columns(df)
     if not pcs:
-        return df._repr_html_()
-    if df.height > _MAX_ROWS_SIG:
-        note = (f"<p class='lab-sig-legenda' style='font-size:0.8em;margin-bottom:.25rem'>Tabela longa ({df.height} linhas): "
-                f"mostrada resumida, sem estrelas nem negrito. Significância pela coluna {pcs[0]}: {_SIG_LEG}.</p>")
-        return note + df._repr_html_()
+        with _pl.Config(tbl_rows=-1, tbl_cols=-1, fmt_str_lengths=500):
+            return _rolavel(df._repr_html_(), df.height)
     pd_ = df.to_pandas()
     for c in pcs[::-1]:
         pd_.insert(list(pd_.columns).index(c) + 1, f"{c} (sig.)", [stars(v) for v in pd_[c]])
@@ -72,7 +88,7 @@ def _df_html(df):
     outras = f" Estrelas em todas as colunas de p ({', '.join(pcs)})." if len(pcs) > 1 else ""
     note = (f"<p class='lab-sig-legenda' style='font-size:0.8em;margin-bottom:.25rem'><b>Negrito</b> = linha com "
             f"{main} ≤ 0,10. Coluna “(sig.)”: {_SIG_LEG}.{outras}</p>")
-    return note + sty.to_html()
+    return note + _rolavel(sty.to_html(), df.height)
 
 try:
     get_ipython().display_formatter.formatters["text/html"].for_type_by_name("polars.dataframe.frame", "DataFrame", _df_html)
