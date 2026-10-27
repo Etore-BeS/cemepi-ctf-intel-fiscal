@@ -43,6 +43,7 @@ LAB_PAGES = [
      "lab-macro", "mac"),
     ("dados/2026-10-26_cnpj_enrich", "L.4", "Enriquecimento CNPJ (RFB ref. 2026-03)", "lab-cnpj-rfb", "rfb"),
     ("eda/2026-10-23_eda_completo", "L.5", "EDA completo (conversão fiel do notebook, com 2026 parcial)", "lab-edac", "edac"),
+    ("dados/2026-10-27_cnpj_geo", "L.6", "CNPJs devedores por município de SP (GEO-01)", "lab-cnpj-geo", "geo"),
 ]
 LAB_ANCHOR = {src.split("/")[-1]: anc for src, _, _, anc, _ in LAB_PAGES}
 LAB_PREFIX = {src.split("/")[-1]: pfx for src, _, _, _, pfx in LAB_PAGES}
@@ -371,12 +372,15 @@ aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem n
 11. **Só agregados.** Nada por CPF, nome ou CDA individual. [A.1.4](#lab-agregados) · [B.5.24](#lab-agregados-b524).
 12. **Todas as análises do laboratório nesta página (CTF-03).** As entradas de `lab/eda/` e `lab/dados/` estão inteiras em
     [L. Análises do laboratório](#s-lab), com subtópicos no sumário: [L.1 K-means](#lab-km) · [L.2 Concentração](#lab-conc) ·
-    [L.3 Selic over e checagem macro](#lab-macro) · [L.4 Enriquecimento CNPJ](#lab-cnpj-rfb) · [L.5 EDA completo](#lab-edac).
+    [L.3 Selic over e checagem macro](#lab-macro) · [L.4 Enriquecimento CNPJ](#lab-cnpj-rfb) · [L.5 EDA completo](#lab-edac) · [L.6 CNPJs por município](#lab-cnpj-geo).
 13. **Gráficos agregados antes de publicar (DADOS-14).** Nenhuma figura leva mais um valor por CDA ou por devedor: os
     histogramas viram barras com a contagem por faixa (B.5.4, B.5.5, B.5.16, B.8.5 em R$, B.9.3), as caixas do B.2.3 são
     desenhadas com quartis, cercas e média já calculados, sem pontos individuais, as nuvens de pontos do B.5.18 e do
     [L.1](#lab-km) viram mapa de densidade 2D (60 × 60 células; contorno de cada grupo na cor dele) e as curvas longas
     (B.5.9, Lorenz do B.5.13) ficam com 500 pontos. Nada usa WebGL.
+14. **CNPJs devedores por município de SP (GEO-01, 27/10/2026).** Mapa coroplético (malha do IBGE, sem tiles externos) com
+    contagem, valor e CNPJs devedores por mil estabelecimentos ativos; município do cadastro RFB 2026-03; municípios com
+    menos de 5 CNPJs suprimidos. [L.6](#lab-cnpj-geo).
 :::
 
 ::: {{.callout-warning title="Qualidade do DEBITO (só sinalizado, nada corrigido)"}}
