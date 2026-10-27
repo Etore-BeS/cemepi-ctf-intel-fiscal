@@ -412,8 +412,12 @@ fig
 
 :::{.callout-warning}
 ## Checagem das correlações anuais
-A correlação entre emprego e estoque é guiada pela tendência comum e por 2020 (n = 10 anos). A checagem está em
-[Selic over e checagem](../eda/2026-10-23_macro_selic_over_checagem.qmd), seção 2.5. Leia os mapas anuais abaixo com isso em mente.
+**Aviso (MAC-07): não use a correlação anual entre emprego e estoque no texto.** Ela vem da tendência comum e da
+queda de 2020: no painel anual do EDA completo, o estoque cai de R$ 410,6 bi (2019) para R$ 328,9 bi (2020), junto com a contagem de CDAs,
+o que parece efeito da extração do DEBITO, não da economia. Isso só pode ser corrigido com a DEBITO corrigida
+(EQ-02/EQ-05); até lá, fica este aviso. Com n = 10 anos, nenhum mapa anual abaixo sustenta afirmação. O que deu para
+corrigir (defasagem única, sem 2026, PIB e crédito reais, PNAD em trimestres civis) já está aplicado aqui e está
+detalhado, com antes e depois, em [Selic over e checagem](../eda/2026-10-23_macro_selic_over_checagem.qmd), seções 2.5 e 3.
 :::
 
 #### D.3.1 Annual portfolio aggregates
@@ -431,7 +435,9 @@ A correlação entre emprego e estoque é guiada pela tendência comum e por 202
 ```{python}
 #| label: c296
 macro_a = macro_m.with_columns(pl.col("month").dt.year().alias("year")).group_by("year").agg(
-    [pl.col(c).last() if c in LOG_VARS else pl.col(c).mean() for c in MACRO_VARS]).sort("year")
+    [pl.col(c).last() if c in LOG_VARS
+     else pl.col(c).filter(pl.col("month").dt.month().is_in([3, 6, 9, 12])).mean() if c in PNAD_VARS  # lab: 4 trimestres civis
+     else pl.col(c).mean() for c in MACRO_VARS]).sort("year")
 ann = annual.select("year", "stock", "collected", "portfolio_rate", "share_paying", "n_cda").join(new_year.select("year", "n_new"), on="year", how="left")
 ann_m = ann.join(macro_a, on="year", how="left").sort("year")
 Y_ANNUAL = ["portfolio_rate", "share_paying", "collected", "stock", "n_new"]
@@ -607,7 +613,7 @@ def robust_monthly() -> list[dict]:
         rows.append({"y": r["y"], "x": r["x"], "lag": lag, "frequency": "monthly", "r": est, "ci_low": lo, "ci_high": hi, "p_boot": p})
     return rows
 
-robust = pl.DataFrame(cached_json("D.5.1", robust_monthly, params={"block": 12, "n_boot": 999}))
+robust = pl.DataFrame(cached_json("D.5.1", robust_monthly, params={"block": 12, "n_boot": 999, "macro": "MAC-07: PIB e crédito reais, PNAD civil"}))
 robust.sort("p_boot").head(10)
 ```
 

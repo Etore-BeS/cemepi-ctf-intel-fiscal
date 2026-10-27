@@ -1046,13 +1046,15 @@ MACRO_SERIES = {
     7478: ("ipca15", "IPCA-15 inflation (% per month)", "mean"),
     189: ("igpm", "IGP-M inflation (% per month)", "mean"),
     1: ("ptax", "PTAX exchange rate (R$/US$)", "mean"),
-    4380: ("gdp_monthly", "Monthly GDP, current prices (log)", "log"),
-    20540: ("credit_firms", "Credit to legal entities (log of balance)", "log"),
-    24369: ("unemployment", "Unemployment rate (%)", "mean"),
-    24379: ("employed", "Employed persons (thousand)", "mean"),
+    4380: ("gdp_monthly", "Monthly GDP, R$ of Dec 2025, IPCA-deflated (log)", "log"),  # lab: era preços correntes
+    20540: ("credit_firms", "Credit to legal entities, R$ of Dec 2025, IPCA-deflated (log of balance)", "log"),  # lab: era nominal
+    24369: ("unemployment", "Unemployment rate (%; PNAD rolling quarter ending in the month)", "mean"),
+    24379: ("employed", "Employed persons (thousand; PNAD rolling quarter ending in the month)", "mean"),
     29037: ("hh_indebtedness", "Household indebtedness (% of income)", "mean"),
     29034: ("hh_commitment", "Household income commitment (%, s.a.)", "mean"),
 }
+
+PNAD_VARS = ["unemployment", "employed"]  # lab: trimestre móvel; no trimestre e no ano só os trimestres civis
 
 def macro_monthly() -> pl.DataFrame:
     codes = ", ".join(str(c) for c in MACRO_SERIES)
@@ -1066,19 +1068,24 @@ def macro_monthly() -> pl.DataFrame:
                            pl.col("codigo_serie").replace_strict({k: v[0] for k, v in MACRO_SERIES.items()}).alias("var"))
     wide = raw.group_by("month", "var").agg(pl.col("valor").mean()).pivot(on="var", index="month", values="valor").sort("month")
     wide = wide.with_columns(pl.all().exclude("month").forward_fill())
+    # lab (MAC-07): índice do IPCA encadeado das variações mensais (SGS 433), base dez/2025 = 1; PIB e crédito PJ reais
+    wide = wide.with_columns(((1 + pl.col("ipca") / 100).cum_prod()).alias("_ipca_idx"))
+    _base = wide.filter(pl.col("month") == pl.date(LAB_SNAP[0], LAB_SNAP[1], 1))["_ipca_idx"][0]
+    wide = wide.with_columns((pl.col("gdp_monthly") / (pl.col("_ipca_idx") / _base)).alias("gdp_monthly"),
+                             (pl.col("credit_firms") / (pl.col("_ipca_idx") / _base)).alias("credit_firms")).drop("_ipca_idx")
     logs = [v[0] for v in MACRO_SERIES.values() if v[2] == "log"]
     wide = wide.with_columns([pl.col(c).log() for c in logs])
     return wide.filter(pl.col("month").is_between(pl.date(YEARS[0] - 4, 1, 1), pl.date(LAB_SNAP[0], LAB_SNAP[1], 1)))
 
-macro_m = collect(cached(LAB_NS + "1.6:monthly", macro_monthly, params={"selic": "SGS 4189", "cut": LAB_EXTRACT}))
+macro_m = collect(cached(LAB_NS + "1.6:monthly", macro_monthly, params={"selic": "SGS 4189", "cut": LAB_EXTRACT, "deflator": "IPCA 433, base 2025-12", "pnad": "trimestre civil"}))
 MACRO_VARS = [v[0] for v in MACRO_SERIES.values()]
 LOG_VARS = [v[0] for v in MACRO_SERIES.values() if v[2] == "log"]
 macro_q = (macro_m.with_columns(pl.col("month").dt.truncate("1q").alias("quarter"))
-           .group_by("quarter").agg([pl.col(c).last() if c in LOG_VARS else pl.col(c).mean() for c in MACRO_VARS])
+           .group_by("quarter").agg([pl.col(c).last() if c in LOG_VARS or c in PNAD_VARS else pl.col(c).mean() for c in MACRO_VARS])  # lab: PNAD = trimestre civil
            .sort("quarter"))
 macro_dictionary = pl.DataFrame([{"variable": v[0], "description": v[1], "sgs_code": k,
                                   "monthly_aggregation": "log of monthly mean" if v[2] == "log" else "monthly mean",
-                                  "quarterly_aggregation": "end of quarter" if v[2] == "log" else "quarterly mean"}
+                                  "quarterly_aggregation": "end of quarter" if v[2] == "log" or v[0] in PNAD_VARS else "quarterly mean"}
                                  for k, v in MACRO_SERIES.items()])
 save_tab(macro_dictionary, "tab_macro_dictionary")
 macro_dictionary

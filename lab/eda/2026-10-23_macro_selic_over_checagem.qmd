@@ -169,7 +169,7 @@ uso = pd.DataFrame([
     ("ptax", 1, "R$/US$", "média do mês da série diária", "Nível nominal com tendência."),
     ("pib_mensal", 4380, "R$ milhões correntes", "valor do mês, sem log nem deflator", "Nominal: cresce com a inflação, como o estoque. Correlação em nível capta tendência comum."),
     ("credito_pj", 20540, "R$ milhões (saldo)", "valor do mês, sem log nem deflator", "Saldo nominal: mesma observação do PIB."),
-    ("desocupacao", 24369, "%", "valor do mês", "PNAD Contínua. Conferir nos metadados do SGS se o valor mensal é de trimestre móvel (meses vizinhos se sobrepõem)."),
+    ("desocupacao", 24369, "%", "valor do mês", "PNAD Contínua: o valor mensal é o trimestre móvel que termina no mês (meses vizinhos se sobrepõem). Ver seção 3."),
     ("ocupados", 24379, "mil pessoas", "valor do mês", "Nível com tendência, mesma observação da desocupação sobre trimestre móvel. Ver 2.5."),
     ("comprometimento", 29034, "%", "valor do mês", "Divulgação com defasagem (última data na tabela acima)."),
     ("endividamento", 29037, "%", "valor do mês", "Divulgação com defasagem."),
@@ -278,13 +278,144 @@ ann10.select("ano", (pl.col("estoque_sum") / 1e9).alias("estoque R$ bi"), (pl.co
 
 **O que não concluir:** com 9 ou 10 pontos, nenhuma dessas correlações sustenta afirmação no artigo.
 
+## 3. Correlações corrigidas (MAC-07, 26/10/2026)
+
+O que deu para corrigir, a partir da checagem acima:
+
+| Problema (seção) | Correção aplicada |
+|---|---|
+| Duas convenções de defasagem (2.2) | Uma só: **Y no mês t contra a macro em t − k**, k = 0 a 3 (a macro antecede). As linhas `Y_lk` do EDA completo (Y defasado) saem. |
+| 2026 parcial nas correlações (2.3) | Só **2016-01 a 2025-12** (120 meses; 10 anos). |
+| PIB e crédito PJ nominais (2.2) | **Deflacionados pelo IPCA** (SGS 433): índice encadeado das variações mensais, base dez/2025 = 1. Ficam em R$ de dez/2025. |
+| PNAD Contínua (2.2) | Confirmado nos metadados do IBGE e do SGS: o valor mensal de desocupação (24369) e ocupados (24379) é o **trimestre móvel** que termina no mês, e meses vizinhos repetem dois meses de entrevistas. No anual, usa-se a média dos quatro trimestres civis (mar, jun, set, dez). No mensal, o valor fica como está, com esta ressalva: a variação mensal é a de um trimestre móvel, não a de um mês. |
+| Selic | Over (4189) no lugar da meta (MAC-03). |
+| Queda de 2020 no estoque (2.5) | **Não dá para corrigir agora:** depende da tabela DEBITO corrigida (EQ-02/EQ-05). Ver o aviso abaixo. |
+
+::: {.callout-warning title="Aviso: emprego × estoque e o ano de 2020"}
+A correlação anual entre estoque e ocupados se apoia na tendência comum e na queda de 2020. Nesse ano o estoque do painel cai
+de R$ 410,6 bi para R$ 328,9 bi e a contagem de CDAs cai junto, o que parece efeito da extração do DEBITO, não da economia.
+Até a DEBITO corrigida chegar (EQ-02/EQ-05), nenhuma correlação anual com o estoque deve ir para o texto do artigo.
+:::
+
+```{python}
+#| label: correcao-base
+# IPCA: índice encadeado das variações mensais (% no mês), base dez/2025 = 1
+ip = wide.select("mes", "ipca").drop_nulls().sort("mes")
+idx = np.cumprod(1 + ip["ipca"].to_numpy() / 100)
+ip = ip.with_columns(pl.Series("indice_ipca", idx))
+base = float(ip.filter(pl.col("mes") == FIM)["indice_ipca"][0])
+ip = ip.with_columns(pl.col("indice_ipca") / base)
+X_ANT = {"ptax": "ptax", "igpm": "igpm", "selic": "selic_meta", "ipca": "ipca", "pib_mensal": "pib_mensal", "ipca15": "ipca15",
+         "credito_pj": "credito_pj", "desocupacao": "desocupacao", "ocupados": "ocupados",
+         "comprometimento": "comprometimento", "endividamento": "endividamento"}
+real = (wide.join(ip.select("mes", "indice_ipca"), on="mes", how="left")
+        .with_columns((pl.col("pib_mensal") / pl.col("indice_ipca")).alias("pib_mensal"),
+                      (pl.col("credito_pj") / pl.col("indice_ipca")).alias("credito_pj"),
+                      pl.col("selic_over").alias("selic"))
+        .select("mes", *X_ANT.keys()).sort("mes"))
+XS = list(X_ANT)
+print(f"IPCA: {ip['mes'].min()} a {ip['mes'].max()}; base dez/2025; PIB e crédito PJ em R$ de dez/2025.")
+```
+
+```{python}
+#| label: tbl-correcao-mensal
+#| tbl-cap: "Correlações mensais de Pearson, antes (corr_macro_mensal.csv do EDA completo: n = 123 meses, até 2026-03, nominal, meta, Y defasado) e depois (2016-01 a 2025-12, PIB e crédito reais, Selic over, macro defasada). k = 0 é o nível contemporâneo; Δ é a primeira diferença dos dois lados. Ordenado pela maior mudança."
+antes = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_mensal.csv")
+xl = real
+for k in (1, 2, 3):
+    xl = xl.join(real.select(pl.col("mes").dt.offset_by(f"{k}mo"), *[pl.col(c).alias(f"{c}_l{k}") for c in XS]), on="mes", how="left")
+jd = serie.join(xl, on="mes", how="inner").filter(pl.col("mes").is_between(INI, FIM)).sort("mes")
+jdd = jd.with_columns([pl.col(c).diff() for c in jd.columns if c != "mes"])
+linhas = []
+for yc in YS:
+    for xc in XS:
+        for k in ("0", "1", "2", "3", "Δ"):
+            if k == "Δ":
+                sub, a_y, a_x = jdd.select(yc, xc).drop_nulls(), f"d_{yc}", f"d_{xc}"
+                xx = xc
+            else:
+                kk = int(k); xx = xc if kk == 0 else f"{xc}_l{kk}"
+                sub = jd.select(yc, xx).drop_nulls()
+                a_y, a_x = (yc if kk == 0 else f"{yc}_l{kk}"), xc
+            r = float(np.corrcoef(sub[yc], sub[xx])[0, 1])
+            prev = antes.filter((pl.col("y") == a_y) & (pl.col("x") == a_x))
+            linhas.append({"Y (mês t)": yc, "macro": xc, "k": k,
+                           "antes": float(prev["pearson"][0]) if prev.height else np.nan,
+                           "n antes": int(prev["n"][0]) if prev.height else None,
+                           "depois": r, "n depois": sub.height})
+cmp_m = pd.DataFrame(linhas)
+cmp_m["mudança"] = cmp_m["depois"] - cmp_m["antes"]
+cmp_m["mudou de sinal"] = np.sign(cmp_m["antes"]) != np.sign(cmp_m["depois"])
+resumo_m = cmp_m.assign(absd=cmp_m["mudança"].abs()).groupby("macro")["absd"].agg(["median", "max"]).round(3)
+with pd.option_context("display.max_rows", 400):
+    display(cmp_m.sort_values("mudança", key=np.abs, ascending=False).round(3).reset_index(drop=True))
+```
+
+```{python}
+#| label: tbl-correcao-mensal-resumo
+#| tbl-cap: "Resumo da tabela anterior: mudança absoluta mediana e máxima por série macro (todas as combinações de Y e k)."
+resumo_m.rename(columns={"median": "|mudança| mediana", "max": "|mudança| máxima"})
+```
+
+```{python}
+#| label: tbl-correcao-anual
+#| tbl-cap: "Correlações anuais de Pearson, antes (corr_macro_anual_painel.csv, spec média do ano: n = 11, 2016–2026, nominal, meta, PNAD média de 12 trimestres móveis) e depois (2016–2025, n = 10, PIB e crédito reais, Selic over, PNAD média dos 4 trimestres civis), com IC de 95% de Fisher."
+antes_a = can.filter(pl.col("spec") == "media_anual").unique()
+PNAD = ("desocupacao", "ocupados")
+ra = (real.with_columns(pl.col("mes").dt.year().alias("ano"), pl.col("mes").dt.month().alias("m"))
+      .filter(pl.col("ano").is_between(2016, 2025))
+      .group_by("ano").agg(*[(pl.col(c).filter(pl.col("m").is_in([3, 6, 9, 12])).mean() if c in PNAD else pl.col(c).mean()).alias(c)
+                             for c in XS]).sort("ano"))
+anr = agg.join(ra, on="ano", how="inner").filter(pl.col("ano").is_between(2016, 2025)).sort("ano")
+linhas = []
+for yc in ("taxa_carteira", "estoque_sum", "arrec_sum", "n_id"):
+    for xc in XS:
+        r = float(np.corrcoef(anr[yc], anr[xc])[0, 1]); lo, hi = fisher_ci(r, anr.height)
+        prev = antes_a.filter((pl.col("y") == yc) & (pl.col("x") == xc))
+        linhas.append({"Y anual": yc, "macro": xc, "antes": float(prev["pearson"][0]) if prev.height else np.nan,
+                       "n antes": int(prev["n"][0]) if prev.height else None, "depois": r, "n depois": anr.height,
+                       "IC95% inf.": lo, "IC95% sup.": hi})
+cmp_a = pd.DataFrame(linhas)
+cmp_a["mudança"] = cmp_a["depois"] - cmp_a["antes"]
+cmp_a["IC inclui 0"] = (cmp_a["IC95% inf."] <= 0) & (cmp_a["IC95% sup."] >= 0)
+cmp_a.sort_values("mudança", key=np.abs, ascending=False).round(3).reset_index(drop=True)
+```
+
+```{python}
+#| label: tbl-correcao-emprego
+#| tbl-cap: "Estoque anual × ocupados depois das correções (PNAD média dos 4 trimestres civis), nas mesmas variantes da seção 2.5."
+y10c, x10c = anr["estoque_sum"].to_numpy(), anr["ocupados"].to_numpy()
+t10c = anr["ano"].to_numpy().astype(float)
+resc = lambda v: v - np.polyval(np.polyfit(t10c, v, 1), t10c)
+s20 = anr["ano"].to_numpy() != 2020
+sem2021 = ~np.isin(t10c[1:], [2020, 2021])
+pd.DataFrame([
+    linha("original do EDA completo (n = 11, com 2026)", a11["estoque_sum"].to_numpy(), a11["ocupados"].to_numpy()),
+    linha("corrigido: nível, 2016–2025", y10c, x10c),
+    linha("corrigido: nível, sem 2020", y10c[s20], x10c[s20]),
+    linha("corrigido: primeira diferença", np.diff(y10c), np.diff(x10c)),
+    linha("corrigido: primeira diferença, sem as variações que envolvem 2020", np.diff(y10c)[sem2021], np.diff(x10c)[sem2021]),
+    linha("corrigido: desvio da tendência linear", resc(y10c), resc(x10c)),
+    linha("corrigido: desvio da tendência linear, sem 2020", resc(y10c)[s20], resc(x10c)[s20]),
+]).round(3)
+```
+
+**Como ler:** "antes" é o número salvo pelo EDA completo, "depois" é o mesmo par com as correções. No mensal, a maior
+mudança é a do crédito PJ deflacionado (ver o resumo por série). Nas outras séries, a mudança vem do corte em 2025 e,
+nas linhas com k ≥ 1, da troca de convenção de defasagem. No anual, com 10 pontos, os intervalos de confiança são largos
+(colunas de IC), e várias correlações mudam bastante com a troca para valores reais e trimestres civis.
+
+**O que não concluir:** as correções tiram vieses de construção, mas não resolvem o tamanho da amostra (10 anos), a
+autocorrelação das séries mensais nem a queda de 2020 no estoque. A correlação emprego × estoque continua sem uso no texto
+até a DEBITO corrigida.
+
 ## Resumo da checagem
 
 - **Fonte e unidade:** as 11 séries vêm do SGS/BCB, com nome e unidade gravados na tabela. Meta (432) e over (4189) estão na mesma unidade (% a.a.).
 - **Cobertura:** as correlações salvas no EDA completo incluem 2026, que está incompleto. Esta página refaz as contas de 2016 a 2025.
 - **Nominal × real:** PIB mensal e crédito PJ entram em reais correntes, sem deflator nem log. Em nível, a correlação com o estoque nominal capta a tendência comum.
-- **Frequência:** séries diárias (meta, PTAX) viram média do mês. A periodicidade da PNAD Contínua (trimestre móvel ou não) ainda precisa ser conferida nos metadados do SGS.
-- **Defasagens:** há duas convenções no EDA (macro defasada e Y defasado). Daqui em diante, usar só a da macro defasada.
+- **Frequência:** séries diárias (meta, PTAX) viram média do mês. A PNAD Contínua mensal é trimestre móvel (conferido em 26/10/2026); a seção 3 usa os trimestres civis no anual.
+- **Defasagens:** há duas convenções no EDA (macro defasada e Y defasado). A seção 3 usa só a da macro defasada.
 - **Emprego × estoque:** a correlação reproduz (0,873) e se apoia na tendência comum e no vale de 2020, que aparece também na contagem de CDAs. Antes de interpretar, conferir o estoque de 2020 na DEBITO corrigida. Ver 2.5.
 
 ```{python}

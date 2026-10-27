@@ -257,7 +257,41 @@ print(f"Legal-entity CDAs in the source snapshot"""),
         raw = pl.concat([raw.filter(pl.col("codigo_serie") != 4189), _selic_over_raw(raw.schema)])  # lab: 4189 do BCB"""),
     P(31, "pl.date(SNAP_YEAR, SNAP_MONTH, 1)", "pl.date(LAB_SNAP[0], LAB_SNAP[1], 1)"),
     P(31, 'cached("1.6:monthly", macro_monthly)',
-      'cached(LAB_NS + "1.6:monthly", macro_monthly, params={"selic": "SGS 4189", "cut": LAB_EXTRACT})'),
+      'cached(LAB_NS + "1.6:monthly", macro_monthly, params={"selic": "SGS 4189", "cut": LAB_EXTRACT, '
+      '"deflator": "IPCA 433, base 2025-12", "pnad": "trimestre civil"})'),
+    # 1.6 (MAC-07, 26/10/2026): PIB mensal (4380) e crédito PJ (20540) em R$ de dez/2025, deflacionados pelo IPCA (433);
+    # PNAD Contínua (24369, 24379) é trimestre móvel: no trimestre e no ano entram só os trimestres civis (mar/jun/set/dez)
+    P(31, '''    4380: ("gdp_monthly", "Monthly GDP, current prices (log)", "log"),''',
+      '''    4380: ("gdp_monthly", "Monthly GDP, R$ of Dec 2025, IPCA-deflated (log)", "log"),  # lab: era preços correntes'''),
+    P(31, '''    20540: ("credit_firms", "Credit to legal entities (log of balance)", "log"),''',
+      '''    20540: ("credit_firms", "Credit to legal entities, R$ of Dec 2025, IPCA-deflated (log of balance)", "log"),  # lab: era nominal'''),
+    P(31, '''    24369: ("unemployment", "Unemployment rate (%)", "mean"),''',
+      '''    24369: ("unemployment", "Unemployment rate (%; PNAD rolling quarter ending in the month)", "mean"),'''),
+    P(31, '''    24379: ("employed", "Employed persons (thousand)", "mean"),''',
+      '''    24379: ("employed", "Employed persons (thousand; PNAD rolling quarter ending in the month)", "mean"),'''),
+    P(31, '''"quarterly_aggregation": "end of quarter" if v[2] == "log" else "quarterly mean"}''',
+      '''"quarterly_aggregation": "end of quarter" if v[2] == "log" or v[0] in PNAD_VARS else "quarterly mean"}'''),
+    P(31, "def macro_monthly() -> pl.DataFrame:",
+      '''PNAD_VARS = ["unemployment", "employed"]  # lab: trimestre móvel; no trimestre e no ano só os trimestres civis
+
+def macro_monthly() -> pl.DataFrame:'''),
+    P(31, '''    wide = wide.with_columns(pl.all().exclude("month").forward_fill())
+''', '''    wide = wide.with_columns(pl.all().exclude("month").forward_fill())
+    # lab (MAC-07): índice do IPCA encadeado das variações mensais (SGS 433), base dez/2025 = 1; PIB e crédito PJ reais
+    wide = wide.with_columns(((1 + pl.col("ipca") / 100).cum_prod()).alias("_ipca_idx"))
+    _base = wide.filter(pl.col("month") == pl.date(LAB_SNAP[0], LAB_SNAP[1], 1))["_ipca_idx"][0]
+    wide = wide.with_columns((pl.col("gdp_monthly") / (pl.col("_ipca_idx") / _base)).alias("gdp_monthly"),
+                             (pl.col("credit_firms") / (pl.col("_ipca_idx") / _base)).alias("credit_firms")).drop("_ipca_idx")
+'''),
+    P(31, '''.group_by("quarter").agg([pl.col(c).last() if c in LOG_VARS else pl.col(c).mean() for c in MACRO_VARS])''',
+      '''.group_by("quarter").agg([pl.col(c).last() if c in LOG_VARS or c in PNAD_VARS else pl.col(c).mean() for c in MACRO_VARS])  # lab: PNAD = trimestre civil'''),
+    # D.5.1: a chave do cache não via a troca das macros (MAC-07); sem isto o bootstrap voltaria do cache nominal
+    P(None, '''cached_json("D.5.1", robust_monthly, params={"block": 12, "n_boot": 999})''',
+      '''cached_json("D.5.1", robust_monthly, params={"block": 12, "n_boot": 999, "macro": "MAC-07: PIB e crédito reais, PNAD civil"})'''),
+    P(296, '''    [pl.col(c).last() if c in LOG_VARS else pl.col(c).mean() for c in MACRO_VARS]).sort("year")''',
+      '''    [pl.col(c).last() if c in LOG_VARS
+     else pl.col(c).filter(pl.col("month").dt.month().is_in([3, 6, 9, 12])).mean() if c in PNAD_VARS  # lab: 4 trimestres civis
+     else pl.col(c).mean() for c in MACRO_VARS]).sort("year")'''),
     # A.1.4: no lugar da amostra de 10 linhas (registro individual), só o esquema da tabela
     P(43, None, '''# lab: no lugar da amostra de 10 linhas da foto (registros individuais), o esquema da tabela DEBITO,
 # sem as colunas de pessoa. O laboratório só mostra agregados.
@@ -326,6 +360,13 @@ CALLOUTS = {
 ## Selic over no lugar da meta
 No laboratório, a variável `selic` é a **Selic over** (SGS 4189, acumulada no mês e anualizada, % a.a.), e não a meta
 (SGS 432). A troca e o efeito nas correlações estão na página [Selic over e checagem]({LINK_MACRO}).
+
+**Também alterado no lab (MAC-07, 26/10/2026):** a série 4380 é o PIB mensal em R$ correntes (não o IBC-Br citado no
+texto do paper). Ela e o saldo de crédito PJ (20540) passam a entrar **deflacionados pelo IPCA** (SGS 433, índice
+encadeado das variações mensais, base dez/2025 = 1), em R$ de dez/2025, antes do log. Desocupação (24369) e ocupados
+(24379) são da PNAD Contínua, cujo valor mensal é o **trimestre móvel** que termina no mês (meses vizinhos repetem dois
+meses de entrevistas). No trimestre, entra o valor do último mês (o trimestre civil) e, no ano, a média dos quatro
+trimestres civis. No mês, o valor fica como está.
 :::""",
     125: f""":::{{.callout-note}}
 ## Concentração por tipo de tributo e por devedor
@@ -351,8 +392,12 @@ A versão com valor pago está em [Concentração e liquidação]({LINK_CONC}).
 :::""",
     294: f""":::{{.callout-warning}}
 ## Checagem das correlações anuais
-A correlação entre emprego e estoque é guiada pela tendência comum e por 2020 (n = 10 anos). A checagem está em
-[Selic over e checagem]({LINK_MACRO}), seção 2.5. Leia os mapas anuais abaixo com isso em mente.
+**Aviso (MAC-07): não use a correlação anual entre emprego e estoque no texto.** Ela vem da tendência comum e da
+queda de 2020: no painel anual do EDA completo, o estoque cai de R$ 410,6 bi (2019) para R$ 328,9 bi (2020), junto com a contagem de CDAs,
+o que parece efeito da extração do DEBITO, não da economia. Isso só pode ser corrigido com a DEBITO corrigida
+(EQ-02/EQ-05); até lá, fica este aviso. Com n = 10 anos, nenhum mapa anual abaixo sustenta afirmação. O que deu para
+corrigir (defasagem única, sem 2026, PIB e crédito reais, PNAD em trimestres civis) já está aplicado aqui e está
+detalhado, com antes e depois, em [Selic over e checagem]({LINK_MACRO}), seções 2.5 e 3.
 :::""",
 }
 
