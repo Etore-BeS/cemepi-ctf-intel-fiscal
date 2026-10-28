@@ -1,3 +1,8 @@
 /.quarto/
 /_site/
 # _freeze/ É versionado de propósito: o CI monta o site a partir dele.
+
+**/*.quarto_ipynb
+
+# Figuras pesadas da página única do EDA do paper (regeneráveis do _freeze: python3 paper_eda/_pagina_unica.py)
+/paper_eda/paper_eda_figs/

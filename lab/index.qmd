@@ -1,48 +1,76 @@
 ---
-title: "Laboratório — dívida ativa de São Paulo"
-subtitle: "Exploração viva, datada, para discussão de pesquisa"
+title: "Lab — São Paulo state enrolled tax debt"
+subtitle: "Live, dated exploration for research discussion"
 date: 2026-10-23
 date-format: "DD/MM/YYYY"
-listing:
-  id: entradas
-  contents: "eda/*.{qmd,ipynb}"
-  type: table
-  fields: [date, title, description]
-  sort: "date desc"
-  date-format: "DD/MM/YYYY"
-  field-display-names:
-    date: "Data"
-    title: "Entrada"
-    description: "Pergunta"
 ---
 
-## O que é este site
+## Main entry: the paper EDA
 
-Caderno de laboratório da pesquisa sobre a dívida ativa inscrita do Estado de São Paulo.
-Cada entrada é datada e diz: a pergunta, os dados usados (versão do painel), o que foi
-encontrado e o que **não** se pode concluir. As figuras dos artigos **não** saem daqui;
-saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
+**[Paper EDA (paper_eda_v1) in the lab](paper_eda/index.qmd)**: the article's whole EDA (sections 0 to 6) on a single
+page, with a side table of contents, a [contents and reading guide](paper_eda/index.qmd#guia) with an organogram at the
+top and the [list of changes](paper_eda/index.qmd#novidades) with links to each changed subsection: window ending in 2025, overnight
+Selic, significance stars (p ≤ 0.10), B.8.5 in BRL (now 6.5), concentration by tax type and by debtor, employment ×
+stock, Figure 3.5.18, K-means with k = 2/3/4, DEBITO quality warnings, with vs. without CNPJ and aggregates only. The
+dated lab analyses sit inside the thematic sections they belong to (1.9, 2.8, 3.12–3.14 and 5.8); the full EDA notebook
+is the appendix (section 8). The whole page is in English; ICMS, the Brazilian state VAT, is called VAT (ICMS).
 
-- **Painel em uso:** `painel_icms` versão `vAAAA-MM-DD` (manifest em `data_manifests/`).
-- **Extração do dump:** `extracao=AAAA-MM`.
-- **Último render local:** ver a data desta página.
+## What this site is
 
-## O que mudou nesta versão
+Lab notebook of the research on the enrolled tax debt (dívida ativa) of the State of São Paulo.
+Each entry is dated and states the question, the data used (panel version), what was
+found and what can **not** be concluded. The articles' figures do **not** come from here;
+they come from `projects/<frente>/notebooks/articles/` (see `docs/ESTRUTURA.md`).
 
-- *(AAAA-MM-DD)* Descreva em uma linha cada entrada nova ou alterada.
+- **Data in use:** Inteligência Fiscal dump (PGE-SP), `extracao=2026-03`. The panels and caches of the article's EDA (`paper_eda_v1`) are reused through the cache key, with no re-extraction.
+- **Default window of the new entries:** 2016 to 2025.
+- **Last local render:** see the date of this page.
 
-## Questões para discussão (2026-10-23)
+## What changed in this version
 
-> Modelo. Mantenha uma seção por data, a mais recente no topo. Sem nomes de pessoas nem
-> referência a reuniões: as notas pessoais ficam em `.local/` (fora do git).
+- *(2026-10-28)* **[Whole lab in English, single numbering](paper_eda/index.qmd#guia):** texts, titles, captions, axes, tables and notes in English (ICMS → VAT (ICMS)); one numbering scheme (0 to 8, with 1.1, 1.2…); the dated analyses moved into the thematic sections; a contents section with an organogram at the top.
+- *(2026-10-27)* **[Registration status and CNAE of debtor firms](paper_eda/index.qmd#lab-cnpj-firmas):** RFB registration status (2026-03) × recovery by origin, with Kaplan–Meier to the first payment, and CNAE division × origin, suppressing divisions with a cell of fewer than 5 CNPJs; 2016 to 2025, aggregates only (3.14).
+- *(2026-10-27)* **[Debtor firms by municipality of São Paulo state](paper_eda/index.qmd#lab-cnpj-geo):** count, value and rate per thousand active establishments by municipality, aggregates only (3.13).
+- *(2026-10-26)* **[Whole paper EDA on one page](paper_eda/index.qmd):** `paper_eda_v1` on a single page, generated from the notebook without running it, with a side table of contents, a list of changes and "New in the lab" / "Changed in the lab" notes in each changed subsection (instead of the `[lab: ...]` markers). Window ending in 2025, overnight Selic, significance stars and flagged DEBITO quality (including partial 2024-12 and repeated rows in 2025-06/07). The K-means now shows profiles for k = 2, 3 and 4.
+- *(2026-10-26)* **[Firm registry enrichment of debtor CNPJs (RFB 2026-03)](paper_eda/index.qmd#lab-cnpj-rfb):** what the pipeline does, coverage, completeness by column, aggregate attributes, partners, the natural-person policy, the API package schema and the upload status (1.9).
+- *(2026-10-23)* **[Debt concentration and settlement in BRL](paper_eda/index.qmd#lab-conc):** concentration of the December 2025 stock by tax type (VAT (ICMS), IPVA, ITCMD, fees) and by debtor (CNPJ root), with Lorenz curve, Gini and top shares; the article's B.8.5 redone with BRL on the y-axis; 2026 left out (2.8).
+- *(2026-10-23)* **[K-means on the top 1% of VAT (ICMS) CDAs](paper_eda/index.qmd#lab-km):** 100 initialisations per k, from k=2 to k=8, with elbow and silhouette; k=2 and k=4 compared by stability across seeds, ARI, sizes and aggregate profiles; Figure 3.5.18 redone (3.12).
+- *(2026-10-23)* **[Overnight Selic and check of the macro correlations](paper_eda/index.qmd#lab-macro):** the target Selic (SGS 432) replaced by the overnight Selic (SGS 4189); source, unit, frequency, lag, coverage and outliers of the series checked; the correlation between employment and stock decomposed (5.8).
+- *(2026-10-23)* **[Full EDA notebook](paper_eda/index.qmd#lab-edac):** the notebook converted without changing its logic, with paths read from `.env`. The window is the original one, with partial 2026; the corrections are in the entries above (appendix, section 8).
 
-1. **Pergunta:** *(ex.: o número de clusters deve ser 2, como indica a silhueta, ou 4?)*
-   **Evidência:** link para a entrada e a figura (`eda/AAAA-MM-DD_tema.qmd#fig-…`).
-   **Opções:** (a) … (b) …
-   **Proposta:** …
-2. **Pergunta:** …
+## Questions for discussion (2026-10-23)
 
-## Entradas
+1. **Question:** how many groups to use in the top 1%: k=2 or k=4?
+   **Evidence:** [K-means on the top 1%](paper_eda/index.qmd#lab-km). The three readings do not point to the same k:
+   - the inertia elbow, by curvature, points to k=3;
+   - the K-means silhouette is higher at k=4 than at k=2 on the December 2025 base;
+   - the silhouette of hierarchical clustering (Gower) is higher at k=2, but that k=2 only separates 93 CDAs (0.4%) from the rest, on both bases. It is not the same split as the K-means (ARI close to zero).
 
-::: {#entradas}
-:::
+   k=2 separates assessed and declared debt. k=4 subdivides the assessed debt by status (suspended, enrolled, cleared for filing) and has a small group.
+   **Options:** (a) k=2, more stable across bases; (b) k=4, more informative and with acceptable stability; (c) show both.
+   **Decision (27/10/2026, IMP-13):** k=4, by the author's decision. The K-means subsection shows k=4 as the main solution and k=2 to 8 as diagnostics.
+2. **Question:** is the correction of Figure 3.5.18 the one requested?
+   **Evidence:** [K-means on the top 1%](paper_eda/index.qmd#lab-km), Figure 3.5.18. In the article, the first PCA component was dominated by the number of payments, because of robust scaling with zero IQR, and the colours of two groups were almost identical. The subsection redoes the PCA with the scaling used in the Gower distance and a distinct palette.
+   **Options:** (a) this is the correction; (b) the request was something else (axis, label, chart type).
+   **Proposal:** confirm what was expected of the figure.
+3. **Question:** does the correlation between employment and stock stay in the text?
+   **Evidence:** [Overnight Selic and check](paper_eda/index.qmd#lab-macro), subsection 5.8.2.5. In first differences, the correlation depends on 2020, when the stock and the CDA count of the panel fall together.
+   **Options:** (a) remove it until the 2020 stock is checked in the corrected DEBITO table; (b) keep it only in differences or deviation from trend, with the caveat.
+   **Proposal:** (a).
+4. **Question:** should the full EDA be redone with the window ending in 2025?
+   **Evidence:** [Full EDA](paper_eda/index.qmd#lab-edac). The conversion keeps partial 2026 to stay faithful to the notebook.
+   **Options:** (a) keep it as a record and use the corrected subsections; (b) redo the window on this page too.
+   **Proposal:** (a).
+
+## Entries
+
+All entries are inside the single page, each in the thematic section it belongs to (request of 26/10/2026: every
+analysis in one HTML, navigated from the side table of contents; single numbering of 28/10/2026):
+
+- [1.9 Firm registry enrichment of debtor CNPJs (RFB ref. 2026-03)](paper_eda/index.qmd#lab-cnpj-rfb) (2026-10-26)
+- [2.8 Concentration by tax type and by debtor; settlement in BRL](paper_eda/index.qmd#lab-conc) (2026-10-23)
+- [3.12 K-means on the top 1% of CDAs and the redrawn Figure 3.5.18](paper_eda/index.qmd#lab-km) (2026-10-23)
+- [3.13 Debtor firms by municipality of São Paulo state](paper_eda/index.qmd#lab-cnpj-geo) (2026-10-27)
+- [3.14 Registration status and CNAE of debtor firms × origin and recovery](paper_eda/index.qmd#lab-cnpj-firmas) (2026-10-27)
+- [5.8 Overnight Selic and check of the macro correlations](paper_eda/index.qmd#lab-macro) (2026-10-23; MAC-07 corrections on 26/10)
+- [8 Appendix: the full EDA notebook (faithful conversion)](paper_eda/index.qmd#lab-edac) (2026-10-23)

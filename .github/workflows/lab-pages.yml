@@ -1,0 +1,84 @@
+# Publica lab/ no GitHub Pages (docs/ESTRUTURA.md §6). O CI não tem dados, Jupyter nem segredos:
+# o site é montado só a partir do que está no git (fontes + lab/_freeze/).
+name: lab-pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lab/**"
+      - "scripts/check_freeze.py"
+      - "scripts/pii_check.py"
+      - "scripts/pii_allowlist.toml"
+      - ".github/workflows/lab-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-pages
+  cancel-in-progress: true
+
+env:
+  QUARTO_VERSION: "1.10.19"   # a mesma do Mac (lab/README.md)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Só biblioteca padrão nos scripts abaixo (tomllib pede Python >= 3.11). Nenhum pip install.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Freeze em dia (nada a executar no CI)
+        run: python3 scripts/check_freeze.py --project lab
+
+      # A página única do EDA do paper (lab/paper_eda/index.qmd) e as 4 figuras pesadas em
+      # lab/paper_eda/paper_eda_figs/ (fora do git) saem do _freeze das 8 partes, sem executar código.
+      - name: Página única do EDA do paper e figuras pesadas (do _freeze)
+        run: |
+          python3 lab/paper_eda/_pagina_unica.py
+          git diff --exit-code -- lab/paper_eda/index.qmd || {
+            echo "::error::lab/paper_eda/index.qmd no git difere do gerado pelo _freeze. Rode python3 lab/paper_eda/_pagina_unica.py e faça commit."; exit 1; }
+          ls -l lab/paper_eda/paper_eda_figs/
+
+      - name: PII nas fontes e no freeze
+        run: python3 scripts/pii_check.py lab
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ env.QUARTO_VERSION }}
+
+      - name: Render (só do _freeze)
+        run: quarto render lab
+
+      - name: Figuras pesadas no site
+        run: |
+          for f in $(grep -o 'paper_eda_figs/[A-Za-z0-9_-]*\.html' lab/_site/paper_eda/index.html | sort -u); do
+            test -s "lab/_site/paper_eda/$f" || { echo "::error::falta lab/_site/paper_eda/$f"; exit 1; }
+          done
+
+      - name: PII no HTML gerado
+        run: python3 scripts/pii_check.py lab/_site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: lab/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

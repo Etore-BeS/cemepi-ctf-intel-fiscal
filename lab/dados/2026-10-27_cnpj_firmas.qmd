@@ -1,0 +1,206 @@
+---
+title: "Registration status and CNAE of VAT (ICMS) debtor firms × origin and recovery (LAB-CNPJ)"
+description: "Does assessed and declared VAT (ICMS) debt recover differently depending on the registration status and the economic activity (CNAE) of the debtor firm? Aggregates only, 2016 to 2025."
+date: 2026-10-27
+jupyter: python3
+---
+
+**Data:** VAT (ICMS) CDAs of legal entities (14-digit CNPJ) from the extract of the paper's EDA, **2016 to 2025** (no 2026): year-end stock, payments (GARE, `VALOR_RECEITA`) and enrolment date. The origin (assessed or declared) and the CNPJ come from the last snapshot of each CDA up to December 2025. The **registration status** and the **main CNAE** (division, 2 digits) come from the Federal Revenue (RFB) enrichment of **March 2026** (`cnpj_enriquecido`, version `rfb-2026-03`, checked against the SHA-256 of the manifest), joined by CNPJ, read-only. The CPF and debtor-name columns are not read.
+**What is shown:** aggregates only, by origin × status and by CNAE division × origin. **A cell with 1 to 4 CNPJs goes to "others (suppressed)"**; for CNAE, the **whole division** is pooled when any of its cells (assessed or declared, December 2025 snapshot or panel) has 1 to 4 CNPJs, because the weight of assessed debt would reveal the small cell. A pooled group that still has fewer than 5 CNPJs is left blank.
+**Status:** exploration. The same analyses as section 10 of the AVD-01 article ("Debtor firm characteristics"), redone with the lab's own code (`lab/dados/_firma_cnpj.py`); the article does not read the lab.
+
+::: {.callout-warning title="Status and CNAE are those of March 2026"}
+The registration status and the CNAE are those of the March 2026 registry, **after** the debts and the payments (which run to December 2025). They describe the debtor; they are not a cause measured before the outcome. A firm may be closed or unfit **because of** its debts.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+sys.path.insert(0, str(Path.cwd().parent / "eda"))
+import numpy as np
+import pandas as pd
+pd.set_option("display.max_colwidth", None)
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from scipy import stats
+from IPython.display import HTML
+import _lab_base as B
+import _firma_cnpj as F
+A = F.agregados()
+fmt = lambda v, d=0: "—" if pd.isna(v) else f"{v:,.{d}f}"
+ORI = F.ORIGIN_EN
+ST = F.STATUS_EN
+ordem = {s: i for i, s in enumerate(F.ORDEM_SIT)}
+def tabela(df):
+    return HTML(df.to_html(index=False, border=0, classes="dataframe"))
+def rolavel(df, n_linhas):
+    return HTML("<style>.lab-tabela-rolavel{max-height:34em;overflow:auto;border:1px solid #d9d9d9}"
+                ".lab-tabela-rolavel thead th{position:sticky;top:0;background:#fff;z-index:1}</style>"
+                f"<div class='lab-tabela-rolavel'>{df.to_html(index=False, border=0, classes='dataframe')}</div>"
+                f"<p style='font-size:0.8em'>Complete table: {n_linhas} rows (scroll inside the box).</p>")
+print(f"cnpj_enriquecido {A['versao_rfb']}: {fmt(A['linhas_rfb'])} CNPJs, SHA-256 checked in {A['arquivos_rfb']} files")
+```
+
+## Coverage of the join
+
+```{python}
+#| label: tbl-cobertura-firmas
+#| tbl-cap: "Coverage of the join with cnpj_enriquecido (RFB 2026-03), VAT (ICMS) CDAs of legal entities, by origin. December 2025 snapshot (stock > 0) and CDA × year panel 2016–2025."
+cov = pd.DataFrame(A["cobertura"])
+for c in ("cdas_dez", "estoque_dez", "cdas_painel"):
+    cov[f"pct_{c}"] = 100 * cov[c] / cov.groupby("origin")[c].transform("sum")
+NIV = {"estabelecimento": "establishment (status and CNAE known)", "raiz": "root only (firm found, establishment not)",
+       "nao_encontrado": "not found in the registry"}
+tabela(pd.DataFrame({"origin": cov.origin.map(ORI), "match": cov.match_level.map(NIV),
+              "CNPJs (Dec 2025)": cov.cnpjs_dez.map(fmt), "CDAs (Dec 2025)": cov.cdas_dez.map(fmt),
+              "% of CDAs": cov.pct_cdas_dez.map(lambda v: fmt(v, 2)), "stock Dec 2025 (BRL bn)": (cov.estoque_dez / 1e9).map(lambda v: fmt(v, 2)),
+              "% of stock": cov.pct_estoque_dez.map(lambda v: fmt(v, 2)), "CDAs in the panel": cov.cdas_painel.map(fmt),
+              "% of panel CDAs": cov.pct_cdas_painel.map(lambda v: fmt(v, 2))}))
+```
+
+```{python}
+#| echo: false
+cn = A["cobertura_cnpjs"]
+tot_c = cov[cov.match_level == "estabelecimento"].cdas_dez.sum() / cov.cdas_dez.sum()
+tot_s = cov[cov.match_level == "estabelecimento"].estoque_dez.sum() / cov.estoque_dez.sum()
+print(f"December 2025 snapshot: {fmt(cn['cnpjs_dez'])} distinct CNPJs; establishment-level match for {fmt(100 * tot_c, 1)}% of CDAs "
+      f"and {fmt(100 * tot_s, 1)}% of the stock. Panel 2016–2025: {fmt(cov.cdas_painel.sum())} CDAs.")
+```
+
+## Registration status × recovery, by origin
+
+**Method.** For each origin and registration status (registry of March 2026): distinct CNPJs, CDAs and stock in the December 2025 snapshot and the share of the origin's stock; in the 2016–2025 panel, the **aggregate recovery rate** $\bar\rho_g = 100\,\sum_t P_{gt} / \sum_t E_{gt}$ (payments of all years over the year-end stock of all years) and the share of CDAs with any payment. CDAs without an establishment-level match get their own categories ("root only", "not found"), with nothing dropped.
+
+```{python}
+#| label: tbl-situacao
+#| tbl-cap: "Registration status of the debtor CNPJ (RFB, March 2026) by origin: December 2025 stock and recovery in the 2016–2025 panel."
+st = pd.DataFrame(A["situacao"])
+st["pct_estoque"] = 100 * st.estoque_dez / st.groupby("origin").estoque_dez.transform("sum")
+st["rec"] = 100 * st.pago / st.estoque_painel
+st["pct_pagas"] = 100 * st.cdas_pagas / st.cdas_painel
+st = st.sort_values(["origin", "status"], key=lambda c: c.map(ordem) if c.name == "status" else c)
+tabela(pd.DataFrame({"origin": st.origin.map(ORI), "status": st.status.map(ST), "CNPJs (Dec 2025)": st.cnpjs_dez.map(fmt),
+              "CDAs (Dec 2025)": st.cdas_dez.map(fmt), "stock (BRL bn)": (st.estoque_dez / 1e9).map(lambda v: fmt(v, 2)),
+              "% of the origin's stock": st.pct_estoque.map(lambda v: fmt(v, 1)), "CDAs in the panel": st.cdas_painel.map(fmt),
+              "% with any payment": st.pct_pagas.map(lambda v: fmt(v, 1)), "aggregate recovery (%)": st.rec.map(lambda v: fmt(v, 2))}))
+```
+
+```{python}
+#| echo: false
+print(f"Suppressed cells (1 to 4 CNPJs): {A['n_celulas_suprimidas_situacao']}.")
+```
+
+**Kaplan–Meier to the first payment.** Duration $T_i$ = months from enrolment to the first payment (GARE). CDAs without a payment by 31 December 2025 are censored at that date. Estimator $\hat S(t)=\prod_{t_j\le t}(1-d_j/n_j)$ (Kaplan & Meier, 1958), with $d_j$ first payments in month $t_j$ and $n_j$ CDAs still at risk; the curves show $1-\hat S(t)$, the share that has made the first payment by month $t$. To avoid left truncation (payments before 2016 are not in the panel), only the **2016–2025 enrolment cohort** enters. The computation uses only monthly aggregate counts ($n$, $d$).
+
+```{python}
+#| label: fig-km-situacao
+#| fig-cap: "Share of CDAs (2016–2025 enrolment cohort) that have made the first payment, by months since enrolment (Kaplan–Meier), by registration status (RFB, March 2026). (a) assessed; (b) declared. Statuses with fewer than 100 CDAs in the cohort are not drawn (they are in the table); each curve stops when fewer than 20 CDAs remain at risk."
+km = pd.DataFrame(A["km"])
+curvas, linhas = [], []
+for (o, s_), g in km.groupby(["origin", "status"]):
+    c = F.kaplan_meier(g)
+    c["origin"], c["status"] = o, s_
+    curvas.append(c)
+    ate = lambda m: c.pago[c.t <= m].max() if (c.t <= m).any() else 0.0
+    med = c.t[c.pago >= 0.5].min()
+    linhas.append({"origin": o, "status": s_, "cdas": int(g.n.sum()), "pag": int(g.d.sum()),
+                   "p12": 100 * ate(12), "p24": 100 * ate(24), "p60": 100 * ate(60), "med": med})
+curvas = pd.concat(curvas, ignore_index=True)
+kmt = pd.DataFrame(linhas).sort_values(["origin", "status"], key=lambda c: c.map(ordem) if c.name == "status" else c)
+COR = {"ativa": "#154C56", "inapta": "#BD9869", "suspensa": "#5EA65B", "baixada": "#5E9AA5", "nula": "#B5651D",
+       "outro código": "#8A9499", "só a raiz (situação desconhecida)": "#8A9499", "não encontrado no cadastro": "#4D4D4D",
+       F.SUP: "#B0B0B0"}
+grandes = kmt[kmt.cdas >= 100][["origin", "status"]]
+pk = curvas.merge(grandes, on=["origin", "status"]).query("t <= 120 and em_risco >= 20")
+fig = make_subplots(rows=1, cols=2, shared_yaxes=True, horizontal_spacing=0.06, subplot_titles=("(a) Assessed", "(b) Declared"))
+for cc, o in ((1, "assessed"), (2, "declared")):
+    for s_ in F.ORDEM_SIT:
+        d = pk[(pk.origin == o) & (pk.status == s_)]
+        if len(d):
+            fig.add_trace(go.Scatter(x=d.t, y=100 * d.pago, mode="lines", line_shape="hv", name=ST[s_], legendgroup=s_,
+                                     showlegend=(cc == 1), line=dict(color=COR[s_], dash="dot" if ("raiz" in s_ or "cadastro" in s_) else "solid"),
+                                     customdata=d.em_risco, hovertemplate="month %{x}: %{y:.1f}%<br>at risk: %{customdata:,}<extra>" + ST[s_] + "</extra>"),
+                          row=1, col=cc)
+fig.update_xaxes(title_text="months since enrolment", dtick=12, range=[0, 120])
+fig.update_yaxes(title_text="% with a first payment", range=[0, 100], row=1, col=1)
+fig.update_layout(height=430, margin=dict(t=50, b=110), legend=dict(orientation="h", y=-0.25, x=0))
+fig.show()
+```
+
+```{python}
+#| label: tbl-km-situacao
+#| tbl-cap: "Kaplan–Meier to the first payment, 2016–2025 enrolment cohort, by origin and registration status. Empty median = not reached."
+tabela(pd.DataFrame({"origin": kmt.origin.map(ORI), "status": kmt.status.map(ST), "CDAs in the cohort": kmt.cdas.map(fmt),
+              "first payments": kmt.pag.map(fmt), "% paid within 12 months": kmt.p12.map(lambda v: fmt(v, 1)),
+              "% within 24 months": kmt.p24.map(lambda v: fmt(v, 1)), "% within 60 months": kmt.p60.map(lambda v: fmt(v, 1)),
+              "median (months)": kmt.med.map(fmt)}))
+```
+
+**How to read.** Two panels, assessed (a) and declared (b); each line is a registration status. The vertical axis is the share of the cohort's CDAs that have made the first payment by month $t$ after enrolment (0 to 120 months). Hover to see how many CDAs are still at risk.
+
+**What not to conclude:** the status is observed in March 2026, after the outcome; a lower curve for closed or unfit firms is an association, not an effect of being closed. The right tail of the curves depends only on the oldest cohorts. Censoring is treated as independent of payment within each group, a strong assumption for closed or unfit firms. CDAs paid off before appearing in a monthly snapshot are not in the panel, which pulls $1-\hat S(t)$ down in the first months. There is no test: with millions of CDAs every difference is significant.
+
+*Reference:* Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American Statistical Association*, 53(282), 457–481. https://doi.org/10.1080/01621459.1958.10501452
+
+## CNAE division × origin
+
+**Method.** Main CNAE 2.0 code of the debtor establishment, at **division** level (2 digits; IBGE/CONCLA; CNAE 2.0 follows ISIC Rev. 4), crossed with the origin. By division: distinct CNPJs, December 2025 stock, the **weight of assessed debt** $w_d = 100\,E^{\text{ass}}_d/(E^{\text{ass}}_d+E^{\text{dec}}_d)$ (share of the division's stock that comes from infringement notices) and the aggregate recovery rate $\bar\rho$ of the 2016–2025 panel, by origin and in total. CDAs without an establishment-level match have no CNAE and form the "no CNAE" row.
+
+```{python}
+#| label: tbl-cnae-divisao
+#| tbl-cap: "CNAE division (RFB, March 2026) × origin: December 2025 stock, weight of assessed debt and aggregate recovery 2016–2025. Divisions with any cell of 1 to 4 CNPJs are pooled in 'others (suppressed)'. Letter in parentheses = CNAE section."
+dv = pd.DataFrame(A["divisao"])
+dv["pct_estoque"] = 100 * dv.estoque_dez / dv.estoque_dez.sum()
+esp = dv.divisao.isin([F.SUP]) | dv.divisao.str.startswith("sem CNAE")
+dv = pd.concat([dv[~esp].sort_values("estoque_dez", ascending=False), dv[esp]]).reset_index(drop=True)
+secao = lambda l: F.SECTION_EN.get(l.split("(")[-1].rstrip(")"), "") if l[:2].isdigit() else ""
+out = pd.DataFrame({"division (section)": dv.divisao.map(F.division_en), "CNAE section": dv.divisao.map(secao), "CNPJs (Dec 2025)": dv.cnpjs_dez.map(fmt),
+                    "CNPJs in the panel": dv.cnpjs_painel.map(fmt), "stock Dec 2025 (BRL bn)": (dv.estoque_dez / 1e9).map(lambda v: fmt(v, 2)),
+                    "% of VAT (ICMS) stock": dv.pct_estoque.map(lambda v: fmt(v, 1)), "weight of assessed debt (%)": dv.peso_autuado.map(lambda v: fmt(v, 1)),
+                    "recovery, assessed (%)": dv.rec_autuado.map(lambda v: fmt(v, 2)),
+                    "recovery, declared (%)": dv.rec_declarado.map(lambda v: fmt(v, 2)), "recovery, total (%)": dv.rec_total.map(lambda v: fmt(v, 2))})
+rolavel(out, len(out))
+```
+
+```{python}
+#| echo: false
+mostradas = dv[~esp & dv.rec_total.notna()]
+rho, p = stats.spearmanr(mostradas.peso_autuado, mostradas.rec_total)
+top5 = mostradas.head(5)
+print(f"Divisions shown: {len(mostradas)}; pooled by suppression: {A['n_divisoes_suprimidas']}. "
+      f"The 5 largest hold {fmt(top5.pct_estoque.sum(), 1)}% of the stock; the largest ({top5.divisao.iloc[0]}) has "
+      f"{fmt(top5.pct_estoque.iloc[0], 1)}% of the stock and a weight of assessed debt of {fmt(top5.peso_autuado.iloc[0], 1)}%. "
+      f"Weight of assessed debt between {fmt(mostradas.peso_autuado.min(), 1)}% and {fmt(mostradas.peso_autuado.max(), 1)}%. "
+      f"Spearman (weight of assessed debt × total recovery, across divisions): rho = {fmt(rho, 2)} (p = {p:.2g}).")
+```
+
+```{python}
+#| label: fig-cnae-divisao
+#| fig-cap: "One bubble per CNAE division shown in the table (pooled divisions and 'no CNAE' left out). x-axis: weight of assessed debt (% of the division's VAT (ICMS) stock in December 2025 that is assessed). y-axis: aggregate recovery 2016–2025 of the division, all origins, log scale. Bubble area proportional to the December 2025 stock; the 10 largest divisions carry their code."
+d = mostradas.copy()
+d["rot"] = np.where(d.index < 10, d.divisao.str.extract(r"^(\d+)")[0], "")
+fig = go.Figure(go.Scatter(x=d.peso_autuado, y=d.rec_total, mode="markers+text", text=d.rot, textposition="top center",
+                           textfont=dict(size=9), customdata=np.c_[d.divisao, d.estoque_dez / 1e9, d.cnpjs_dez],
+                           hovertemplate="division %{customdata[0]}<br>weight of assessed debt %{x:.1f}%<br>recovery %{y:.2f}%"
+                                         "<br>stock BRL %{customdata[1]:.2f} bn<br>CNPJs %{customdata[2]:,}<extra></extra>",
+                           marker=dict(size=d.estoque_dez / 1e9, sizemode="area", sizeref=2 * d.estoque_dez.max() / 1e9 / 40 ** 2,
+                                       sizemin=3, color="#267586", opacity=0.7, line=dict(width=0.5, color="#154C56"))))
+fig.update_xaxes(title_text="weight of assessed debt in the December 2025 stock (%)", range=[-2, 102])
+fig.update_yaxes(title_text="aggregate recovery 2016–2025 (%, log)", type="log")
+fig.update_layout(showlegend=False, height=460, margin=dict(t=30))
+fig.show()
+```
+
+**How to read.** Each bubble is a division: to the right, divisions whose VAT (ICMS) debt is almost all assessed; higher up, those that recover more. The table gives, within each division, the recovery of assessed and of declared debt separately.
+
+**What not to conclude:** the position of a division mixes the composition by origin with the size, age and status of the firms; the correlation across divisions is ecological and does not say that assessed debt recovers less **within** a division. The CNAE is that of March 2026 and of the establishment (head office and branches count as separate CNPJs).
+
+**Difference from the AVD-01 article (section 10).** Same definitions and same suppression; the lab's own code on the caches of the paper's EDA (attributes by year, year end and GARE by year, parts from 2016 to 2025), instead of the article's reading of `DEBITO`. Small differences in counts (CDAs that change type in the last snapshot) may appear.
+
+```{python}
+#| label: cache
+#| echo: false
+B.cache_summary().to_pandas()
+```

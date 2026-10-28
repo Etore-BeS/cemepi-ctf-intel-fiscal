@@ -1,0 +1,63 @@
+---
+title: "Parte E. Discussão e correspondência com o manuscrito"
+description: "Porte do paper EDA v1 (Parte E) com as mudanças das reuniões de out/2026."
+date: 2026-10-26
+jupyter: python3
+execute:
+  echo: true
+format:
+  html:
+    code-fold: true
+    code-summary: "Código"
+---
+
+::: {.callout-tip collapse="true"}
+## Sobre esta página (porte do paper EDA v1 para o laboratório)
+Gerada por `lab/paper_eda/_gerar_paginas.py` a partir de `paper_eda_v1.ipynb` (fontes sha256 `b96d4cfad489`), sem rodar
+nem alterar o notebook original. Texto do paper mantido em inglês; o que o laboratório mudou aparece marcado com
+**[lab: ...]** ou em comentários `# lab:` no código. Mudanças em todas as páginas: nada de 2026 (último ano completo 2025;
+foto de referência dez/2025), Selic over (SGS 4189) no lugar da meta, estrelas de significância (* p ≤ 0,10; ** p ≤ 0,05;
+*** p ≤ 0,01) e linhas em negrito quando p ≤ 0,10 nas tabelas, e só agregados (nada por CPF, nome ou CDA individual).
+:::
+
+```{python}
+#| label: prelude
+#| include: false
+exec(compile(open("_prelude.py").read(), "_prelude.py", "exec"))
+```
+
+## Part E. Discussion
+
+*No new terms are introduced in this section; terms used here are defined in the Glossary.*
+
+#### E.1 Synthesis
+
+The answers to the research questions are summarised in the manuscript on the basis of the results above.
+
+#### E.2 Limitations
+
+The analysis relies on a single frozen extraction; stocks are reconstructed from monthly snapshots; settlement is only approximated; the annual sample is short; settlement programmes introduce structural breaks; firm-level revenue and indebtedness are not available; and the restriction to ICMS limits generalisation to other taxes.
+
+#### E.3 Ethical considerations
+
+The study uses only data on legal entities. Records whose debtor is identified by a CPF (natural persons) are excluded at extraction, and no name or personal identifier is retained.
+
+#### E.4 Future research
+
+Directions for further work include the recovered-over-recoverable indicator under a validated criterion; explicit modelling of settlement programmes through their attributes, with separate components for regular and programme-driven collection; instalment agreements and their breach; protest; the distinction between inability to pay and concealment of assets; firm indebtedness; and heterogeneity across sectors.
+
+## Correspondence with the manuscript and the dissertation
+The structure of this notebook corresponds to the paper and to the master's dissertation prepared with the School of Technology (FT-Unicamp) thesis template.
+
+| Notebook | Paper | Dissertation |
+|---|---|---|
+| Research questions | Introduction | Ch. 1 Introduction |
+| 0–1 | Data | Ch. 3 Data and methods |
+| Part A | The portfolio across tax types | Ch. 4 Exploratory analysis |
+| Part B | The ICMS portfolio (incl. the most concentrated CDAs) | Ch. 4 Exploratory analysis |
+| Part C | Statistical properties (Methods) | Ch. 3 Data and methods |
+| Part D | Macroeconomic conditions | Ch. 5 Macroeconomic associations |
+| Part E | Discussion, limitations, conclusion | Ch. 6 Discussion; Ch. 7 Conclusion |
+| A.1.2, A.3.1, 1.7 | Appendix | Appendices |
+
+Figures (`fig_*.pdf`) and tables (`tab_*.tex`) are shared by the paper and the dissertation.

@@ -1,0 +1,245 @@
+---
+title: "Firm registry enrichment of debtor CNPJs (RFB ref. 2026-03): what the pipeline does and what the API package contains"
+description: "Which Federal Revenue (RFB) attributes were linked to the debtor CNPJs, with what coverage, how natural persons are protected and what is missing before the upload to the API?"
+date: 2026-10-26
+jupyter: python3
+---
+
+**Data:** the anonymised package `cnpj_enriquecido_ref2026-03` (API version, generated on 23 October 2026), the build's `coverage.csv` and the versioned manifest `data_manifests/cnpj_enrich/cnpj_enriquecido_2026-03.json`. Every number on this page is computed on the fly from these files.
+**What is shown:** aggregate counts only. No row per CNPJ, partner or hash, and every count below 5 is suppressed (shown as "<5").
+**Status:** the package has been validated in a local DuckDB. See the last subsection.
+
+```{python}
+#| label: setup
+import json, subprocess
+from pathlib import Path
+import duckdb
+import pandas as pd
+from dotenv import dotenv_values
+pd.set_option("display.max_colwidth", None)
+from IPython.display import HTML
+show = lambda df: HTML(df.to_html(index=False, border=0, classes="dataframe"))   # tables without the pandas index
+
+def repo_root(p=Path.cwd()):
+    for q in (p, *p.parents):
+        if (q / ".git").exists():
+            return q
+    raise RuntimeError("repo not found")
+REPO = repo_root()
+WORKDIR = Path(dotenv_values(REPO / ".env")["CNPJ_PIPELINE_WORKDIR"])   # only this key of .env
+PKG = WORKDIR / "export/cnpj_enriquecido_ref2026-03"
+MAN = json.loads((PKG / "MANIFEST.json").read_text())
+MAN_REPO = json.loads(subprocess.run(
+    ["git", "-C", str(REPO), "show", "78f88cd:data_manifests/cnpj_enrich/cnpj_enriquecido_2026-03.json"],
+    capture_output=True, text=True, check=True).stdout)
+con = duckdb.connect()
+con.execute(f"CREATE VIEW t AS SELECT * FROM read_parquet('{PKG / 'data/cnpj_enriquecido.parquet'}')")
+con.execute(f"CREATE VIEW s AS SELECT * FROM read_parquet('{PKG / 'data/socios_vinculos.parquet'}')")
+N = con.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+
+# English labels for the RFB domain values shown in the tables (values not listed are shown as in the data)
+EN = {"estabelecimento": "establishment", "raiz": "root only", "nao_encontrado": "not found",
+      "ATIVA": "active", "BAIXADA": "closed (baixada)", "INAPTA": "unfit (inapta)", "SUSPENSA": "suspended", "NULA": "null",
+      "(sem estabelecimento)": "(no establishment)", "MICRO EMPRESA": "micro enterprise",
+      "EMPRESA DE PEQUENO PORTE": "small enterprise", "DEMAIS": "other", "NAO INFORMADO": "not informed",
+      "(nulo)": "(null)", "(sem regime)": "(no regime)", "LUCRO REAL": "actual profit (lucro real)",
+      "LUCRO PRESUMIDO": "presumed profit (lucro presumido)", "LUCRO ARBITRADO": "arbitrated profit (lucro arbitrado)",
+      "IMUNE": "immune", "ISENTA": "exempt", "IMUNE DO IRPJ": "immune from IRPJ", "ISENTA DO IRPJ": "exempt from IRPJ",
+      "SIMPLES (cadastro)": "Simples (registry)"}
+
+def sup(df, col="n"):
+    """Suppress counts < 5 (and the matching %)."""
+    df = df.copy()
+    small = df[col] < 5
+    for c in [c for c in df.columns if c.startswith("%")]:
+        df[c] = df[c].round(2).astype(object).where(~small, "—")
+    df[col] = df[col].astype(object).where(~small, "<5")
+    return df
+
+def contagem(sql):
+    d = con.execute(sql).df()
+    d["% of rows"] = 100 * d["n"] / N
+    for c in d.columns[:-2]:
+        d[c] = d[c].map(lambda v: EN.get(v, v))
+    return show(sup(d))
+```
+
+## What the pipeline does
+
+| step | what it does | output |
+|---|---|---|
+| collect | Reads the distinct CNPJs of `DEBITO` (CEMEPI DuckDB, read-only), only the debtor CNPJ, tax and value columns | list of debtor CNPJs |
+| enrich (RFB 2026-03) | Joins the Federal Revenue open files (Companies, Establishments, Simples, domain tables), first by the 14-digit CNPJ and, if not found, by the root | registry, CNAE, size, legal nature, status, municipality, Simples/MEI |
+| partners | Reads the RFB `Socios*` files, in the local layer only | firm–partner links |
+| regime (ECF) | Joins the lists of tax regimes (actual, presumed and arbitrated profit, immune and exempt) by root and year | `regime_ultimo`, `regimes_por_ano` |
+| build | One row per debtor CNPJ, partitioned into 16 files | `cnpj_enriquecido` (local) |
+| anonymised export | `anonimizar` policy: a CNPJ linked to a natural person becomes an HMAC-SHA256 id with a salt kept outside the package; dates truncated; municipality generalised where k<5; partners only with decade of entry and age band | package for the API |
+
+```{python}
+#| label: tbl-versao
+#| tbl-cap: "Version of the package, of the package's MANIFEST.json and of the manifest versioned in the repository."
+show(pd.DataFrame([
+    {"item": "RFB reference", "value": MAN["ref_rfb"]},
+    {"item": "rows of cnpj_enriquecido (package)", "value": f"{MAN['rows']:,}"},
+    {"item": "rows of cnpj_enriquecido (repository manifest)", "value": f"{MAN_REPO['linhas']:,}"},
+    {"item": "rows read now from the parquet", "value": f"{N:,}"},
+    {"item": "rows of socios_vinculos (package)", "value": f"{MAN['socios_rows']:,}"},
+    {"item": "RFB files with a recorded sha256", "value": len(MAN["rfb_files_sha256"])},
+    {"item": "natural-person policy", "value": MAN["pf_policy"]},
+    {"item": "partner detail", "value": MAN["socios_detail"] + " (entry by decade only)"},
+    {"item": "pipeline version", "value": MAN["pipeline_version"]},
+    {"item": "package generated on", "value": MAN["created_at"][:10]},
+]))
+```
+
+## Coverage of the join with the RFB
+
+```{python}
+#| label: tbl-cobertura
+#| tbl-cap: "Coverage by tax (the build's coverage.csv). A CNPJ that owes more than one tax appears in each row, so the rows do not add up to ALL (TODOS). % of matched stock uses the 2026-03 snapshot."
+cov = pd.read_csv(WORKDIR / "build/2026-03/coverage.csv")
+show(cov.rename(columns={"tributo": "tax", "cnpjs_devedores": "debtor CNPJs", "pct_dv_valido": "% valid check digit",
+                    "pct_casado_cnpj14": "% matched (CNPJ 14)", "pct_casado_raiz_ou_cnpj14": "% matched (14 or root)",
+                    "pct_estoque_ref_casado": "% of stock matched", "pct_pessoa_fisica_vinculada": "% linked to a natural person",
+                    "pct_municipio_ibge": "% with IBGE municipality"}))
+```
+
+```{python}
+#| label: tbl-match
+#| tbl-cap: "Level of the join, in the package: establishment (14-digit CNPJ), root only, or not found in the RFB."
+contagem("SELECT match_nivel AS \"level\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-situacao
+#| tbl-cap: "Registration status in the RFB (2026-03)."
+contagem("SELECT COALESCE(situacao_cadastral_descricao, '(sem estabelecimento)') AS \"status\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+## Completeness by column
+
+```{python}
+#| label: tbl-preenchimento
+#| tbl-cap: "Percentage of rows with a non-null value in each column of cnpj_enriquecido."
+cols = [c["name"] for c in MAN["columns"]]
+row = con.execute("SELECT " + ", ".join(f'COUNT("{c}")' for c in cols) + " FROM t").fetchone()
+show(pd.DataFrame({"column": cols, "type (DuckDB)": [c["duckdb"] for c in MAN["columns"]],
+              "% filled": [round(100 * v / N, 2) for v in row]}))
+```
+
+**How to read:** low completeness is not always a failure. Simples exclusion dates exist only for firms that left the regime, the special status is rare and the regime exists only for firms with an ECF or a Simples registration.
+
+## Attributes: Simples/MEI, size, regime, state and CNAE
+
+```{python}
+#| label: tbl-simples
+#| tbl-cap: "Option for Simples and for MEI (true / false / null) by level of the join. Null only where the firm was not found in the RFB."
+contagem("""SELECT match_nivel AS "level", CAST(opcao_simples AS VARCHAR) AS simples, CAST(opcao_mei AS VARCHAR) AS mei, COUNT(*) AS n
+            FROM t GROUP BY ALL ORDER BY 1, 2, 3""")
+```
+
+```{python}
+#| label: tbl-porte
+#| tbl-cap: "Firm size (RFB)."
+contagem("SELECT COALESCE(porte_descricao, '(nulo)') AS size, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-regime
+#| tbl-cap: "Most recent tax regime. 'Simples (registry)' comes from the Simples registry and not from the ECF (regime_derivado = true)."
+contagem("SELECT COALESCE(regime_ultimo, '(sem regime)') AS regime, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-ecf
+#| tbl-cap: "CNPJ roots (firms) with a regime from the ECF, counted by distinct root."
+r = con.execute("""SELECT COUNT(DISTINCT cnpj_raiz),
+                          COUNT(DISTINCT cnpj_raiz) FILTER (WHERE regime_ultimo IS NOT NULL AND NOT regime_derivado),
+                          COUNT(DISTINCT cnpj_raiz) FILTER (WHERE regime_derivado)
+                   FROM t""").fetchone()
+show(pd.DataFrame([{"distinct roots": r[0], "with a regime from the ECF": r[1], "% with ECF": round(100 * r[1] / r[0], 2),
+               "Simples only (registry)": r[2]}]))
+```
+
+```{python}
+#| label: tbl-uf
+#| tbl-cap: "State (UF) of the establishment (counts below 5 suppressed)."
+contagem("SELECT COALESCE(uf, '(nulo)') AS UF, COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+```{python}
+#| label: tbl-cnae
+#| tbl-cap: "CNAE section of the main activity (counts below 5 suppressed)."
+contagem("SELECT COALESCE(cnae_secao, '(nulo)') AS \"CNAE section\", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY n DESC")
+```
+
+## Partners and protection of natural persons
+
+```{python}
+#| label: tbl-socios
+#| tbl-cap: "Firm–partner links in socios_vinculos (API version)."
+r = con.execute("SELECT COUNT(*), COUNT(DISTINCT cnpj_basico), COUNT(DISTINCT socio_id) FROM s").fetchone()
+show(pd.concat([
+    pd.DataFrame([{"item": "links", "n": r[0]}, {"item": "firms (roots) with a listed partner", "n": r[1]},
+                  {"item": "distinct partners (id)", "n": r[2]}]),
+    con.execute("SELECT 'partners of type ' || socio_tipo AS item, COUNT(*) AS n FROM s GROUP BY 1 ORDER BY n DESC").df(),
+    con.execute("""SELECT CASE WHEN empresa_devedora AND socio_pj_devedor THEN 'debtor firm whose legal-entity partner is also a debtor'
+                               WHEN empresa_devedora THEN 'debtor firm (partner not a debtor)'
+                               ELSE 'non-debtor firm whose legal-entity partner is a debtor' END AS item, COUNT(*) AS n
+                   FROM s GROUP BY 1 ORDER BY n DESC""").df(),
+]).pipe(sup))
+```
+
+```{python}
+#| label: tbl-decada
+#| tbl-cap: "Decade of entry into the partnership (the only date information on partners in the API package). Counts below 5 suppressed."
+d = con.execute("SELECT CAST(decada_entrada_sociedade AS VARCHAR) AS \"decade\", COUNT(*) AS n FROM s GROUP BY 1 ORDER BY 1").df()
+show(sup(d))
+```
+
+```{python}
+#| label: tbl-pf
+#| tbl-cap: "Rows of cnpj_enriquecido linked to a natural person and what happens to them in the package."
+contagem("""SELECT CAST(pessoa_fisica_vinculada AS VARCHAR) AS "linked to a natural person", CAST(cnpj_anonimizado AS VARCHAR) AS "CNPJ becomes HMAC",
+                   CAST(municipio_generalizado AS VARCHAR) AS "municipality → state", COUNT(*) AS n FROM t GROUP BY ALL ORDER BY 1, 2, 3""")
+```
+
+```{python}
+#| label: tbl-risco
+#| tbl-cap: "Re-identification risk measured in the export (MANIFEST.json): combinations of quasi-identifiers with fewer than 5 persons (k<5)."
+rows = []
+for r in MAN["pf_reidentification_risk"]:
+    rows.append({"table": "cnpj_enriquecido (natural persons)", "quasi-identifiers": r["conjunto"], "combinations": r["combinacoes"],
+                 "with k<5": r["combinacoes_k_lt_5"], "% in k<5": r["pct_linhas_em_k_lt_5"]})
+for r in MAN["socios_reidentification_risk"]:
+    rows.append({"table": "socios_vinculos (natural persons)", "quasi-identifiers": r["conjunto"], "combinations": r["combinacoes"],
+                 "with k<5": r["combinacoes_k_lt_5"], "% in k<5": r["pct_pf_em_k_lt_5"]})
+show(pd.DataFrame(rows))
+```
+
+**Natural-person policy:**
+
+- **Pseudonym:** the CNPJ of a firm linked to a natural person (MEI, sole proprietor) and the natural-person partner become HMAC-SHA256 ids. The salt is kept outside the package, in an environment variable, and goes neither to git nor to the API.
+- **What is left out:** name, CPF, legal representative and exact date of entry into the partnership. For partners, only the decade of entry and the age band remain.
+- **Access:** the API is open only to the group's researchers, with a login and under PGE's NDA.
+- **Accepted risk:** in the combination "age band × municipality × CNAE", which can be obtained from the firm's CNPJ, about 38% of natural persons are in cells with k<5. The risk was accepted by Étore because access is restricted. In the generalised versions (state × CNAE section) the share falls below 1%. Combinations with more attributes (legal nature, size, start year, status or the role within the firm) have k<5 for a large share of rows. Access is therefore restricted to researchers and there is no public release.
+
+## API package schema
+
+```{python}
+#| label: tbl-esquema-socios
+#| tbl-cap: "Columns of socios_vinculos (those of cnpj_enriquecido are in the completeness table above)."
+show(con.execute("DESCRIBE s").df()[["column_name", "column_type"]].rename(columns={"column_name": "column", "column_type": "type (DuckDB)"}))
+```
+
+The package also carries the README, the data dictionary, SHA256SUMS and the load scripts (DDL and load for DuckDB and Postgres).
+
+| step | status |
+|---|---|
+| pipeline (collect → enrich → partners → regime → build → export) | done and merged |
+| Simples/MEI null only for firms not found | done |
+| validation of the load in a local DuckDB | done |
+| API server | missing |
+| HTTP test (authenticated query) | missing |
+| salt on the server (environment variable) | missing |
+| package upload | missing |
