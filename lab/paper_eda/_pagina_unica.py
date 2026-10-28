@@ -442,21 +442,39 @@ include-in-header:
 """
 
 
-GUIDE_MERMAID = """```{mermaid}
-%%| fig-width: 7
-flowchart TD
-  S0["0 Computational environment"] --> S1["1 Data<br/>1.8 Lab window · 1.9 Firm registry enrichment (RFB)"]
-  S1 --> S2["2 The portfolio across tax types<br/>2.8 Concentration by tax type and by debtor"]
-  S2 --> S3["3 The VAT (ICMS) portfolio<br/>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE"]
-  S3 --> S4["4 Statistical properties"]
-  S4 --> S5["5 Macroeconomic conditions<br/>5.8 Overnight Selic and correlation check"]
-  S5 --> S6["6 Discussion"]
-  S6 --> S7["7 Correspondence with the manuscript"]
-  S1 -.-> S8["8 Appendix: the full EDA notebook"]
-  classDef paper fill:#FFF4E5,stroke:#154C56,color:#154C56
-  classDef app fill:#ffffff,stroke:#8A9499,color:#4D4D4D,stroke-dasharray: 4 3
-  class S0,S1,S2,S3,S4,S5,S6,S7 paper
-  class S8 app
+GUIDE_MERMAID = """```{=html}
+<style>
+.cg-wrap{display:flex;gap:28px;align-items:flex-start;margin:1.2rem 0 1.4rem;font-family:inherit}
+.cg-main{display:flex;flex-direction:column;align-items:stretch;flex:1 1 auto;max-width:560px}
+.cg-box{display:block;border:1.5px solid #154C56;background:#FFF4E5;color:#154C56!important;border-radius:8px;
+ padding:.45rem .8rem;text-decoration:none!important;font-weight:600;font-size:.95rem;line-height:1.3}
+.cg-box:hover{background:#154C56;color:#fff!important}
+.cg-box small{display:block;font-weight:400;font-size:.78rem;opacity:.85;margin-top:.1rem}
+.cg-arrow{align-self:center;width:0;height:20px;border-left:2px solid #154C56;position:relative;margin:0}
+.cg-arrow::after{content:"";position:absolute;left:-7px;bottom:-2px;border:6px solid transparent;border-top:8px solid #154C56}
+.cg-side{flex:0 0 220px;margin-top:3.1rem;position:relative}
+.cg-side .cg-box{background:#fff;border:1.5px dashed #8A9499;color:#4D4D4D!important}
+.cg-side .cg-box:hover{background:#4D4D4D;color:#fff!important}
+.cg-side::before{content:"";position:absolute;left:-28px;top:1.1rem;width:24px;border-top:2px dashed #8A9499}
+.cg-note{font-size:.75rem;color:#6b7378;margin-top:.35rem}
+@media (max-width:700px){.cg-wrap{flex-direction:column}.cg-side{margin-top:0}.cg-side::before{display:none}}
+</style>
+<div class="cg-wrap" role="navigation" aria-label="Reading guide">
+<div class="cg-main">
+<a class="cg-box" href="#s-0">0 · Computational environment</a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-1">1 · Data<small>1.8 Lab window · 1.9 Firm registry enrichment (RFB)</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-a">2 · The portfolio across tax types<small>2.8 Concentration by tax type and by debtor</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-b">3 · The VAT (ICMS) portfolio<small>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-c">4 · Statistical properties</a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-d">5 · Macroeconomic conditions<small>5.8 Overnight Selic and correlation check</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-e">6 · Discussion</a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-7">7 · Correspondence with the manuscript and the dissertation</a>
+</div>
+<div class="cg-side">
+<a class="cg-box" href="#lab-edac">8 · Appendix: the full EDA notebook<small>Faithful conversion; includes partial 2026 data</small></a>
+<div class="cg-note">Dashed = appendix, outside the main reading order.</div>
+</div>
+</div>
 ```"""
 
 
@@ -485,7 +503,7 @@ names of the raw debt types in the data (e.g. *ICMS Declarado*, *ICMS Autuação
 
 **How the page is organised.** One numbering scheme for the whole page (1, 1.1, 1.1.1, …). Sections 0 to 7 follow the
 paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 2.8, 3.12–3.14, 5.8), each opened by a
-**New in the lab** box; section 8 is an appendix. The diagram shows the reading order; dashed = appendix.
+**New in the lab** box; section 8 is an appendix. The diagram shows the reading order; click a box to jump to its section (dashed = appendix).
 
 {GUIDE_MERMAID}
 
