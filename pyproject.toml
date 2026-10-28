@@ -104,3 +104,7 @@ override-dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["scripts/tests", "pipelines/litigancia/tests", "pipelines/cnpj_enrich/tests"]
+pythonpath = ["projects/monitoramento/scripts"]
+
+[tool.ruff]
+extend-exclude = ["projects/monitoramento/scripts/v1_protocol_extract.py"]
