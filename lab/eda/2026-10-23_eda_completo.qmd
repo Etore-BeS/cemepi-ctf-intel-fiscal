@@ -7,7 +7,7 @@ jupyter: python3
 
 **What this page is:** the `EDA_completo.ipynb` notebook converted without changing its logic. It runs from the artefacts already written to the external drive (the `EDA_ARTIFACTS` folder in `.env`) and only queries the database when an artefact is missing. The slow cells stay switched off, as in the original.
 **Data:** `cemepi.duckdb` and `macro.duckdb` in `DATA_ROOT` (from `.env`), `extracao=2026-03`.
-**Window:** the original notebook's, including partial 2026 in the series and correlations. The corrections made on 23/10/2026 are in their own subsections:
+**Window:** cut at December 2025 in this lab copy: every series, table and chart stops at 2025. The corrections made on 23/10/2026 are in their own subsections:
 
 - [Debt concentration and settlement in BRL](2026-10-23_concentracao_e_liquidacao.qmd): cut-off in 2025, B.8.5 in BRL, concentration by tax type and by debtor.
 - [K-means on the top 1%](2026-10-23_kmeans_top1.qmd): k from 2 to 8, k=2 against k=4, corrected Figure 3.5.18.
@@ -26,6 +26,42 @@ from pathlib import Path
 import polars as pl
 # lab (27/10/2026): tabelas impressas completas, sem cortar linhas nem colunas (pedido do Étore)
 pl.Config.set_tbl_rows(-1); pl.Config.set_tbl_cols(-1); pl.Config.set_fmt_str_lengths(200); pl.Config.set_tbl_width_chars(400)
+
+# lab (28/10/2026): janela do apêndice termina em dez/2025. Todo parquet lido (Polars/pandas) passa por um corte:
+# colunas de data < 2026-01-01 e colunas inteiras de ano (ano, ano_*, year) <= 2025. Nulos ficam.
+import datetime as _dt
+import re as _re
+import pandas as _pd
+ANO_FIM_LAB = 2025
+_FIM = _dt.date(ANO_FIM_LAB + 1, 1, 1)
+_ANO_RE = _re.compile(r"^(ano|ano_.*|year|.*_ano)$", _re.I)
+def _cond_pl(schema):
+    conds = []
+    for c, t in schema.items():
+        if t in (pl.Date,) or isinstance(t, pl.Datetime) or t == pl.Datetime:
+            conds.append(pl.col(c).is_null() | (pl.col(c).cast(pl.Date) < _FIM))
+        elif t.is_integer() and _ANO_RE.match(c):
+            conds.append(pl.col(c).is_null() | (pl.col(c) <= ANO_FIM_LAB))
+    return conds
+_pl_read, _pl_scan, _pd_read = pl.read_parquet, pl.scan_parquet, _pd.read_parquet
+def _read_cut(*a, **k):
+    df = _pl_read(*a, **k)
+    c = _cond_pl(df.schema)
+    return df.filter(*c) if c else df
+def _scan_cut(*a, **k):
+    lf = _pl_scan(*a, **k)
+    c = _cond_pl(lf.collect_schema())
+    return lf.filter(*c) if c else lf
+def _pd_cut(*a, **k):
+    df = _pd_read(*a, **k)
+    m = _pd.Series(True, index=df.index)
+    for c in df.columns:
+        if _pd.api.types.is_datetime64_any_dtype(df[c]):
+            m &= df[c].isna() | (df[c] < _pd.Timestamp(_FIM))
+        elif _pd.api.types.is_integer_dtype(df[c]) and _ANO_RE.match(str(c)):
+            m &= df[c].isna() | (df[c] <= ANO_FIM_LAB)
+    return df.loc[m]
+pl.read_parquet, pl.scan_parquet, _pd.read_parquet = _read_cut, _scan_cut, _pd_cut
 import plotly.express as px
 import plotly.io as pio
 
@@ -98,13 +134,86 @@ def load_inventario() -> list[dict[str, Any]]:
     return data
 
 
+def _exceeds_lab_window(val: Any) -> bool:
+    """True when a stored endpoint is after 31 Dec 2025."""
+    if val is None:
+        return False
+    if isinstance(val, _dt.datetime):
+        return val.date() > _dt.date(ANO_FIM_LAB, 12, 31)
+    if isinstance(val, _dt.date):
+        return val > _dt.date(ANO_FIM_LAB, 12, 31)
+    s = str(val).strip()
+    if len(s) == 4 and s.isdigit():
+        return int(s) > ANO_FIM_LAB
+    if len(s) >= 10 and s[4:5] == "-" and s[7:8] == "-":
+        try:
+            return _dt.date.fromisoformat(s[:10]) > _dt.date(ANO_FIM_LAB, 12, 31)
+        except ValueError:
+            return False
+    return False
+
+
+def _yearish(col: str) -> bool:
+    n = col.lower()
+    return n in {"ano", "year", "ano_extracao"} or n.endswith("_ano")
+
+
+def _minmax_through_2025(con, rel: str, col: str):
+    """Min and max on or before 31 Dec 2025. Years use the integer. Dates use the calendar day."""
+    if _yearish(col):
+        sql = (
+            f'SELECT MIN(v), MAX(v) FROM ('
+            f' SELECT TRY_CAST("{col}" AS BIGINT) AS v FROM {rel}'
+            f') t WHERE v IS NOT NULL AND v <= {ANO_FIM_LAB}'
+        )
+    else:
+        sql = (
+            f'SELECT MIN(v), MAX(v) FROM ('
+            f' SELECT TRY_CAST("{col}" AS TIMESTAMP) AS v FROM {rel}'
+            f") t WHERE v IS NOT NULL AND CAST(v AS DATE) <= DATE '2025-12-31'"
+        )
+    return con.execute(sql).fetchone()
+
+
+def _cap_cached_ranges(db_name: str, table: str, row: dict[str, Any]) -> None:
+    """Replace cached endpoints after 31 Dec 2025. One scan per table. Read-only."""
+    ranges = row.get("ranges") or {}
+    todo = [c for c, pair in ranges.items() if any(_exceeds_lab_window(x) for x in pair)]
+    if not todo:
+        return
+    db = DATA_ROOT / db_name
+    if not db.is_file():
+        return
+    con = duckdb.connect()
+    try:
+        con.execute("SET memory_limit='1200MB'")
+        con.execute("SET threads=2")
+        con.execute("SET preserve_insertion_order=false")
+        tmp = DATA_ROOT / "_duckdb_tmp_eda"
+        tmp.mkdir(exist_ok=True)
+        con.execute(f"SET temp_directory='{tmp}'")
+        con.execute(f"ATTACH '{db}' AS dbx (READ_ONLY)")
+        rel = f'dbx."{table}"'
+        out = dict(ranges)
+        for c in todo:
+            lo, hi = _minmax_through_2025(con, rel, c)
+            out[c] = (lo, hi)
+        row["ranges"] = out
+        _save_inventario()
+        print(f"ranges capped at 2025-12-31 — {db_name}:{table}: {', '.join(todo)}")
+    finally:
+        con.close()
+
+
 def describe_duckdb_table(db_name: str, table: str) -> dict[str, Any]:
     """Full census of ONE table (SQL). Run cell by cell."""
     db = DATA_ROOT / db_name
     label = f"{db_name}:{table}"
     if any(r.get("label") == label for r in inventario):
         print(f"already in the cache — skip {label}")
-        return next(r for r in inventario if r.get("label") == label)
+        row = next(r for r in inventario if r.get("label") == label)
+        _cap_cached_ranges(db_name, table, row)
+        return row
     if not fonte_ok or not db.is_file():
         print(f"SOURCE/file missing — skip {label}")
         return {"label": label, "n": None, "skipped": True}
@@ -129,7 +238,7 @@ def describe_duckdb_table(db_name: str, table: str) -> dict[str, Any]:
         dateish = [c for c in col_names if any(k in c.lower() for k in ("data", "date", "dt_", "ano", "mes"))]
         ranges: dict[str, tuple[Any, Any]] = {}
         for c in dateish:
-            lo, hi = con.execute(f'SELECT MIN("{c}"), MAX("{c}") FROM {rel}').fetchone()
+            lo, hi = _minmax_through_2025(con, rel, c)
             ranges[c] = (lo, hi)
 
         print(f"\n=== {label} ===")
@@ -248,11 +357,17 @@ for r in inv:
     top_null = sorted((r.get("null_pct") or {}).items(), key=lambda x: -x[1])[:3]
     top_s = "; ".join(f"{c} {100*v:.0f}%" for c, v in top_null) if top_null else "—"
     ranges = r.get("ranges") or {}
-    # pega um intervalo de data se houver
+    # pega um intervalo de data se houver (só até 31/12/2025)
     span = "—"
     for k, v in ranges.items():
         if "data" in k.lower() or k.lower().startswith("dt"):
-            span = f"{v[0]} → {v[1]}" if isinstance(v, (list, tuple)) else str(v)
+            if not isinstance(v, (list, tuple)) or len(v) < 2:
+                continue
+            if v[0] in (None, "None") or v[1] in (None, "None"):
+                continue
+            if _exceeds_lab_window(v[0]) or _exceeds_lab_window(v[1]):
+                continue
+            span = f"{v[0]} → {v[1]}"
             break
     rows.append({
         "tabela": r["label"],
@@ -327,7 +442,7 @@ Lean suggestion for the supervisor: 1 slide "what is in the database" (volume ba
 
 ### Pitfall: summing all extractions
 
-Each CDA reappears in every extraction month. `SUM(VALOR_SEM_HONORARIOS)` over the whole table **multiplies the stock by the number of months** the debt stayed in `DEBITO`. The real VAT (ICMS) stock is in the **hundreds of billions** (2026 VAT (ICMS) panel ≈ BRL 450 bn), not trillions.
+Each CDA reappears in every extraction month. `SUM(VALOR_SEM_HONORARIOS)` over the whole table **multiplies the stock by the number of months** the debt stayed in `DEBITO`. The real VAT (ICMS) stock is in the **hundreds of billions** (the VAT (ICMS) panel is in the hundreds of BRL bn), not trillions.
 
 ### What this step does
 
@@ -362,8 +477,8 @@ assert "fonte_ok" in globals() and fonte_ok, "Run step 0 with the Meedi drive mo
 db = DATA_ROOT / "cemepi.duckdb"
 assert db.is_file(), db
 
-# None = automático (último ANO×MES completo). Para fixar: CORTE = (2026, 3)
-CORTE: tuple[int, int] | None = None
+# lab (28/10/2026): corte fixo em dez/2025 (janela do lab termina em 2025)
+CORTE: tuple[int, int] | None = (2025, 12)
 
 out_dir = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
 out_dir.mkdir(exist_ok=True)
@@ -544,7 +659,7 @@ print("\ngroup × status at the cut-off:")
 print(sit)
 
 icms_bi = float(tot.filter(pl.col("bucket") == "ICMS")["valor_bi"].sum() or 0)
-print(f"\nVAT (ICMS) at the cut-off = BRL {icms_bi:,.1f} bn (expected order: hundreds of bn; 2026 panel ≈ BRL 450 bn)")
+print(f"\nVAT (ICMS) at the cut-off = BRL {icms_bi:,.1f} bn (expected order: hundreds of bn)")
 if icms_bi > 2_000:
     print("ALERT: VAT (ICMS) > BRL 2 tn — looks like a sum of extractions; check the cut-off filter.")
 
@@ -843,7 +958,7 @@ TEAL = "#154C56"
 
 csv_agg = out / "serie_agregada_icms_ano.csv"
 if csv_agg.is_file():
-    agg_ano = pl.read_csv(csv_agg).sort("ano")
+    agg_ano = pl.read_csv(csv_agg).filter(pl.col("ano") <= ANO_FIM_LAB).sort("ano")
     # DoD / diagnóstico ainda via scan se o painel existir
     if "painel_path" in globals() and Path(str(painel_path)).is_file():
         lf = pl.scan_parquet(str(painel_path))
@@ -996,6 +1111,7 @@ else:
         LAG(taxa, 3) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS taxa_l3,
         LAG(estoque_medio, 1) OVER (PARTITION BY ID_DEBITO ORDER BY ano) AS estoque_l1
       FROM read_parquet('{painel_path}')
+      WHERE ano <= {ANO_FIM_LAB}
     ) TO '{lags_path}' (FORMAT PARQUET)
     """
     con.execute(sql)
@@ -1012,6 +1128,7 @@ for a, b in pares:
         SELECT corr({a}, {b}) AS r,
                count(*) FILTER (WHERE {a} IS NOT NULL AND {b} IS NOT NULL) AS n
         FROM read_parquet('{lags_path}')
+        WHERE ano <= {ANO_FIM_LAB}
     """).fetchone()
     # Spearman em amostra de 2M — evita OOM no rank global de 23M
     spe = con.execute(f"""
@@ -1019,6 +1136,7 @@ for a, b in pares:
           SELECT {a} AS x, {b} AS y
           FROM read_parquet('{lags_path}')
           WHERE {a} IS NOT NULL AND {b} IS NOT NULL
+            AND ano <= {ANO_FIM_LAB}
           USING SAMPLE 2000000
         ),
         r AS (
@@ -1170,12 +1288,13 @@ else:
       WHERE taxa_l1 IS NOT NULL
         AND estoque_medio IS NOT NULL
         AND idade_anos IS NOT NULL
+        AND ano <= {ANO_FIM_LAB}
       USING SAMPLE 1000000
     ) TO '{amostra_path}' (FORMAT PARQUET)
     """)
     print("sample →", amostra_path)
 
-# agregados anuais na base toda
+# agregados anuais até o fim da janela do lab (2025)
 agg = con.execute(f"""
   SELECT
     ano,
@@ -1186,6 +1305,7 @@ agg = con.execute(f"""
     avg(taxa) AS taxa_media_id,
     avg((arrecadado > 0)::DOUBLE) AS share_pago
   FROM read_parquet('{lags_path}')
+  WHERE ano <= {ANO_FIM_LAB}
   GROUP BY 1
   ORDER BY 1
 """).pl()
@@ -1263,7 +1383,7 @@ where $\mathbf{m}_t$ are annual means of the macro series (BCB SGS), standardise
 
 **Inference.** Robust standard errors clustered by CDA (Cameron & Miller, 2015). Since the macro variation comes from only 9 years, the micro p-values of the macro series are optimistic (Moulton, 1990). Conservative column: **two-step** regression of the 9 year effects of the reference model on the macro series (OLS; Donald & Lang, 2007).
 
-**Window.** 2026 excluded (incomplete year in collections and macro series). Conditional association, not causal effect.
+**Window.** Ends in 2025 (the lab window). Conditional association, not causal effect.
 
 ```{python}
 # --- Modelo 1M: Logit P(pagamento no ano) com variáveis da CDA + macroeconomia anual ---
@@ -1282,7 +1402,7 @@ from scipy import stats
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 out = ARTIFACTS if "ARTIFACTS" in globals() else EDA_ARTIFACTS
-ANO_INI, ANO_FIM = 2017, 2025  # 2026 fica fora: ano incompleto na arrecadação e nas macros
+ANO_INI, ANO_FIM = 2017, 2025  # janela do lab termina em 2025
 
 # 1) Macros: média anual das séries mensais do BCB/IBGE (mesmo grão do painel CDA × ano)
 mw = pl.read_parquet(out / "macro_mensal_wide.parquet").with_columns(pl.col("mes").cast(pl.Date))
@@ -1477,7 +1597,7 @@ dic = pd.DataFrame([
 meta = pd.DataFrame([{
     "variavel_dependente": "y_pago = 1 if the VAT (ICMS) CDA had collections (GARE) > 0 in the year; 0 otherwise",
     "unidade": "CDA × year (annual VAT (ICMS) panel; random sample with the previous year's rate observed)",
-    "periodo": f"{ANO_INI}–{ANO_FIM} (2026 excluded: incomplete year)",
+    "periodo": f"{ANO_INI}–{ANO_FIM} (lab window ends in 2025)",
     "N": int(m_princ.nobs),
     "n_cdas": int(df["ID_DEBITO"].nunique()),
     "share_pago": float(df["y_pago"].mean()),
@@ -1514,7 +1634,7 @@ Three simple charts, **no dual axis**:
 
 The portfolio recovery rate is the metric for the conversation with PGE. The arithmetic mean of the per-CDA ratios (`taxa_media_id` in the CSV) explodes with residual stock and should **not** be used as portfolio recovery.
 
-If the recovery rate falls while the stock rises, the debt "grows" faster than collection: a descriptive reading, no causality. The year 2026 in the window is usually incomplete.
+If the recovery rate falls while the stock rises, the debt "grows" faster than collection: a descriptive reading, no causality. The window ends in 2025.
 
 ```{python}
 # --- Modelo 3: trajetórias agregadas (sem eixo dual) + AR(1) na taxa da carteira ---
@@ -1532,9 +1652,9 @@ TEAL = "#154C56"
 if "agg" in globals() and agg is not None:
     agg_pd = agg.to_pandas().sort_values("ano") if hasattr(agg, "to_pandas") else agg.sort_values("ano")
 else:
-    agg_pd = pl.read_csv(out / "serie_agregada_icms_ano.csv").to_pandas().sort_values("ano")
+    agg_pd = pl.read_csv(out / "serie_agregada_icms_ano.csv").filter(pl.col("ano") <= ANO_FIM_LAB).to_pandas().sort_values("ano")
 
-agg_pd = agg_pd.copy()
+agg_pd = agg_pd.loc[agg_pd["ano"] <= ANO_FIM_LAB].copy()
 agg_pd["estoque_bi"] = agg_pd["estoque_sum"] / 1e9
 agg_pd["arrec_bi"] = agg_pd["arrec_sum"] / 1e9
 agg_pd["taxa_carteira_pct"] = agg_pd["taxa_carteira"] * 100
@@ -1581,7 +1701,7 @@ fig.update_layout(
     title=dict(
         text=(
             "How much enrolled VAT (ICMS) did PGE collect each year?"
-            "<br><sup>Value in GARE in the year (BRL billion). 2026 is an incomplete window.</sup>"
+            "<br><sup>Value in GARE in the year (BRL billion). Window ends in 2025.</sup>"
         )
     )
 )
@@ -1603,13 +1723,13 @@ fig_e = go.Figure(
         hovertemplate="Year %{x}<br>Stock: BRL %{y:.1f} bn<extra></extra>",
     )
 )
-row26 = agg_pd.loc[agg_pd["ano"] == 2026]
+row26 = agg_pd.loc[agg_pd["ano"] == ANO_FIM_LAB]
 if not row26.empty:
     v = float(row26["estoque_bi"].iloc[0])
     fig_e.add_annotation(
-        x=2026,
+        x=ANO_FIM_LAB,
         y=v,
-        text=f"2026 ≈ BRL {v:.0f} bn",
+        text=f"{ANO_FIM_LAB} ≈ BRL {v:.0f} bn",
         showarrow=True,
         arrowhead=2,
         ax=40,
@@ -2105,6 +2225,7 @@ def _quita_por_id(painel_path: Path) -> pl.DataFrame:
             "           PARTITION BY ID_DEBITO ORDER BY ano "
             "         ) AS estoque_abertura "
             "  FROM read_parquet('" + q + "') "
+            "  WHERE ano <= " + str(ANO_FIM_LAB) + " "
             ") "
             "SELECT ID_DEBITO, "
             "       MIN(data_inscricao) AS data_inscricao, "
@@ -2638,7 +2759,7 @@ else:
             "FROM cem.ARRECADACAO a "
             f"SEMI JOIN read_parquet('{qpath(ids_path)}') i ON a.ID_DEBITO = i.ID_DEBITO "
             "WHERE TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP) IS NOT NULL "
-            "AND YEAR(TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP)) BETWEEN 2010 AND 2026 "
+            "AND YEAR(TRY_CAST(a.DATA_ARRECADACAO_GARE AS TIMESTAMP)) BETWEEN 2010 AND 2025 "
             "GROUP BY 1 ORDER BY 1"
         ).pl()
     finally:
@@ -2653,7 +2774,7 @@ else:
         .agg(pl.col("data_inscricao").min().alias("data_inscricao"))
         .with_columns(pl.col("data_inscricao").cast(pl.Date))
         .filter(pl.col("data_inscricao").is_not_null())
-        .filter(pl.col("data_inscricao").dt.year().is_between(2010, 2026))
+        .filter(pl.col("data_inscricao").dt.year().is_between(2010, 2025))
         .with_columns(pl.col("data_inscricao").dt.truncate("1mo").alias("mes"))
         .group_by("mes")
         .agg(pl.len().alias("n_novas"))
@@ -2672,7 +2793,7 @@ else:
     tick(f"wrote {proxy_path.name}")
     if novas_m.height == 0:
         print(
-            "NOTE: no usable data_inscricao between 2010 and 2026. "
+            "NOTE: no usable data_inscricao between 2010 and 2025. "
             "monthly n_novas stays empty; the annual proxy (first year of the id in the panel) is written."
         )
     else:
@@ -2697,7 +2818,7 @@ else:
                 "FROM cem.DEBITO "
                 "WHERE UPPER(CAST(TIPO_DEBITO AS VARCHAR)) LIKE '%ICMS%' "
                 "AND TRY_CAST(DATA_INSCRICAO AS TIMESTAMP) IS NOT NULL "
-                "AND YEAR(TRY_CAST(DATA_INSCRICAO AS TIMESTAMP)) BETWEEN 2010 AND 2026 "
+                "AND YEAR(TRY_CAST(DATA_INSCRICAO AS TIMESTAMP)) BETWEEN 2010 AND 2025 "
                 "GROUP BY 1 ORDER BY 1"
             ).pl()
         except Exception as e:

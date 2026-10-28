@@ -49,7 +49,7 @@ LAB_PAGES = [
      "lab-cnpj-firmas", "firm", "05_parte_b3", "LAB-CNPJ"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
-    ("eda/2026-10-23_eda_completo", "8", "Appendix: the full EDA notebook (faithful conversion, includes partial 2026)",
+    ("eda/2026-10-23_eda_completo", "8", "Appendix: the full EDA notebook (faithful conversion, window ending in 2025)",
      "lab-edac", "edac", "APPENDIX", "CTF-03"),
 ]
 LAB_ANCHOR = {p[0].split("/")[-1]: p[3] for p in LAB_PAGES}
@@ -131,7 +131,7 @@ PT2EN = [
      "common trend and from the 2020 drop: in the annual panel of the full EDA, the stock falls from BRL 410.6 bn (2019) to "
      "BRL 328.9 bn (2020), together with the count of CDAs, which looks like an artefact of the DEBITO extraction, not of the "
      "economy. It can only be fixed with a corrected DEBITO table (EQ-02/EQ-05); until then, this warning stays. With n = 10 "
-     "years, no annual map below supports a claim. What could be fixed (a single lag convention, no 2026, real GDP and credit, "
+     "years, no annual map below supports a claim. What could be fixed (a single lag convention, a window ending in 2025, real GDP and credit, "
      "PNAD in calendar quarters) is already applied here and is detailed, with before and after, in "
      "[5.8 Overnight Selic rate and check of the macroeconomic correlations]"),
     (", seções 2.5 e 3.", ", subsections 5.8.2.5 and 5.8.3."),
@@ -168,12 +168,12 @@ CALLOUT_MAP = {
     "Check of the annual correlations": ("lab-emprego", "New in the lab", "MAC-07"),
 }
 
-# O que cada marcador quer dizer (texto novo no paper; o "era" vem do marcador)
+# O que cada marcador quer dizer. O texto antigo (o "era") não entra na página: a janela do lab não cita 2026.
 ERA_NOVO = {
-    "era março de 2026": ("December 2025 (reference snapshot)", "March 2026"),
-    "era até março de 2026": ("up to December 2025", "up to March 2026"),
-    "era 2016–2026": ("2016–2025", "2016–2026"),
-    "era 2026": ("2025", "2026"),
+    "era março de 2026": "December 2025 (reference snapshot)",
+    "era até março de 2026": "up to December 2025",
+    "era 2016–2026": "2016–2025",
+    "era 2026": "2025",
 }
 
 # Callouts extras por seção (âncora do título -> (âncora do aviso, rótulo, texto))
@@ -273,7 +273,10 @@ def transform(md: str, state: dict) -> str:
     md = md.replace("#### lab: qualidade das fotos mensais {#lab-qualidade}",
                     "#### New in the lab: quality of the monthly DEBITO snapshots {#lab-qualidade}")
     md = md.replace("#### lab: recorte do laboratório",
-                    "### 1.8 New in the lab: window ending in 2025, no 2026 {#lab-recorte}")
+                    "### 1.8 New in the lab: window ending in 2025 {#lab-recorte}")
+    # Duas frases do paper ficaram com a janela antiga e sem marcador [lab: era ...].
+    md = md.replace("`DEBITO` and `ARRECADACAO`, 2016–2026,", "`DEBITO` and `ARRECADACAO`, 2016–2025,")
+    md = md.replace("ICMS extract (1.3), 2016–2026.", "ICMS extract (1.3), 2016–2025.")
     if "{#lab-qualidade}" in md:
         state["anchors"].add("lab-qualidade")
     if "{#lab-recorte}" in md:
@@ -306,7 +309,7 @@ def sectionize(md: str, state: dict) -> str:
         notes = []
         if sec["eras"]:
             uniq = list(dict.fromkeys(sec["eras"]))
-            items = "; ".join(f"**{ERA_NOVO.get(e, ('?', e))[0]}** (was {ERA_NOVO.get(e, ('?', e))[1]})" for e in uniq)
+            items = "; ".join(f"**{ERA_NOVO.get(e, e)}**" for e in uniq)
             notes.append(callout("note", "Changed in the lab (IMP-12): data cut at 2025",
                                  f"Paper text adjusted to the [lab window](#lab-recorte): {items}."))
             state["n_era_sections"] += 1
@@ -471,7 +474,7 @@ GUIDE_MERMAID = """```{=html}
 <a class="cg-box" href="#s-7">7 · Correspondence with the manuscript and the dissertation</a>
 </div>
 <div class="cg-side">
-<a class="cg-box" href="#lab-edac">8 · Appendix: the full EDA notebook<small>Faithful conversion; includes partial 2026 data</small></a>
+<a class="cg-box" href="#lab-edac">8 · Appendix: the full EDA notebook<small>Faithful conversion; window ends in December 2025</small></a>
 <div class="cg-note">Dashed = appendix, outside the main reading order.</div>
 </div>
 </div>
@@ -491,7 +494,7 @@ def guide(state: dict) -> str:
                               "correlation check."),
             ("6", "s-part-e", "Synthesis, limitations, ethics, future research."),
             ("7", "s-7", "Where each result goes in the manuscript and the dissertation."),
-            ("8", "lab-edac", "The full EDA notebook, converted as is (includes partial 2026 data; read with care).")]
+            ("8", "lab-edac", "The full EDA notebook, converted as is, with the window cut at December 2025.")]
     lst = "\n".join(f"- [**{n}** {SEC_TITLE[n]}](#{a}): {d}" for n, a, d in rows)
     return f"""## Contents and reading guide {{#guia}}
 
@@ -528,7 +531,7 @@ The paper's text is kept and its conclusions are not rewritten. Each change belo
 a **New in the lab** or **Changed in the lab** box explains it. Numbers that changed appear in the tables and figures of
 that section.
 
-1. **Data cut at 2025, no 2026 (IMP-12).** Last full year: 2025; reference snapshot: December 2025 (was March 2026).
+1. **Data cut at 2025 (IMP-12).** Last full year: 2025; reference snapshot: December 2025.
    [1.8 Lab window](#lab-recorte). The paper's text was adjusted in {state['n_markers']} places in
    {state['n_era_sections']} sections, each with a “Changed in the lab (IMP-12)” box.
 2. **Overnight Selic instead of the target rate (MAC-03).** The variable `selic` is now the overnight Selic rate
@@ -540,7 +543,7 @@ that section.
 4. **3.8.5 with value in BRL on the y-axis (IMP-09).** [3.8.5 Time to settlement](#lab-b885).
 5. **Concentration by tax type and by debtor (IMP-10).** [3.4 Concentration](#lab-concentracao) ·
    [2.8 Concentration by tax type and by debtor]({LINK_CONC}).
-6. **Macroeconomic correlations corrected (MAC-07).** One lag convention (macro at t − k), no 2026, monthly GDP and
+6. **Macroeconomic correlations corrected (MAC-07).** One lag convention (macro at t − k), window ending in 2025, monthly GDP and
    credit to firms deflated by the IPCA (BRL of December 2025) and PNAD Contínua in calendar quarters, by quarter and by
    year. **Warning:** the annual employment × stock correlation comes from the common trend and from the 2020 drop, which
    looks like an artefact of the DEBITO extraction (EQ-02/EQ-05), and must not go into the text.
@@ -749,6 +752,29 @@ def renumber_and_vat(md: str) -> str:
     return "\n".join(out)
 
 
+
+HM_2026_RE = re.compile(
+    r'"text":(\[\[.*?\]\]),"texttemplate":"([^"]*)","x":(\[[^\]]*\]),"y":(\[[^\]]*,"2026"\]),'
+    r'"z":\{"dtype":"f8","bdata":"([^"]+)","shape":"(\d+), (\d+)"\}')
+
+
+def drop_empty_2026_rows(page: str) -> str:
+    """Heatmaps com uma última linha "2026" vazia (só NaN, texto ""): tira a linha (janela do lab termina em 2025)."""
+    import base64, json, math, struct
+
+    def fix(m: re.Match) -> str:
+        text, tt, x, y = json.loads(m.group(1)), m.group(2), m.group(3), json.loads(m.group(4))
+        raw = base64.b64decode(m.group(5).replace("\\u002f", "/"))
+        r, c = int(m.group(6)), int(m.group(7))
+        last = struct.unpack(f"<{c}d", raw[(r - 1) * c * 8:r * c * 8])
+        if r != len(y) or any(t != "" for t in text[-1]) or not all(math.isnan(v) for v in last):
+            return m.group(0)
+        bd = base64.b64encode(raw[:(r - 1) * c * 8]).decode().replace("/", "\\u002f")
+        return (f'"text":{json.dumps(text[:-1], separators=(",", ":"))},"texttemplate":"{tt}","x":{x},'
+                f'"y":{json.dumps(y[:-1], separators=(",", ":"))},"z":{{"dtype":"f8","bdata":"{bd}","shape":"{r - 1}, {c}"}}')
+
+    return HM_2026_RE.sub(fix, page)
+
 def main() -> int:
     state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": [], "pt2en": {}, "lab_pages": []}
     includes = []
@@ -793,6 +819,7 @@ def main() -> int:
     if missing:
         sys.exit(f"âncoras sem destino: {missing}")
     assert "[lab:" not in re.sub(r"```.*?```", "", page, flags=re.S), "sobrou marcador [lab: ...] no texto"
+    page = drop_empty_2026_rows(page)
     OUT.write_text(page, encoding="utf-8")
     print(f"{OUT.relative_to(LAB)}: {len(page)/1e6:.1f} MB; marcadores {state['n_markers']} em {state['n_era_sections']} seções; "
           f"seções com estrelas {len(state['star_secs'])}; scattergl->scatter {state['n_gl']}; figuras à parte {[(c, round(n/1e6, 1)) for c, n in state['figs']]}")

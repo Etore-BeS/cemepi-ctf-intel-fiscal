@@ -9,7 +9,7 @@ date-format: "DD/MM/YYYY"
 
 **[Paper EDA (paper_eda_v1) in the lab](paper_eda/index.qmd)**: the article's whole EDA (sections 0 to 6) on a single
 page, with a side table of contents, a [contents and reading guide](paper_eda/index.qmd#guia) with an organogram at the
-top and the [list of changes](paper_eda/index.qmd#novidades) with links to each changed subsection: no 2026, overnight
+top and the [list of changes](paper_eda/index.qmd#novidades) with links to each changed subsection: window ending in 2025, overnight
 Selic, significance stars (p ≤ 0.10), B.8.5 in BRL (now 6.5), concentration by tax type and by debtor, employment ×
 stock, Figure 3.5.18, K-means with k = 2/3/4, DEBITO quality warnings, with vs. without CNPJ and aggregates only. The
 dated lab analyses sit inside the thematic sections they belong to (1.9, 2.8, 3.12–3.14 and 5.8); the full EDA notebook
@@ -23,7 +23,7 @@ found and what can **not** be concluded. The articles' figures do **not** come f
 they come from `projects/<frente>/notebooks/articles/` (see `docs/ESTRUTURA.md`).
 
 - **Data in use:** Inteligência Fiscal dump (PGE-SP), `extracao=2026-03`. The panels and caches of the article's EDA (`paper_eda_v1`) are reused through the cache key, with no re-extraction.
-- **Default window of the new entries:** 2016 to 2025. 2026 only has January to March and is left out of the charts and correlations.
+- **Default window of the new entries:** 2016 to 2025.
 - **Last local render:** see the date of this page.
 
 ## What changed in this version

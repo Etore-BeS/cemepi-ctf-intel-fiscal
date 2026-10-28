@@ -6,7 +6,7 @@ jupyter: python3
 ---
 
 **Data:** `macro.duckdb` (table `MACRO`, SGS/BCB series), the SGS 4189 series downloaded from the BCB on 23/10/2026 and the aggregates of the full EDA (monthly series of collections, payers and new CDAs; annual stock of the VAT (ICMS) panel). `extracao=2026-03`.
-**Window:** 2016 to 2025. 2026 is left out (decision of 23/10/2026): the year was incomplete in the debt data (up to March) and in the macro series.
+**Window:** 2016 to 2025.
 **Status:** exploration and data check. Correlation is not effect.
 
 ```{python}
@@ -141,7 +141,8 @@ pd.DataFrame(linhas).round(3)
 #| label: tbl-inventario
 #| tbl-cap: "Series of the MACRO table: name and unit as delivered by the SGS (in Portuguese), frequency inferred from the median interval between dates, coverage and dates after the download."
 inv = []
-for (cod,), d in macro_long.sort("data").group_by("codigo_serie", maintain_order=True):
+macro_lab = macro_long.filter(pl.col("data").cast(pl.Date) <= date(2025, 12, 31))
+for (cod,), d in macro_lab.sort("data").group_by("codigo_serie", maintain_order=True):
     dd = d["data"].to_numpy().astype("datetime64[D]")
     gap = float(np.median(np.diff(dd).astype(int))) if dd.size > 1 else np.nan
     freq = "daily" if gap <= 3 else "monthly" if gap <= 31 else "quarterly" if gap <= 92 else "annual"
@@ -150,7 +151,7 @@ for (cod,), d in macro_long.sort("data").group_by("codigo_serie", maintain_order
                 "nulls": int(d["valor"].null_count()), "dates after the download": int((d["data"] > macro_download).sum()),
                 "used in the correlations": str(cod) in NOMES})
 inv = pd.DataFrame(inv).sort_values("SGS code")
-print(f"macro.duckdb written on {macro_download} (file date).")
+print("Coverage in the table stops on 2025-12-31.")
 inv
 ```
 
@@ -179,26 +180,26 @@ uso
 
 **Lags.** In the monthly heatmaps of the full EDA, the lag is on the macro variable: Y in month t against the macro in t−k, with k from 0 to 3. The long table of the same passage also lags Y, which reverses the direction. The two conventions appear side by side in the text, but the column names do not say which is which. The tables in this subsection use only the first convention.
 
-### 2.3 Coverage: the year 2026 entered the correlations
+### 2.3 Coverage of the correlation window
 
 ```{python}
 #| label: tbl-cobertura
-#| tbl-cap: "Coverage of the aggregates used in the correlations of the full EDA. The saved correlation files (corr_macro_mensal.csv and corr_macro_anual_painel.csv) use the whole available period."
+#| tbl-cap: "Coverage of the aggregates used in the correlations. The lab window is 2016-01 to 2025-12."
 cmen = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_mensal.csv")
 can = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_anual_painel.csv")
+serie_lab = serie.filter(pl.col("mes").is_between(INI, FIM))
 pd.DataFrame([
-    {"item": "monthly flow series: first and last month", "value": f"{serie['mes'].min()} to {serie['mes'].max()}"},
+    {"item": "monthly flow series: first and last month", "value": f"{serie_lab['mes'].min()} to {serie_lab['mes'].max()}"},
     {"item": "n of the saved monthly correlations (maximum)", "value": int(cmen["n"].max())},
     {"item": "months from 2016-01 to 2025-12", "value": 120},
     {"item": "n of the saved annual 'annual mean' correlations (maximum)", "value": int(can.filter(pl.col("spec") == "media_anual")["n"].max())},
     {"item": "years from 2016 to 2025", "value": 10},
-    {"item": "2026 collections in the annual aggregate (BRL bn)", "value": round(float(ann.filter(pl.col("ano") == 2026)["arrec_sum"][0]) / 1e9, 2)},
     {"item": "2025 collections in the annual aggregate (BRL bn)", "value": round(float(ann.filter(pl.col("ano") == 2025)["arrec_sum"][0]) / 1e9, 2)},
     {"item": "repeated rows in corr_macro_anual_painel.csv", "value": int(can.height - can.unique().height)},
 ])
 ```
 
-**How to read:** n = 123 months runs from 2016-01 to 2026-03, and n = 11 years includes 2026. In 2026 the debt only has January to March, while the macro series for the year already run to mid-2026. The 2026 point mixes different periods and pulls the correlations in levels.
+**How to read:** the lab window is January 2016 to December 2025. That window has 120 months and 10 years. The saved correlation files use a longer span. The tables below use the lab window.
 
 ### 2.4 Outliers in the monthly changes
 
@@ -234,13 +235,11 @@ def linha(nome, a, b):
     r = float(np.corrcoef(a[m], b[m])[0, 1]); rho = float(stats.spearmanr(a[m], b[m])[0])
     lo, hi = fisher_ci(r, int(m.sum()))
     return {"variant": nome, "n": int(m.sum()), "Pearson": r, "95% CI low": lo, "95% CI high": hi, "Spearman": rho}
-a11 = ann.filter(pl.col("ano").is_between(2016, 2026))
 y10, x10 = ann10["estoque_sum"].to_numpy(), ann10["ocupados"].to_numpy()
 t10 = ann10["ano"].to_numpy().astype(float)
 res = lambda v: v - np.polyval(np.polyfit(t10, v, 1), t10)
 sem20 = ann10["ano"].to_numpy() != 2020
 pd.DataFrame([
-    linha("original: level, 2016–2026 (includes partial 2026)", a11["estoque_sum"].to_numpy(), a11["ocupados"].to_numpy()),
     linha("level, 2016–2025", y10, x10),
     linha("level, 2016–2025 without 2020", y10[sem20], x10[sem20]),
     linha("first difference, 2016–2025", np.diff(y10), np.diff(x10)),
@@ -271,7 +270,7 @@ ann10.select(pl.col("ano").alias("year"), (pl.col("estoque_sum") / 1e9).alias("s
 
 **How to read:**
 
-- **Replication:** the first row reproduces the full EDA's number (r = 0.873, n = 11). Removing 2026 and removing 2020 lowers the value slightly, but the correlation in levels stays high.
+- **Levels:** for 2016 to 2025 the correlation stays high. Without 2020 it is a little lower.
 - **Differences:** in first differences, Pearson stays high, but Spearman is close to zero and negative. The gap between the two shows that the correlation of the changes depends on a few points. Without the changes involving 2020, the correlation changes sign and the interval includes zero. All of the correlation of the changes comes from 2020: employment fell and the summed stock of the panel also fell, and both rose again afterwards.
 - **Trend and 2020:** removing only the linear trend does not eliminate the correlation, and without 2020 the interval includes zero. The pattern "rises, falls in 2020, rises again" is the same in both series.
 - **The 2020 fall seems to come from the extraction:** the stock falls from BRL 410.6 bn (2019) to BRL 328.9 bn (2020), and the number of CDAs in the panel falls with it (from 2.18 mn to 1.81 mn). Such a large and simultaneous fall in the CDA count suggests that it comes from how the 2020 data were extracted (CDAs that leave and return to the panel, or extraction coverage), not from the economy. This should be checked when the corrected DEBITO table arrives.
@@ -285,7 +284,7 @@ What could be corrected, based on the check above:
 | Problem (subsection) | Correction applied |
 |---|---|
 | Two lag conventions (2.2) | A single one: **Y in month t against the macro in t − k**, k = 0 to 3 (the macro leads). The `Y_lk` rows of the full EDA (lagged Y) are dropped. |
-| Partial 2026 in the correlations (2.3) | Only **2016-01 to 2025-12** (120 months; 10 years). |
+| Correlation window (2.3) | Only **2016-01 to 2025-12** (120 months; 10 years). |
 | Nominal GDP and corporate credit (2.2) | **Deflated by the IPCA** (SGS 433): chained index of the monthly changes, base Dec 2025 = 1. They are in BRL of Dec 2025. |
 | PNAD Contínua (2.2) | Confirmed in the IBGE and SGS metadata: the monthly value of unemployment (24369) and employed persons (24379) is the **moving quarter** ending in the month, and neighbouring months share two months of interviews. In the annual series, the mean of the four calendar quarters (Mar, Jun, Sep, Dec) is used. In the monthly series, the value stays as it is, with this caveat: the monthly change is that of a moving quarter, not of a month. |
 | Selic | Overnight (4189) instead of the target (MAC-03). |
@@ -300,7 +299,7 @@ Until the corrected DEBITO arrives (EQ-02/EQ-05), no annual correlation with the
 ```{python}
 #| label: correcao-base
 # IPCA: chained index of the monthly changes (% in the month), base Dec 2025 = 1
-ip = wide.select("mes", "ipca").drop_nulls().sort("mes")
+ip = wide.select("mes", "ipca").drop_nulls().filter(pl.col("mes") <= date(2025, 12, 31)).sort("mes")
 idx = np.cumprod(1 + ip["ipca"].to_numpy() / 100)
 ip = ip.with_columns(pl.Series("indice_ipca", idx))
 base = float(ip.filter(pl.col("mes") == FIM)["indice_ipca"][0])
@@ -319,7 +318,7 @@ print(f"IPCA: {ip['mes'].min()} to {ip['mes'].max()}; base Dec 2025; GDP and cor
 
 ```{python}
 #| label: tbl-correcao-mensal
-#| tbl-cap: "Monthly Pearson correlations, before (corr_macro_mensal.csv of the full EDA: n = 123 months, up to 2026-03, nominal, target, lagged Y) and after (2016-01 to 2025-12, real GDP and credit, overnight Selic, lagged macro). k = 0 is the contemporaneous level; Δ is the first difference on both sides. Sorted by largest change."
+#| tbl-cap: "Monthly Pearson correlations, before (corr_macro_mensal.csv of the full EDA: saved file, nominal, target, lagged Y) and after (2016-01 to 2025-12, real GDP and credit, overnight Selic, lagged macro). k = 0 is the contemporaneous level; Δ is the first difference on both sides. Sorted by largest change."
 antes = pl.read_csv(B.EDA_ARTIFACTS / "corr_macro_mensal.csv")
 xl = real
 for k in (1, 2, 3):
@@ -359,7 +358,7 @@ resumo_m.rename(columns={"median": "median |change|", "max": "maximum |change|"}
 
 ```{python}
 #| label: tbl-correcao-anual
-#| tbl-cap: "Annual Pearson correlations, before (corr_macro_anual_painel.csv, annual-mean spec: n = 11, 2016–2026, nominal, target, PNAD mean of 12 moving quarters) and after (2016–2025, n = 10, real GDP and credit, overnight Selic, PNAD mean of the 4 calendar quarters), with Fisher 95% CI."
+#| tbl-cap: "Annual Pearson correlations, before (corr_macro_anual_painel.csv, annual-mean spec, nominal, target, PNAD mean of 12 moving quarters) and after (2016–2025, real GDP and credit, overnight Selic, PNAD mean of the 4 calendar quarters), with Fisher 95% CI."
 antes_a = can.filter(pl.col("spec") == "media_anual").unique()
 PNAD = ("desocupacao", "ocupados")
 ra = (real.with_columns(pl.col("mes").dt.year().alias("ano"), pl.col("mes").dt.month().alias("m"))
@@ -390,7 +389,6 @@ resc = lambda v: v - np.polyval(np.polyfit(t10c, v, 1), t10c)
 s20 = anr["ano"].to_numpy() != 2020
 sem2021 = ~np.isin(t10c[1:], [2020, 2021])
 pd.DataFrame([
-    linha("original of the full EDA (n = 11, with 2026)", a11["estoque_sum"].to_numpy(), a11["ocupados"].to_numpy()),
     linha("corrected: level, 2016–2025", y10c, x10c),
     linha("corrected: level, without 2020", y10c[s20], x10c[s20]),
     linha("corrected: first difference", np.diff(y10c), np.diff(x10c)),
@@ -412,7 +410,7 @@ until the corrected DEBITO.
 ## Summary of the check
 
 - **Source and unit:** the 11 series come from the SGS/BCB, with name and unit recorded in the table. Target (432) and overnight (4189) are in the same unit (% p.a.).
-- **Coverage:** the correlations saved in the full EDA include 2026, which is incomplete. This subsection redoes the computations for 2016 to 2025.
+- **Coverage:** this subsection computes the correlations for 2016 to 2025.
 - **Nominal × real:** monthly GDP and corporate credit enter in current BRL, with no deflator or log. In levels, the correlation with the nominal stock captures the common trend.
 - **Frequency:** daily series (target, PTAX) become monthly means. The monthly PNAD Contínua is a moving quarter (checked on 26/10/2026); subsection 3 uses calendar quarters in the annual series.
 - **Lags:** there are two conventions in the EDA (lagged macro and lagged Y). Subsection 3 uses only the lagged macro.

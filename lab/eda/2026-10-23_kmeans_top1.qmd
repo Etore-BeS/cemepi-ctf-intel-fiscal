@@ -1,11 +1,11 @@
 ---
 title: "Large VAT (ICMS) debts: distance structure (Figure 3.5.18) and K-means with many initialisations"
-description: "K-means with 100 initialisations per k on the top 1%, no 2026: main solution k = 4 (author's decision, IMP-13), with k = 2 to 8, elbow, silhouette and HDBSCAN as diagnostics."
+description: "K-means with 100 initialisations per k on the top 1%, window ending in December 2025: main solution k = 4 (author's decision, IMP-13), with k = 2 to 8, elbow, silhouette and HDBSCAN as diagnostics."
 date: 2026-10-23
 jupyter: python3
 ---
 
-**Data:** the legal-entity-only VAT (ICMS) extract of paper EDA v1 (subsection 1.3), `extracao=2026-03`. **Main base:** top 1% of CDAs by value in the **December 2025** snapshot, with payments up to 31/12/2025 (no 2026). **Comparison base:** the paper's, with the March 2026 snapshot and all payments.
+**Data:** the legal-entity-only VAT (ICMS) extract of paper EDA v1 (subsection 1.3), `extracao=2026-03`. **Base:** top 1% of CDAs by value in the **December 2025** snapshot, with payments through 31/12/2025.
 **Status:** exploration. **Main solution: k = 4, by the author's decision (IMP-13, 27/10/2026).** k = 2 to 8, elbow, silhouette, hierarchical clustering and HDBSCAN are kept as diagnostics. The subsection draws no substantive conclusions from the groups.
 
 ```{python}
@@ -32,8 +32,6 @@ N_SUB = 5000
 BASES = {
     "2025-12": dict(snap=(2025, 12), cutoff="2026-01-01",
                     params={"set": "top_1pct", "snapshot": "2025-12", "pay_cutoff": "2026-01-01", "features": K.NUM + K.CAT}),
-    "2026-03 (paper)": dict(snap=(2026, 3), cutoff=None,
-                            params={"set": "top_1pct", "snapshot": B.EXTRACT, "features": K.NUM + K.CAT}),
 }
 R = {}
 for nome, cfg in BASES.items():
@@ -66,7 +64,7 @@ print(f"scikit-learn {sklearn.__version__}; seed {B.SEED}; {N_SEEDS} initialisat
 
 ```{python}
 #| label: tbl-bases
-#| tbl-cap: "The two top-1% bases."
+#| tbl-cap: "The top 1% base, December 2025 snapshot."
 pl.DataFrame([{"base": n, "CDAs": r["f"].height, "minimum value (BRL mn)": float(r["f"]["value"].min() / 1e6),
                "total value (BRL bn)": float(r["f"]["value"].sum() / 1e9),
                "% with any payment": float(100 * (r["f"]["n_payments"] > 0).mean())} for n, r in R.items()]).to_pandas().round(2)
@@ -329,26 +327,19 @@ for n, r in R.items():
     for k in (2, 4):
         linhas.append({"base": n, "comparison": f"K-means k={k} × hierarchical k={K_STAR[n]} (highest silhouette)",
                        "ARI": adjusted_rand_score(b[k], agg[n])})
-ids = {n: r["f"]["ID_DEBITO"].to_numpy() for n, r in R.items()}
-comuns, ia, ib = np.intersect1d(ids["2025-12"], ids["2026-03 (paper)"], return_indices=True)
-for k in (2, 4):
-    a = np.array(R["2025-12"]["km"]["best"][str(k)])[ia]
-    b2 = np.array(R["2026-03 (paper)"]["km"]["best"][str(k)])[ib]
-    linhas.append({"base": f"CDAs in both bases (n = {comuns.size:,})",
-                   "comparison": f"K-means k={k}: Dec 2025 × Mar 2026", "ARI": adjusted_rand_score(a, b2)})
 pl.DataFrame(linhas).to_pandas().round(3)
 ```
 
 ```{python}
 #| label: tbl-agg-tamanhos
-#| tbl-cap: "Size of the hierarchical clustering groups (average linkage, Gower) at the k with the highest silhouette, in both bases."
+#| tbl-cap: "Size of the hierarchical clustering groups (average linkage, Gower) at the k with the highest silhouette, December 2025 base."
 pl.DataFrame([{"base": n, "group": int(g), "CDAs": int(c), "% of CDAs": round(100 * c / agg[n].size, 2)}
               for n in R for g, c in zip(*np.unique(agg[n], return_counts=True))]).to_pandas()
 ```
 
 **How to read:** if one of the two hierarchical groups is tiny, the high silhouette at k = 2 comes from separating a few outliers from the rest, not from splitting the base into two profiles. This explains an ARI close to zero with the K-means.
 
-**How to read:** the k = 2 × k = 4 cross-tab shows whether the 4 groups are subdivisions of the 2 (each column falls almost entirely in one row) or cut the base another way. The ARI between the bases says whether the partition changes when the 2026 months are removed.
+**How to read:** the k = 2 × k = 4 cross-tab shows whether the 4 groups are subdivisions of the 2 (each column falls almost entirely in one row) or cut the base another way.
 
 ## What not to conclude
 
