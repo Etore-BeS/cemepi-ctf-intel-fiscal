@@ -18,7 +18,7 @@ CNPJ e só agregados. As entradas datadas, inteiras, estão na mesma página, na
 Caderno de laboratório da pesquisa sobre a dívida ativa inscrita do Estado de São Paulo.
 Cada entrada é datada e diz: a pergunta, os dados usados (versão do painel), o que foi
 encontrado e o que **não** se pode concluir. As figuras dos artigos **não** saem daqui;
-saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
+saem de `projects/<frente>/notebooks/articles/` (ver `docs/ESTRUTURA.md`).
 
 - **Base em uso:** dump Inteligência Fiscal (PGE-SP), `extracao=2026-03`. Os painéis e caches do EDA do artigo (`paper_eda_v1`) são reaproveitados pela chave de cache, sem reextração.
 - **Recorte padrão das entradas novas:** de 2016 a 2025. 2026 só tem janeiro a março e fica fora dos gráficos e das correlações.
@@ -26,6 +26,7 @@ saem de `projects/<frente>/analysis/<slug>/` (ver `docs/ESTRUTURA.md`).
 
 ## O que mudou nesta versão
 
+- *(2026-10-27)* **[Situação cadastral e CNAE dos CNPJs devedores](paper_eda/index.qmd#lab-cnpj-firmas):** situação cadastral (RFB 2026-03) × recuperação por origem, com Kaplan–Meier até o 1º pagamento, e CNAE por divisão × origem, com supressão de divisões que tenham célula de menos de 5 CNPJs; 2016 a 2025, só agregados (L.7).
 - *(2026-10-26)* **[EDA do paper inteiro numa página](paper_eda/index.qmd):** `paper_eda_v1` numa página só, gerada do notebook sem rodá-lo, com sumário lateral, quadro de novidades e avisos “Novo no lab” / “Alterado no lab” em cada seção mudada (no lugar dos marcadores `[lab: ...]`). Corte em 2025, Selic over, estrelas de significância e qualidade do DEBITO sinalizada (inclui 2024-12 parcial e linhas repetidas em 2025-06/07). O K-means passa a mostrar perfis de k = 2, 3 e 4.
 - *(2026-10-26)* **[Enriquecimento CNPJ (RFB 2026-03)](paper_eda/index.qmd#lab-cnpj-rfb):** o que o pipeline faz, a cobertura, o preenchimento por coluna, os atributos agregados, os sócios, a política de pessoa física, o esquema do pacote da API e o status da subida.
 - *(2026-10-23)* **Concentração da dívida e liquidação em R$:** a concentração do estoque de dez/2025 por tributo (ICMS, IPVA, ITCMD, TAXAS) e por devedor (raiz de CNPJ), com curva de Lorenz, Gini e participação do topo; o B.8.5 do artigo refeito com R$ no eixo y; 2026 fora.

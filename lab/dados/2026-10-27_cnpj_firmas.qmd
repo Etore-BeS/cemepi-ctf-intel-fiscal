@@ -1,0 +1,205 @@
+---
+title: "Situação cadastral e CNAE dos CNPJs devedores de ICMS × origem e recuperação (LAB-CNPJ)"
+description: "A dívida autuada e a declarada de ICMS se recuperam de forma diferente conforme a situação cadastral e a atividade (CNAE) da empresa devedora? Só agregados, 2016 a 2025."
+date: 2026-10-27
+jupyter: python3
+---
+
+**Dados:** CDAs de ICMS de pessoa jurídica (CNPJ de 14 dígitos) do extrato do EDA do paper, de **2016 a 2025** (sem 2026): estoque de fim de ano, pagamentos (GARE, `VALOR_RECEITA`) e data de inscrição. A origem (autuado ou declarado) e o CNPJ vêm da última foto de cada CDA até dez/2025. A **situação cadastral** e o **CNAE principal** (divisão, 2 dígitos) vêm do enriquecimento da Receita Federal de **março de 2026** (`cnpj_enriquecido`, versão `rfb-2026-03`, conferido pelo SHA-256 do manifest), por junção pelo CNPJ, só para leitura. As colunas de CPF e de nome do devedor não são lidas.
+**O que aparece:** só agregados por origem × situação e por divisão CNAE × origem. **Célula com 1 a 4 CNPJs vai para "outros (suprimido)"**; no CNAE, a **divisão inteira** é agrupada quando qualquer célula dela (autuado ou declarado, foto de dez/2025 ou painel) tem 1 a 4 CNPJs, porque o peso do autuado revelaria a célula pequena. Um agrupado que continue com menos de 5 CNPJs sai em branco.
+**Status:** exploração. As mesmas análises da seção 10 do artigo AVD-01 ("Debtor firm characteristics"), refeitas com código próprio do laboratório (`lab/dados/_firma_cnpj.py`); o artigo não lê o laboratório.
+
+::: {.callout-warning title="A situação e o CNAE são de março de 2026"}
+A situação cadastral e o CNAE são os do cadastro de março de 2026, **depois** das dívidas e dos pagamentos (que vão até dez/2025). Descrevem o devedor; não são causa medida antes do resultado. Uma empresa pode estar baixada ou inapta **por causa** das dívidas.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+sys.path.insert(0, str(Path.cwd().parent / "eda"))
+import numpy as np
+import pandas as pd
+pd.set_option("display.max_colwidth", None)
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from scipy import stats
+from IPython.display import HTML
+import _lab_base as B
+import _firma_cnpj as F
+A = F.agregados()
+br = lambda v, d=0: "—" if pd.isna(v) else f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+ORI = F.ORIGEM
+ordem = {s: i for i, s in enumerate(F.ORDEM_SIT)}
+def tabela(df):
+    return HTML(df.to_html(index=False, border=0, classes="dataframe"))
+def rolavel(df, n_linhas):
+    return HTML("<style>.lab-tabela-rolavel{max-height:34em;overflow:auto;border:1px solid #d9d9d9}"
+                ".lab-tabela-rolavel thead th{position:sticky;top:0;background:#fff;z-index:1}</style>"
+                f"<div class='lab-tabela-rolavel'>{df.to_html(index=False, border=0, classes='dataframe')}</div>"
+                f"<p style='font-size:0.8em'>Tabela completa: {n_linhas} linhas (role dentro da caixa).</p>")
+print(f"cnpj_enriquecido {A['versao_rfb']}: {br(A['linhas_rfb'])} CNPJs, SHA-256 conferido em {A['arquivos_rfb']} arquivos")
+```
+
+## Cobertura da junção
+
+```{python}
+#| label: tbl-cobertura-firmas
+#| tbl-cap: "Cobertura da junção com o cnpj_enriquecido (RFB 2026-03), CDAs de ICMS de pessoa jurídica, por origem. Foto de dez/2025 (estoque > 0) e painel CDA × ano 2016–2025."
+cov = pd.DataFrame(A["cobertura"])
+for c in ("cdas_dez", "estoque_dez", "cdas_painel"):
+    cov[f"pct_{c}"] = 100 * cov[c] / cov.groupby("origin")[c].transform("sum")
+NIV = {"estabelecimento": "estabelecimento (situação e CNAE conhecidos)", "raiz": "só a raiz (empresa achada, estabelecimento não)",
+       "nao_encontrado": "não encontrado no cadastro"}
+tabela(pd.DataFrame({"origem": cov.origin.map(ORI), "casamento": cov.match_level.map(NIV),
+              "CNPJs (dez/2025)": cov.cnpjs_dez.map(br), "CDAs (dez/2025)": cov.cdas_dez.map(br),
+              "% das CDAs": cov.pct_cdas_dez.map(lambda v: br(v, 2)), "estoque dez/2025 (R$ bi)": (cov.estoque_dez / 1e9).map(lambda v: br(v, 2)),
+              "% do estoque": cov.pct_estoque_dez.map(lambda v: br(v, 2)), "CDAs no painel": cov.cdas_painel.map(br),
+              "% das CDAs do painel": cov.pct_cdas_painel.map(lambda v: br(v, 2))}))
+```
+
+```{python}
+#| echo: false
+cn = A["cobertura_cnpjs"]
+tot_c = cov[cov.match_level == "estabelecimento"].cdas_dez.sum() / cov.cdas_dez.sum()
+tot_s = cov[cov.match_level == "estabelecimento"].estoque_dez.sum() / cov.estoque_dez.sum()
+print(f"Foto de dez/2025: {br(cn['cnpjs_dez'])} CNPJs distintos; casamento no estabelecimento de {br(100 * tot_c, 1)}% das CDAs "
+      f"e {br(100 * tot_s, 1)}% do estoque. Painel 2016–2025: {br(cov.cdas_painel.sum())} CDAs.")
+```
+
+## 1. Situação cadastral × recuperação, por origem
+
+**Método.** Para cada origem e situação cadastral (cadastro de março de 2026): CNPJs distintos, CDAs e estoque na foto de dez/2025 e a parte do estoque da origem; no painel 2016–2025, a **taxa de recuperação agregada** $\bar\rho_g = 100\,\sum_t P_{gt} / \sum_t E_{gt}$ (pagamentos de todos os anos sobre o estoque de fim de ano de todos os anos) e a parte das CDAs com algum pagamento. CDAs sem casamento no estabelecimento ficam em categorias próprias ("só a raiz", "não encontrado"), sem descarte.
+
+```{python}
+#| label: tbl-situacao
+#| tbl-cap: "Situação cadastral do CNPJ devedor (RFB, março de 2026) por origem: estoque de dez/2025 e recuperação no painel 2016–2025."
+st = pd.DataFrame(A["situacao"])
+st["pct_estoque"] = 100 * st.estoque_dez / st.groupby("origin").estoque_dez.transform("sum")
+st["rec"] = 100 * st.pago / st.estoque_painel
+st["pct_pagas"] = 100 * st.cdas_pagas / st.cdas_painel
+st = st.sort_values(["origin", "status"], key=lambda c: c.map(ordem) if c.name == "status" else c)
+tabela(pd.DataFrame({"origem": st.origin.map(ORI), "situação": st.status, "CNPJs (dez/2025)": st.cnpjs_dez.map(br),
+              "CDAs (dez/2025)": st.cdas_dez.map(br), "estoque (R$ bi)": (st.estoque_dez / 1e9).map(lambda v: br(v, 2)),
+              "% do estoque da origem": st.pct_estoque.map(lambda v: br(v, 1)), "CDAs no painel": st.cdas_painel.map(br),
+              "% com algum pagamento": st.pct_pagas.map(lambda v: br(v, 1)), "recuperação agregada (%)": st.rec.map(lambda v: br(v, 2))}))
+```
+
+```{python}
+#| echo: false
+print(f"Células suprimidas (1 a 4 CNPJs): {A['n_celulas_suprimidas_situacao']}.")
+```
+
+**Kaplan–Meier até o 1º pagamento.** Duração $T_i$ = meses da inscrição ao primeiro pagamento (GARE). CDAs sem pagamento até 31/12/2025 são censuradas nessa data. Estimador $\hat S(t)=\prod_{t_j\le t}(1-d_j/n_j)$ (Kaplan & Meier, 1958), com $d_j$ primeiros pagamentos no mês $t_j$ e $n_j$ CDAs ainda em risco; as curvas mostram $1-\hat S(t)$, a parte que já fez o primeiro pagamento até o mês $t$. Para não haver truncamento à esquerda (pagamentos antes de 2016 não estão no painel), só entra a **coorte de inscrição 2016–2025**. O cálculo usa só contagens agregadas por mês ($n$, $d$).
+
+```{python}
+#| label: fig-km-situacao
+#| fig-cap: "Parte das CDAs (coorte de inscrição 2016–2025) que já fez o 1º pagamento, por meses desde a inscrição (Kaplan–Meier), por situação cadastral (RFB, março de 2026). (a) autuado; (b) declarado. Situações com menos de 100 CDAs na coorte não são desenhadas (ficam na tabela); cada curva para quando restam menos de 20 CDAs em risco."
+km = pd.DataFrame(A["km"])
+curvas, linhas = [], []
+for (o, s_), g in km.groupby(["origin", "status"]):
+    c = F.kaplan_meier(g)
+    c["origin"], c["status"] = o, s_
+    curvas.append(c)
+    ate = lambda m: c.pago[c.t <= m].max() if (c.t <= m).any() else 0.0
+    med = c.t[c.pago >= 0.5].min()
+    linhas.append({"origin": o, "status": s_, "cdas": int(g.n.sum()), "pag": int(g.d.sum()),
+                   "p12": 100 * ate(12), "p24": 100 * ate(24), "p60": 100 * ate(60), "med": med})
+curvas = pd.concat(curvas, ignore_index=True)
+kmt = pd.DataFrame(linhas).sort_values(["origin", "status"], key=lambda c: c.map(ordem) if c.name == "status" else c)
+COR = {"ativa": "#154C56", "inapta": "#BD9869", "suspensa": "#5EA65B", "baixada": "#5E9AA5", "nula": "#B5651D",
+       "outro código": "#8A9499", "só a raiz (situação desconhecida)": "#8A9499", "não encontrado no cadastro": "#4D4D4D",
+       F.SUP: "#B0B0B0"}
+grandes = kmt[kmt.cdas >= 100][["origin", "status"]]
+pk = curvas.merge(grandes, on=["origin", "status"]).query("t <= 120 and em_risco >= 20")
+fig = make_subplots(rows=1, cols=2, shared_yaxes=True, horizontal_spacing=0.06, subplot_titles=("(a) Autuado", "(b) Declarado"))
+for cc, o in ((1, "assessed"), (2, "declared")):
+    for s_ in F.ORDEM_SIT:
+        d = pk[(pk.origin == o) & (pk.status == s_)]
+        if len(d):
+            fig.add_trace(go.Scatter(x=d.t, y=100 * d.pago, mode="lines", line_shape="hv", name=s_, legendgroup=s_,
+                                     showlegend=(cc == 1), line=dict(color=COR[s_], dash="dot" if ("raiz" in s_ or "cadastro" in s_) else "solid"),
+                                     customdata=d.em_risco, hovertemplate="mês %{x}: %{y:.1f}%<br>em risco: %{customdata:,}<extra>" + s_ + "</extra>"),
+                          row=1, col=cc)
+fig.update_xaxes(title_text="meses desde a inscrição", dtick=12, range=[0, 120])
+fig.update_yaxes(title_text="% com 1º pagamento", range=[0, 100], row=1, col=1)
+fig.update_layout(height=430, margin=dict(t=50, b=110), legend=dict(orientation="h", y=-0.25, x=0))
+fig.show()
+```
+
+```{python}
+#| label: tbl-km-situacao
+#| tbl-cap: "Kaplan–Meier até o 1º pagamento, coorte de inscrição 2016–2025, por origem e situação cadastral. Mediana vazia = não alcançada."
+tabela(pd.DataFrame({"origem": kmt.origin.map(ORI), "situação": kmt.status, "CDAs na coorte": kmt.cdas.map(br),
+              "1ºs pagamentos": kmt.pag.map(br), "% pago em 12 meses": kmt.p12.map(lambda v: br(v, 1)),
+              "% em 24 meses": kmt.p24.map(lambda v: br(v, 1)), "% em 60 meses": kmt.p60.map(lambda v: br(v, 1)),
+              "mediana (meses)": kmt.med.map(br)}))
+```
+
+**Como ler.** Dois painéis, autuado (a) e declarado (b); cada linha é uma situação cadastral. O eixo vertical é a parte das CDAs da coorte que já fez o primeiro pagamento até o mês $t$ depois da inscrição (0 a 120 meses). Passe o mouse para ver quantas CDAs ainda estão em risco.
+
+**O que não concluir:** a situação é observada em março de 2026, depois do resultado; uma curva mais baixa para empresas baixadas ou inaptas é associação, não efeito de estar baixada. A cauda direita das curvas depende só das coortes mais antigas. A censura é tratada como independente do pagamento dentro de cada grupo, hipótese forte para empresas baixadas ou inaptas. CDAs quitadas antes de aparecer numa foto mensal não estão no painel, o que puxa $1-\hat S(t)$ para baixo nos primeiros meses. Não há teste: com milhões de CDAs toda diferença é significativa.
+
+*Referência:* Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American Statistical Association*, 53(282), 457–481. https://doi.org/10.1080/01621459.1958.10501452
+
+## 2. CNAE por divisão × origem
+
+**Método.** CNAE 2.0 principal do estabelecimento devedor, no nível de **divisão** (2 dígitos; IBGE/CONCLA), cruzado com a origem. Por divisão: CNPJs distintos, estoque de dez/2025, o **peso do autuado** $w_d = 100\,E^{\text{aut}}_d/(E^{\text{aut}}_d+E^{\text{dec}}_d)$ (parte do estoque da divisão que vem de autos de infração) e a taxa de recuperação agregada $\bar\rho$ do painel 2016–2025, por origem e no total. CDAs sem casamento no estabelecimento não têm CNAE e formam a linha "sem CNAE".
+
+```{python}
+#| label: tbl-cnae-divisao
+#| tbl-cap: "Divisão CNAE (RFB, março de 2026) × origem: estoque de dez/2025, peso do autuado e recuperação agregada 2016–2025. Divisões com alguma célula de 1 a 4 CNPJs agrupadas em 'outros (suprimido)'. Letra entre parênteses = seção CNAE."
+dv = pd.DataFrame(A["divisao"])
+dv["pct_estoque"] = 100 * dv.estoque_dez / dv.estoque_dez.sum()
+esp = dv.divisao.isin([F.SUP]) | dv.divisao.str.startswith("sem CNAE")
+dv = pd.concat([dv[~esp].sort_values("estoque_dez", ascending=False), dv[esp]]).reset_index(drop=True)
+secao = lambda l: F.SECAO.get(l.split("(")[-1].rstrip(")"), "") if l[:2].isdigit() else ""
+out = pd.DataFrame({"divisão (seção)": dv.divisao, "seção CNAE": dv.divisao.map(secao), "CNPJs (dez/2025)": dv.cnpjs_dez.map(br),
+                    "CNPJs no painel": dv.cnpjs_painel.map(br), "estoque dez/2025 (R$ bi)": (dv.estoque_dez / 1e9).map(lambda v: br(v, 2)),
+                    "% do estoque de ICMS": dv.pct_estoque.map(lambda v: br(v, 1)), "peso do autuado (%)": dv.peso_autuado.map(lambda v: br(v, 1)),
+                    "recuperação autuado (%)": dv.rec_autuado.map(lambda v: br(v, 2)),
+                    "recuperação declarado (%)": dv.rec_declarado.map(lambda v: br(v, 2)), "recuperação total (%)": dv.rec_total.map(lambda v: br(v, 2))})
+rolavel(out, len(out))
+```
+
+```{python}
+#| echo: false
+mostradas = dv[~esp & dv.rec_total.notna()]
+rho, p = stats.spearmanr(mostradas.peso_autuado, mostradas.rec_total)
+top5 = mostradas.head(5)
+print(f"Divisões mostradas: {len(mostradas)}; agrupadas por supressão: {A['n_divisoes_suprimidas']}. "
+      f"As 5 maiores somam {br(top5.pct_estoque.sum(), 1)}% do estoque; a maior ({top5.divisao.iloc[0]}) tem "
+      f"{br(top5.pct_estoque.iloc[0], 1)}% do estoque e peso do autuado de {br(top5.peso_autuado.iloc[0], 1)}%. "
+      f"Peso do autuado entre {br(mostradas.peso_autuado.min(), 1)}% e {br(mostradas.peso_autuado.max(), 1)}%. "
+      f"Spearman (peso do autuado × recuperação total, entre divisões): rho = {br(rho, 2)} (p = {p:.2g}).")
+```
+
+```{python}
+#| label: fig-cnae-divisao
+#| fig-cap: "Uma bolha por divisão CNAE mostrada na tabela (agrupadas e 'sem CNAE' fora). Eixo x: peso do autuado (% do estoque de ICMS da divisão em dez/2025 que é autuado). Eixo y: recuperação agregada 2016–2025 da divisão, todas as origens, escala log. Área da bolha proporcional ao estoque de dez/2025; as 10 maiores divisões levam o código."
+d = mostradas.copy()
+d["rot"] = np.where(d.index < 10, d.divisao.str.extract(r"^(\d+)")[0], "")
+fig = go.Figure(go.Scatter(x=d.peso_autuado, y=d.rec_total, mode="markers+text", text=d.rot, textposition="top center",
+                           textfont=dict(size=9), customdata=np.c_[d.divisao, d.estoque_dez / 1e9, d.cnpjs_dez],
+                           hovertemplate="divisão %{customdata[0]}<br>peso do autuado %{x:.1f}%<br>recuperação %{y:.2f}%"
+                                         "<br>estoque R$ %{customdata[1]:.2f} bi<br>CNPJs %{customdata[2]:,}<extra></extra>",
+                           marker=dict(size=d.estoque_dez / 1e9, sizemode="area", sizeref=2 * d.estoque_dez.max() / 1e9 / 40 ** 2,
+                                       sizemin=3, color="#267586", opacity=0.7, line=dict(width=0.5, color="#154C56"))))
+fig.update_xaxes(title_text="peso do autuado no estoque de dez/2025 (%)", range=[-2, 102])
+fig.update_yaxes(title_text="recuperação agregada 2016–2025 (%, log)", type="log")
+fig.update_layout(showlegend=False, height=460, margin=dict(t=30))
+fig.show()
+```
+
+**Como ler.** Cada bolha é uma divisão: à direita, divisões cuja dívida de ICMS é quase toda autuada; acima, as que recuperam mais. A tabela dá, dentro de cada divisão, a recuperação do autuado e a do declarado separadas.
+
+**O que não concluir:** a posição de uma divisão mistura a composição por origem com porte, idade e situação das empresas; a correlação entre divisões é ecológica e não diz que a dívida autuada se recupera menos **dentro** de uma divisão. O CNAE é o de março de 2026 e o do estabelecimento (matriz e filial contam como CNPJs separados).
+
+**Diferença em relação ao artigo AVD-01 (§10).** Mesmas definições e mesma supressão; código próprio do laboratório sobre os caches do EDA do paper (atributos por ano, fim de ano e GARE por ano, partes de 2016 a 2025), em vez da leitura do `DEBITO` feita pelo artigo. Pequenas diferenças de contagem (CDAs que mudam de tipo na última foto) podem aparecer.
+
+```{python}
+#| label: cache
+#| echo: false
+B.cache_summary().to_pandas()
+```
