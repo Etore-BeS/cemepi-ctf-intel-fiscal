@@ -1,13 +1,13 @@
 ---
-title: "Concentração do estoque por tipo e por devedor; tempo até a saída em reais"
-description: "Quanto do estoque está em poucas CDAs e em poucos devedores, por tipo de tributo, em dezembro de 2025? Quanto dinheiro sai da carteira, e quando?"
+title: "Concentration of the stock by tax type and by debtor; time to exit in BRL"
+description: "How much of the stock is in a few CDAs and a few debtors, by tax type, in December 2025? How much money leaves the portfolio, and when?"
 date: 2026-10-23
 jupyter: python3
 ---
 
-**Dados:** dump Inteligência Fiscal (PGE-SP), `extracao=2026-03`. Concentração: foto de **dezembro de 2025** da tabela `DEBITO`, todos os tipos. Tempo até a saída: extrato ICMS só de PJ do paper EDA v1 (seção 1.3) e painel CDA × ano (seção 1.4), com pagamentos até 31/12/2025.
-**Recorte de tempo:** nada de 2026 entra nas análises nem nos gráficos (decisão de 23/10/2026). A foto de março de 2026, usada no paper, foi trocada pela de dezembro de 2025.
-**Status:** exploração. Não é resultado de artigo.
+**Data:** Inteligência Fiscal dump (PGE-SP), `extracao=2026-03`. Concentration: **December 2025** snapshot of the `DEBITO` table, all types. Time to exit: the legal-entity-only VAT (ICMS) extract of paper EDA v1 (subsection 1.3) and the CDA × year panel (subsection 1.4), with payments up to 31/12/2025.
+**Time window:** nothing from 2026 enters the analyses or the charts (decision of 23/10/2026). The March 2026 snapshot used in the paper was replaced by the December 2025 one.
+**Status:** exploration. Not an article result.
 
 ```{python}
 #| label: setup
@@ -24,20 +24,22 @@ import _lab_base as B
 
 SNAP = (B.LAST_FULL_YEAR, 12)
 SNAP_KEY = SNAP[0] * 100 + SNAP[1]
+# Display labels for the tax groups (the data keys stay as in the dump)
+LBL = {"ICMS": "VAT (ICMS)", "IPVA": "IPVA", "ITCMD": "ITCMD", "TAXAS": "Fees (TAXAS)"}
 ```
 
-## Pergunta
+## Question
 
-1. **Concentração (por tipo e por devedor):** em cada grupo de tributo (ICMS, IPVA, ITCMD e taxas), que parte do estoque está nas maiores CDAs e nos maiores devedores?
-2. **Tempo até a saída (seção B.8.5 do paper, agora em reais):** quanto valor sai da carteira depois de algum pagamento, e com quantos anos de inscrição?
+1. **Concentration (by type and by debtor):** in each tax group (VAT (ICMS), IPVA, ITCMD and fees), what share of the stock is in the largest CDAs and the largest debtors?
+2. **Time to exit (the paper's 3.8.5, now in BRL):** how much value leaves the portfolio after some payment, and how many years after enrolment?
 
-## Método
+## Method
 
-- **Curva de concentração (Lorenz invertida).** As unidades (CDAs ou devedores) são ordenadas da maior para a menor. A curva mostra a fração acumulada do estoque que está nos *x*% maiores.
-- **Coeficiente de Gini:** $G = 1 - 2\int_0^1 L(p)\,dp$, em que $L(p)$ é a curva de Lorenz (fração do total nas $p$ menores unidades). Vai de 0 (todas iguais) a 1 (tudo numa unidade). É a mesma função `lorenz` do paper EDA v1 (seção 0.6).
-- **Participação do topo:** a fração do estoque nas 0,1%, 1% e 10% maiores unidades. Também se informa quantas unidades somam metade do estoque.
-- **Devedor** é a raiz do CNPJ (8 dígitos), usada só dentro do cálculo. Nada aqui mostra CNPJ, nome ou CDA individual. Quem não tem CNPJ (pessoa física, sobretudo no IPVA e no ITCMD) **não** entra no nível de devedor. Este laboratório não lê CPF, e a tabela diz quanto do estoque de cada grupo fica coberto.
-- **Grupos de tributo:** mesma regra do EDA completo, na ordem IPVA > ICMS > ITCMD (inclui o ITBI de doação e causa mortis) > taxas.
+- **Concentration curve (inverted Lorenz).** The units (CDAs or debtors) are sorted from largest to smallest. The curve shows the cumulative share of the stock held by the largest *x*%.
+- **Gini coefficient:** $G = 1 - 2\int_0^1 L(p)\,dp$, where $L(p)$ is the Lorenz curve (share of the total in the smallest $p$ units). It ranges from 0 (all equal) to 1 (everything in one unit). It is the same `lorenz` function as in paper EDA v1 (subsection 0.6).
+- **Top shares:** the share of the stock in the largest 0.1%, 1% and 10% of units. The number of units that add up to half the stock is also reported.
+- **Debtor** is the CNPJ root (8 digits), used only inside the computation. Nothing here shows an individual CNPJ, name or CDA. Debtors without a CNPJ (natural persons, mostly in IPVA and ITCMD) do **not** enter the debtor level. This lab does not read CPF, and the table states how much of each group's stock is covered.
+- **Tax groups:** same rule as the full EDA, in the order IPVA > VAT (ICMS) > ITCMD (includes the ITBI on donations and causa mortis) > fees.
 
 ```{python}
 #| label: dados-foto
@@ -60,29 +62,29 @@ foto = (foto_raw.sort("valor", descending=True, nulls_last=True).unique("ID_DEBI
         .filter(pl.col("valor").is_not_null() & (pl.col("valor") > 0)))
 GRUPOS = ["ICMS", "IPVA", "ITCMD", "TAXAS"]
 qualidade = pl.DataFrame({
-    "item": ["linhas na foto", "CDAs distintas", "linhas repetidas por CDA", "CDAs com valor nulo ou ≤ 0 (fora)",
-             "CDAs usadas"],
-    "valor": [n_linhas, n_ids, n_linhas - n_ids, n_ids - foto.height, foto.height]})
+    "item": ["rows in the snapshot", "distinct CDAs", "repeated rows per CDA", "CDAs with null or ≤ 0 value (excluded)",
+             "CDAs used"],
+    "value": [n_linhas, n_ids, n_linhas - n_ids, n_ids - foto.height, foto.height]})
 qualidade.to_pandas()
 ```
 
-**Como ler a tabela acima:** é a checagem da foto de dezembro de 2025 antes de qualquer cálculo. Repetições e valores nulos ou não positivos saem do cálculo.
+**How to read the table above:** it is the check of the December 2025 snapshot before any computation. Repeated rows and null or non-positive values are left out of the computation.
 
-## Resultado
+## Result
 
-### Concentração por grupo de tributo
+### Concentration by tax group
 
 ```{python}
 #| label: tbl-concentracao
-#| tbl-cap: "Concentração do estoque por grupo de tributo, foto de dezembro de 2025. CDA: cada CDA é uma unidade. Devedor: soma por raiz de CNPJ, só para quem tem CNPJ."
+#| tbl-cap: "Concentration of the stock by tax group, December 2025 snapshot. CDA: each CDA is a unit. Debtor: sum by CNPJ root, only for debtors with a CNPJ."
 def resumo(valores: np.ndarray, grupo: str, nivel: str, cobertura: float | None = None) -> dict:
     share, cum, gini = B.lorenz(valores)
     k50 = int(np.searchsorted(cum, 0.5)) + 1
     ts = B.top_shares(valores)
-    return {"grupo": grupo, "nível": nivel, "unidades": int(valores.size), "estoque_R$_bi": float(valores.sum() / 1e9),
-            "Gini": gini, "top_0,1%": 100 * ts["top_0.1pct"], "top_1%": 100 * ts["top_1pct"], "top_10%": 100 * ts["top_10pct"],
-            "unidades_p/_50%": k50, "%_unid._p/_50%": 100 * k50 / valores.size,
-            "%_estoque_c/_CNPJ": cobertura}
+    return {"group": LBL.get(grupo, grupo), "level": nivel, "units": int(valores.size), "stock_BRL_bn": float(valores.sum() / 1e9),
+            "Gini": gini, "top_0.1%": 100 * ts["top_0.1pct"], "top_1%": 100 * ts["top_1pct"], "top_10%": 100 * ts["top_10pct"],
+            "units_for_50%": k50, "%_units_for_50%": 100 * k50 / valores.size,
+            "%_stock_with_CNPJ": cobertura}
 
 linhas, curvas = [], {}
 for g in GRUPOS:
@@ -94,42 +96,42 @@ for g in GRUPOS:
     cob = 100 * pj["valor"].sum() / d["valor"].sum()
     dv = pj.group_by("raiz").agg(pl.col("valor").sum())["valor"].to_numpy()
     if dv.size >= 100:
-        linhas.append(resumo(dv, g, "Devedor (raiz CNPJ)", cob))
+        linhas.append(resumo(dv, g, "Debtor (CNPJ root)", cob))
         curvas[(g, "Devedor")] = B.lorenz(dv)[:2]
     else:
-        linhas.append({"grupo": g, "nível": "Devedor (raiz CNPJ)", "unidades": int(dv.size), "%_estoque_c/_CNPJ": cob})
+        linhas.append({"group": LBL[g], "level": "Debtor (CNPJ root)", "units": int(dv.size), "%_stock_with_CNPJ": cob})
 conc = pl.DataFrame(linhas, infer_schema_length=None)
 conc.to_pandas().round(3)
 ```
 
-**Como ler:** cada linha é um grupo e um nível. "top 1%" é a fração do estoque nas 1% maiores unidades. "%_estoque_c/_CNPJ" diz quanto do estoque do grupo tem devedor com CNPJ e, portanto, entra no nível de devedor.
-**O que não concluir:** nos grupos em que a cobertura por CNPJ é baixa (IPVA e ITCMD), o nível de devedor descreve só as empresas, não o grupo inteiro. Concentração alta não diz nada sobre a chance de recuperar.
+**How to read:** each row is a group and a level. "top 1%" is the share of the stock in the largest 1% of units. "%_stock_with_CNPJ" says how much of the group's stock has a debtor with a CNPJ and therefore enters the debtor level.
+**What not to conclude:** in the groups where CNPJ coverage is low (IPVA and ITCMD), the debtor level describes only firms, not the whole group. High concentration says nothing about the chance of recovery.
 
 ```{python}
 #| label: fig-lorenz-tipo
-#| fig-cap: "Curvas de concentração por grupo de tributo, dezembro de 2025. Esquerda: CDAs. Direita: devedores com CNPJ (raiz). Eixo x em escala log."
-fig = make_subplots(rows=1, cols=2, subplot_titles=("CDA", "Devedor (raiz do CNPJ)"), horizontal_spacing=0.1)
+#| fig-cap: "Concentration curves by tax group, December 2025. Left: CDAs. Right: debtors with a CNPJ (root). x-axis on a log scale."
+fig = make_subplots(rows=1, cols=2, subplot_titles=("CDA", "Debtor (CNPJ root)"), horizontal_spacing=0.1)
 for col, nivel in ((1, "CDA"), (2, "Devedor")):
     for i, g in enumerate(GRUPOS):
         if (g, nivel) not in curvas:
             continue
         share, cum = curvas[(g, nivel)]
         idx = np.unique(np.geomspace(1, share.size, 300).astype(int)) - 1
-        fig.add_trace(go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", name=g, legendgroup=g,
+        fig.add_trace(go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", name=LBL[g], legendgroup=g,
                                  showlegend=col == 1, line=dict(color=B.color(i), dash=B.DASHES[i % 5])), 1, col)
-    fig.update_xaxes(type="log", title_text="% das unidades, da maior para a menor (log)", row=1, col=col)
-fig.update_yaxes(title_text="% acumulado do estoque", range=[0, 100], row=1, col=1)
+    fig.update_xaxes(type="log", title_text="% of units, largest to smallest (log)", row=1, col=col)
+fig.update_yaxes(title_text="cumulative % of the stock", range=[0, 100], row=1, col=1)
 fig.update_layout(height=430)
 fig.show()
 ```
 
-**Como ler:** quanto mais alto e mais à esquerda a curva sobe, mais concentrado é o estoque. A distância entre a curva de CDA e a de devedor mostra quanto a soma por empresa concentra ainda mais.
+**How to read:** the higher and further left the curve rises, the more concentrated the stock. The gap between the CDA curve and the debtor curve shows how much summing by firm concentrates it further.
 
-### Concentração dentro do ICMS, por tipo bruto
+### Concentration within VAT (ICMS), by raw type
 
 ```{python}
 #| label: tbl-concentracao-icms
-#| tbl-cap: "Concentração por tipo bruto de ICMS, dezembro de 2025 (CDA e devedor com CNPJ)."
+#| tbl-cap: "Concentration by raw VAT (ICMS) type, December 2025 (CDA and debtor with a CNPJ). Raw type names are kept as in the data."
 linhas_icms = []
 icms = foto.filter(pl.col("grupo") == "ICMS")
 for (t,), d in icms.group_by("TIPO_DEBITO"):
@@ -139,20 +141,20 @@ for (t,), d in icms.group_by("TIPO_DEBITO"):
     pj = d.filter(pl.col("raiz").is_not_null())
     dv = pj.group_by("raiz").agg(pl.col("valor").sum())["valor"].to_numpy()
     if dv.size >= 100:
-        linhas_icms.append(resumo(dv, t, "Devedor (raiz CNPJ)", 100 * pj["valor"].sum() / d["valor"].sum()))
-pl.DataFrame(linhas_icms, infer_schema_length=None).sort("estoque_R$_bi", descending=True).to_pandas().round(3)
+        linhas_icms.append(resumo(dv, t, "Debtor (CNPJ root)", 100 * pj["valor"].sum() / d["valor"].sum()))
+pl.DataFrame(linhas_icms, infer_schema_length=None).sort("stock_BRL_bn", descending=True).to_pandas().round(3)
 ```
 
-**O que não concluir:** os tipos com menos de 100 CDAs ficam fora da tabela, porque as frações de topo não fazem sentido com tão poucas unidades.
+**What not to conclude:** types with fewer than 100 CDAs are left out of the table, because top shares make no sense with so few units.
 
-### Tempo até a saída, em reais (B.8.5)
+### Time to exit, in BRL (3.8.5)
 
-**Definição (a mesma do paper).** A quitação não é registrada no dump. Por isso, uma CDA é tratada como "saiu depois de pagar" quando deixa de aparecer nas fotos mensais depois de ter recebido pelo menos um pagamento (GARE). Aqui, a saída tem que ter ocorrido até dezembro de 2025 (última foto em que aparece antes de 12/2025) e só contam pagamentos até 31/12/2025.
-**O que mudou em relação ao paper:** o eixo vertical passou a ser **valor em reais**. As barras mostram o valor inscrito (o maior valor sem honorários que a CDA teve nas fotos) e o valor pago por GARE dessas CDAs, por ano de idade na saída. A contagem de CDAs fica no painel de baixo.
+**Definition (the same as the paper's).** Settlement is not recorded in the dump. A CDA is therefore treated as "exited after paying" when it stops appearing in the monthly snapshots after receiving at least one payment (GARE). Here, the exit must have happened by December 2025 (last snapshot in which it appears before 12/2025) and only payments up to 31/12/2025 count.
+**What changed relative to the paper:** the vertical axis is now **value in BRL**. The bars show the enrolled value (the largest value without fees the CDA had in the snapshots) and the value paid by GARE for these CDAs, by year of age at exit. The CDA count is in the lower panel.
 
 ```{python}
 #| label: fig-b85-reais
-#| fig-cap: "CDAs de ICMS (PJ) que saíram da carteira depois de algum pagamento, até dez/2025: valor inscrito e valor pago (R$ bilhões) por anos entre a inscrição e a saída. Embaixo, número de CDAs."
+#| fig-cap: "VAT (ICMS) CDAs (legal entities) that left the portfolio after some payment, up to December 2025: enrolled value and paid value (BRL billion) by years between enrolment and exit. Below, number of CDAs."
 fim = pl.date(B.LAST_FULL_YEAR + 1, 1, 1)
 pag = B.collect(B.scan_gare().filter(pl.col("DATA_ARRECADACAO_GARE") < fim)
                 .group_by("ID_DEBITO").agg(pl.col("VALOR_RECEITA").sum().alias("pago"),
@@ -168,38 +170,38 @@ hist = (saiu.group_by("faixa").agg(pl.len().alias("cdas"), (pl.col("max_value").
                                     (pl.col("pago").sum() / 1e9).alias("pago_bi")).sort("faixa"))
 rot = [f"{f}" if f < 20 else "20+" for f in hist["faixa"]]
 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.06)
-fig.add_trace(go.Bar(x=rot, y=hist["inscrito_bi"], name="Valor inscrito (R$ bi)", marker_color=B.CEMEPI["deep_teal"]), 1, 1)
-fig.add_trace(go.Bar(x=rot, y=hist["pago_bi"], name="Valor pago por GARE (R$ bi)", marker_color=B.CEMEPI["sand"]), 1, 1)
+fig.add_trace(go.Bar(x=rot, y=hist["inscrito_bi"], name="Enrolled value (BRL bn)", marker_color=B.CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=rot, y=hist["pago_bi"], name="Value paid by GARE (BRL bn)", marker_color=B.CEMEPI["sand"]), 1, 1)
 fig.add_trace(go.Bar(x=rot, y=hist["cdas"], name="CDAs", marker_color=B.CEMEPI["grey"], showlegend=True), 2, 1)
-fig.update_yaxes(title_text="R$ bilhões", row=1, col=1)
+fig.update_yaxes(title_text="BRL billion", row=1, col=1)
 fig.update_yaxes(title_text="CDAs", row=2, col=1)
-fig.update_xaxes(title_text="Anos entre a inscrição e a saída (20+ = 20 ou mais)", row=2, col=1)
+fig.update_xaxes(title_text="Years between enrolment and exit (20+ = 20 or more)", row=2, col=1)
 fig.update_layout(barmode="group", height=560)
 fig.show()
 ```
 
 ```{python}
 #| label: tbl-b85-resumo
-#| tbl-cap: "Resumo das saídas depois de pagamento (ICMS, PJ, até dez/2025)."
-tot = saiu.select(pl.len().alias("cdas"), (pl.col("max_value").sum() / 1e9).alias("inscrito_R$_bi"),
-                  (pl.col("pago").sum() / 1e9).alias("pago_R$_bi"),
-                  pl.col("anos_ate_saida").median().alias("mediana_anos_(CDAs)"))
+#| tbl-cap: "Summary of exits after payment (VAT (ICMS), legal entities, up to December 2025)."
+tot = saiu.select(pl.len().alias("cdas"), (pl.col("max_value").sum() / 1e9).alias("enrolled_BRL_bn"),
+                  (pl.col("pago").sum() / 1e9).alias("paid_BRL_bn"),
+                  pl.col("anos_ate_saida").median().alias("median_years_(CDAs)"))
 w = saiu.sort("anos_ate_saida").with_columns((pl.col("max_value").cum_sum() / pl.col("max_value").sum()).alias("cum"))
 med_valor = float(w.filter(pl.col("cum") >= 0.5)["anos_ate_saida"][0])
-tot.with_columns(pl.lit(med_valor).alias("mediana_anos_(ponderada_por_R$)"),
-                 (100 * pl.col("pago_R$_bi") / pl.col("inscrito_R$_bi")).alias("pago/inscrito_%")).to_pandas().round(3)
+tot.with_columns(pl.lit(med_valor).alias("median_years_(BRL-weighted)"),
+                 (100 * pl.col("paid_BRL_bn") / pl.col("enrolled_BRL_bn")).alias("paid/enrolled_%")).to_pandas().round(3)
 ```
 
-**Como ler:** compare as barras escuras (quanto estava inscrito) com as claras (quanto foi pago) em cada idade. Uma mediana ponderada por reais diferente da mediana por CDA mostra que as CDAs grandes saem em outro ritmo que as pequenas.
-**O que não concluir:**
+**How to read:** compare the dark bars (how much was enrolled) with the light ones (how much was paid) at each age. A BRL-weighted median different from the median by CDA shows that large CDAs exit at a different pace from small ones.
+**What not to conclude:**
 
-- A saída também pode ser cancelamento, parcelamento rescindido e reinscrito, ou mudança de número. O pagamento por GARE pode ser parcial. Por isso, o valor pago fica abaixo do inscrito e a idade na saída é um limite superior do tempo até a quitação.
-- Só há fotos a partir de 2016. Uma CDA antiga que saiu antes disso não aparece, o que puxa a distribuição para saídas recentes.
-- O valor inscrito é nominal (sem correção), igual ao do dump.
+- An exit can also be a cancellation, an instalment plan terminated and re-enrolled, or a change of number. Payment by GARE can be partial. So the paid value stays below the enrolled value and the age at exit is an upper bound on the time to settlement.
+- Snapshots exist only from 2016. An old CDA that exited before then does not appear, which pulls the distribution towards recent exits.
+- The enrolled value is nominal (not inflation-adjusted), as in the dump.
 
-## O que não concluir (geral)
+## What not to conclude (general)
 
-Tudo é descritivo e de uma única foto. Não há afirmação causal nem comparação de eficiência entre tributos.
+Everything is descriptive and from a single snapshot. There is no causal claim and no comparison of efficiency across taxes.
 
 ```{python}
 #| label: cache

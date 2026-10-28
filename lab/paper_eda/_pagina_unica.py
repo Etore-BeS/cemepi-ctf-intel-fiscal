@@ -32,65 +32,166 @@ FIGS = HERE / "paper_eda_figs"
 PARTS = ["01_dados", "02_parte_a", "03_parte_b1", "04_parte_b2", "05_parte_b3", "06_parte_c", "07_parte_d", "08_parte_e"]
 BIG_FIG = 1_000_000  # bytes de HTML por figura acima dos quais ela vai para arquivo à parte
 
-# Páginas do laboratório trazidas inteiras para dentro desta página (CTF-03, 26/10/2026: "toda análise dentro de 1 HTML
-# só"). Cada uma vira uma subseção de "L. Análises do laboratório", montada do _freeze dela, sem executar nada.
-# (fonte relativa a lab/, número, título curto, âncora, prefixo dos ids internos)
+# Páginas do laboratório trazidas inteiras para dentro desta página (CTF-03, 26/10/2026) e, desde 28/10/2026, colocadas
+# dentro da seção temática certa (pedido do Étore: numeração única, tudo em inglês). Cada uma vira uma subseção numerada
+# da seção indicada, montada do _freeze dela, sem executar nada. A L.5 (EDA completo) vira o apêndice 8.
+# (fonte relativa a lab/, número, título, âncora, prefixo dos ids internos, parte depois da qual entra, códigos)
 LAB_PAGES = [
-    ("eda/2026-10-23_kmeans_top1", "L.1", "K-means no top 1% e figura B.5.18 corrigida (CTF-03, IMP-11)", "lab-km", "km"),
-    ("eda/2026-10-23_concentracao_e_liquidacao", "L.2", "Concentração por tributo e por devedor; saída em R$ (IMP-09, IMP-10)",
-     "lab-conc", "conc"),
-    ("eda/2026-10-23_macro_selic_over_checagem", "L.3", "Selic over e checagem das correlações macro (MAC-03, MAC-07)",
-     "lab-macro", "mac"),
-    ("dados/2026-10-26_cnpj_enrich", "L.4", "Enriquecimento CNPJ (RFB ref. 2026-03)", "lab-cnpj-rfb", "rfb"),
-    ("eda/2026-10-23_eda_completo", "L.5", "EDA completo (conversão fiel do notebook, com 2026 parcial)", "lab-edac", "edac"),
-    ("dados/2026-10-27_cnpj_geo", "L.6", "CNPJs devedores por município de SP (GEO-01)", "lab-cnpj-geo", "geo"),
-    ("dados/2026-10-27_cnpj_firmas", "L.7", "Situação cadastral e CNAE dos CNPJs devedores × origem e recuperação (LAB-CNPJ)",
-     "lab-cnpj-firmas", "firm"),
+    ("dados/2026-10-26_cnpj_enrich", "1.9", "Firm registry enrichment of debtor CNPJs (RFB, March 2026)", "lab-cnpj-rfb",
+     "rfb", "01_dados", "CNPJ-ENRICH"),
+    ("eda/2026-10-23_concentracao_e_liquidacao", "2.8", "Concentration by tax type and by debtor; settlement in BRL",
+     "lab-conc", "conc", "02_parte_a", "IMP-09, IMP-10"),
+    ("eda/2026-10-23_kmeans_top1", "3.12", "K-means clustering of the top 1% of CDAs and the redrawn Figure 3.5.18",
+     "lab-km", "km", "05_parte_b3", "CTF-03, IMP-11, IMP-13"),
+    ("dados/2026-10-27_cnpj_geo", "3.13", "Debtor firms by municipality of São Paulo state", "lab-cnpj-geo", "geo",
+     "05_parte_b3", "GEO-01"),
+    ("dados/2026-10-27_cnpj_firmas", "3.14", "Registration status and economic activity (CNAE) of debtor firms × origin and recovery",
+     "lab-cnpj-firmas", "firm", "05_parte_b3", "LAB-CNPJ"),
+    ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
+     "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
+    ("eda/2026-10-23_eda_completo", "8", "Appendix: the full EDA notebook (faithful conversion, includes partial 2026)",
+     "lab-edac", "edac", "APPENDIX", "CTF-03"),
 ]
-LAB_ANCHOR = {src.split("/")[-1]: anc for src, _, _, anc, _ in LAB_PAGES}
-LAB_PREFIX = {src.split("/")[-1]: pfx for src, _, _, _, pfx in LAB_PAGES}
+LAB_ANCHOR = {p[0].split("/")[-1]: p[3] for p in LAB_PAGES}
+LAB_PREFIX = {p[0].split("/")[-1]: p[4] for p in LAB_PAGES}
 LINK_KM = "#lab-km"
 LINK_CONC = "#lab-conc"
 LINK_MACRO = "#lab-macro"
+# seções do paper: letra -> número (numeração única do lab, 28/10/2026)
+SEC_NUM = {"A": "2", "B": "3", "C": "4", "D": "5", "E": "6"}
+SEC_TITLE = {"0": "Computational environment", "1": "Data", "2": "The portfolio across tax types",
+             "3": "The VAT (ICMS) portfolio", "4": "Statistical properties", "5": "Macroeconomic conditions",
+             "6": "Discussion", "7": "Correspondence with the manuscript and the dissertation",
+             "8": "Appendix: the full EDA notebook"}
+
+# Avisos e saídas em português que vêm do _freeze das 8 partes (gerados por _gerar_paginas.py): traduzidos aqui, na
+# montagem, para não reexecutar as partes. Casamento por espaço flexível; cada um tem de aparecer (senão para).
+PT2EN = [
+    ("## Selic over no lugar da meta", "## Overnight Selic instead of the target rate"),
+    ("No laboratório, a variável `selic` é a **Selic over** (SGS 4189, acumulada no mês e anualizada, % a.a.), e não a meta "
+     "(SGS 432). A troca e o efeito nas correlações estão na página [Selic over e checagem]",
+     "In the lab, the variable `selic` is the **overnight Selic rate** (SGS 4189, compounded over the month and annualised, "
+     "% p.a.), not the policy target rate (SGS 432). The change and its effect on the correlations are in "
+     "[5.8 Overnight Selic rate and check of the macroeconomic correlations]"),
+    ("**Também alterado no lab (MAC-07, 26/10/2026):** a série 4380 é o PIB mensal em R$ correntes (não o IBC-Br citado no "
+     "texto do paper). Ela e o saldo de crédito PJ (20540) passam a entrar **deflacionados pelo IPCA** (SGS 433, índice "
+     "encadeado das variações mensais, base dez/2025 = 1), em R$ de dez/2025, antes do log. Desocupação (24369) e ocupados "
+     "(24379) são da PNAD Contínua, cujo valor mensal é o **trimestre móvel** que termina no mês (meses vizinhos repetem dois "
+     "meses de entrevistas). No trimestre, entra o valor do último mês (o trimestre civil) e, no ano, a média dos quatro "
+     "trimestres civis. No mês, o valor fica como está.",
+     "**Also changed in the lab (MAC-07, 26 Oct 2026):** series 4380 is monthly GDP in current BRL (not the IBC-Br cited in "
+     "the paper's text). It and the outstanding credit to firms (20540) now enter **deflated by the IPCA** (SGS 433, index "
+     "chained from the monthly changes, December 2025 = 1), in BRL of December 2025, before taking logs. Unemployment "
+     "(24369) and employed persons (24379) come from the PNAD Contínua, whose monthly value is the **rolling quarter** "
+     "ending in that month (neighbouring months share two months of interviews). Quarterly series take the value of the "
+     "last month (the calendar quarter), and annual series the mean of the four calendar quarters. Monthly series are used "
+     "as they are."),
+    ("## Concentração por tipo de tributo e por devedor", "## Concentration by tax type and by debtor"),
+    ("A concentração por grupo de tributo (ICMS, IPVA, ITCMD, taxas) e por devedor (raiz do CNPJ), na foto de "
+     "dezembro de 2025, está na página [Concentração e liquidação]",
+     "Concentration by tax group (VAT (ICMS), IPVA, ITCMD, fees) and by debtor (CNPJ root), in the December 2025 snapshot, "
+     "is in [2.8 Concentration by tax type and by debtor]"),
+    (". Aqui fica a concentração do ICMS, como no paper.", ". This section keeps the concentration of VAT (ICMS), as in the paper."),
+    ("## B.5.18: figura do paper e versão corrigida", "## B.5.18: the paper's figure, redrawn"),
+    ("A figura abaixo usa as projeções do paper (PCA na escala mediana/IQR e t-SNE sobre o Gower), **redesenhadas no lab para "
+     "ficarem legíveis (IMP-11, 27/10/2026)**: uma linha com todas as origens e uma por origem da CDA, contagem de CDAs por "
+     "célula no lugar de pontos, e o PC1 em escala log de (PC1 − mínimo + 1), porque a maior parte das CDAs (as sem pagamento) "
+     "fica empilhada no mínimo do PC1.",
+     "The figure below uses the paper's projections (PCA on the median/IQR scale and t-SNE on the Gower distance), **redrawn "
+     "in the lab to be legible (IMP-11, 27 Oct 2026)**: one row with all origins and one per CDA origin, the count of CDAs per "
+     "cell instead of points, and PC1 on a log scale of (PC1 − minimum + 1), because most CDAs (those without payments) pile "
+     "up at the minimum of PC1."),
+    ("**Como ler:** cada coluna é uma projeção, com a mesma janela em todas as linhas; o tom é o número de CDAs na célula (mais "
+     "escuro, mais CDAs) e o contorno cinza é o total de todas as origens, para comparar onde cada origem se concentra. Origens "
+     "com menos de 5 CDAs não ganham linha própria. O PCA corrigido (escala do Gower) está em [K-means no top 1%]",
+     "**How to read:** each column is a projection, with the same window in all rows; the shade is the number of CDAs in the "
+     "cell (darker, more CDAs) and the grey contour is the total over all origins, to compare where each origin concentrates. "
+     "Origins with fewer than 5 CDAs get no row of their own. The corrected PCA (Gower scale) is in [3.12 K-means in the top 1%]"),
+    ("## Escolha do k", "## Choice of k"),
+    ("O paper escolhe o número de grupos do hierárquico automaticamente, pela maior silhueta (`K_STAR`). Isso só reproduz o "
+     "paper. **No laboratório, a solução principal é o K-means com k = 4, por decisão do autor (IMP-13, 27/10/2026).** O K-means "
+     "com 100 inicializações por k, com os perfis de k = 4 e o diagnóstico de k = 2 a 8, está em [K-means no top 1%]",
+     "The paper chooses the number of hierarchical clusters automatically, by the highest silhouette (`K_STAR`). This only "
+     "reproduces the paper. **In the lab, the main solution is K-means with k = 4, by the author's decision (IMP-13, 27 Oct "
+     "2026).** K-means with 100 initialisations per k, with the profiles for k = 4 and the diagnostics for k = 2 to 8, is in "
+     "[3.12 K-means in the top 1%]"),
+    ("## B.8.5 com valor no eixo Y", "## B.8.5 with value on the y-axis"),
+    ("Além do histograma do paper (número de CDAs), a célula abaixo mostra o valor inscrito em R$ bilhões por ano até a saída. "
+     "A versão com valor pago está em [Concentração e liquidação]",
+     "Besides the paper's histogram (number of CDAs), the cell below shows the enrolled value in BRL billion by years to exit. "
+     "The version with the amount paid is in [2.8 Concentration by tax type and by debtor]"),
+    ("## Checagem das correlações anuais", "## Check of the annual correlations"),
+    ("**Aviso (MAC-07): não use a correlação anual entre emprego e estoque no texto.** Ela vem da tendência comum e da "
+     "queda de 2020: no painel anual do EDA completo, o estoque cai de R$ 410,6 bi (2019) para R$ 328,9 bi (2020), junto com a "
+     "contagem de CDAs, o que parece efeito da extração do DEBITO, não da economia. Isso só pode ser corrigido com a DEBITO "
+     "corrigida (EQ-02/EQ-05); até lá, fica este aviso. Com n = 10 anos, nenhum mapa anual abaixo sustenta afirmação. O que deu "
+     "para corrigir (defasagem única, sem 2026, PIB e crédito reais, PNAD em trimestres civis) já está aplicado aqui e está "
+     "detalhado, com antes e depois, em [Selic over e checagem]",
+     "**Warning (MAC-07): do not use the annual correlation between employment and stock in the text.** It comes from the "
+     "common trend and from the 2020 drop: in the annual panel of the full EDA, the stock falls from BRL 410.6 bn (2019) to "
+     "BRL 328.9 bn (2020), together with the count of CDAs, which looks like an artefact of the DEBITO extraction, not of the "
+     "economy. It can only be fixed with a corrected DEBITO table (EQ-02/EQ-05); until then, this warning stays. With n = 10 "
+     "years, no annual map below supports a claim. What could be fixed (a single lag convention, no 2026, real GDP and credit, "
+     "PNAD in calendar quarters) is already applied here and is detailed, with before and after, in "
+     "[5.8 Overnight Selic rate and check of the macroeconomic correlations]"),
+    (", seções 2.5 e 3.", ", subsections 5.8.2.5 and 5.8.3."),
+    # saídas de células (tabela de qualidade e recorte)
+    ('"foto ausente"', '"missing snapshot"'),
+    ("<td>foto ausente</td>", "<td>missing snapshot</td>"),
+    ("<td>linhas repetidas (somadas uma vez)</td>", "<td>repeated rows (counted once)</td>"),
+    ("<td>foto parcial? (&lt; 80% da mediana móvel de 7 meses)</td>", "<td>partial snapshot? (&lt; 80% of the 7-month rolling median)</td>"),
+    ("Recorte: 2016–2025; foto de referência 2025-12; extração congelada 2026-03.",
+     "Window: 2016–2025; reference snapshot 2025-12; frozen extraction 2026-03."),
+]
+OPTIONAL_PT = {'"foto ausente"', "<td>foto ausente</td>", "<td>foto parcial? (&lt; 80% da mediana móvel de 7 meses)</td>"}
+
+
+def translate_part(md: str, state: dict) -> str:
+    for pt, en in PT2EN:
+        pat = re.compile(r"\s+".join(re.escape(w) for w in pt.split()))
+        md, n = pat.subn(lambda m: en, md)
+        state["pt2en"][pt] = state["pt2en"].get(pt, 0) + n
+    return md
+
 
 # Avisos que _gerar_paginas.py já põe nas partes (título -> âncora, rótulo, código da decisão)
 CALLOUT_MAP = {
-    "Selic over no lugar da meta": ("lab-selic", "Alterado no lab", "MAC-03"),
-    "Concentração por tipo de tributo e por devedor": ("lab-concentracao", "Novo no lab", "IMP-10"),
-    "B.5.18: figura do paper e versão corrigida": ("lab-b518", "Alterado no lab", "IMP-11"),
-    "Escolha do k": ("lab-k", "Novo no lab", "CTF-03"),
-    "B.8.5 com valor no eixo Y": ("lab-b885", "Novo no lab", "IMP-09"),
-    "Checagem das correlações anuais": ("lab-emprego", "Novo no lab", "MAC-07"),
+    "Overnight Selic instead of the target rate": ("lab-selic", "Changed in the lab", "MAC-03"),
+    "Concentration by tax type and by debtor": ("lab-concentracao", "New in the lab", "IMP-10"),
+    "B.5.18: the paper's figure, redrawn": ("lab-b518", "Changed in the lab", "IMP-11"),
+    "Choice of k": ("lab-k", "New in the lab", "CTF-03"),
+    "B.8.5 with value on the y-axis": ("lab-b885", "New in the lab", "IMP-09"),
+    "Check of the annual correlations": ("lab-emprego", "New in the lab", "MAC-07"),
 }
 
 # O que cada marcador quer dizer (texto novo no paper; o "era" vem do marcador)
 ERA_NOVO = {
-    "era março de 2026": "dezembro de 2025 (foto de referência)",
-    "era até março de 2026": "até dezembro de 2025",
-    "era 2016–2026": "2016–2025",
-    "era 2026": "2025",
+    "era março de 2026": ("December 2025 (reference snapshot)", "March 2026"),
+    "era até março de 2026": ("up to December 2025", "up to March 2026"),
+    "era 2016–2026": ("2016–2025", "2016–2026"),
+    "era 2026": ("2025", "2026"),
 }
 
 # Callouts extras por seção (âncora do título -> (âncora do aviso, rótulo, texto))
 EXTRA = {
-    "s-1-2": ("lab-cnpj-1-2", "Alterado no lab", "Identificação do devedor por **CNPJ × sem CNPJ**, sem ler a coluna de CPF "
-              "(no paper: CPF × CNPJ × sem identificador). CDAs com CNPJ e CPF ao mesmo tempo contam como CNPJ."),
-    "s-1-3-1": ("lab-cnpj", "Alterado no lab", "A tabela classifica as CDAs em **CNPJ (pessoa jurídica)** e **sem CNPJ (CPF ou sem "
-                "identificador)**, sem ler a coluna de CPF. No paper eram três classes: CPF, CNPJ e sem identificador. A "
-                "exclusão de pessoas físicas no extrato (1.3) é a mesma do paper."),
-    "s-1-5": ("lab-estoque-mensal", "Alterado no lab", "O estoque mensal soma **uma linha por CDA e mês**: o DEBITO tem linhas "
-              "repetidas em vários meses (ex.: 2020-04 a 06, 2025-06/07) e o paper as somava. Nada é corrigido além disso; "
-              "a tabela de qualidade está logo abaixo, em [Qualidade das fotos mensais](#lab-qualidade)."),
-    "s-a-1-4": ("lab-agregados", "Alterado no lab", "No lugar da amostra de 10 linhas da foto (registros individuais), o "
-                "esquema da tabela DEBITO sem as colunas de pessoa. O laboratório só mostra agregados."),
-    "s-b-5-24": ("lab-agregados-b524", "Alterado no lab", "Só agregados: o paper mostrava as primeiras linhas com o hash."),
+    "s-1-2": ("lab-cnpj-1-2", "Changed in the lab", "Debtors are identified as **CNPJ × no CNPJ**, without reading the CPF "
+              "column (the paper used CPF × CNPJ × no identifier). CDAs with both a CNPJ and a CPF count as CNPJ."),
+    "s-1-3-1": ("lab-cnpj", "Changed in the lab", "The table classifies CDAs as **CNPJ (legal entity)** and **no CNPJ (CPF or "
+                "no identifier)**, without reading the CPF column. The paper had three classes: CPF, CNPJ and no identifier. "
+                "The exclusion of individuals from the extract (1.3) is the same as in the paper."),
+    "s-1-5": ("lab-estoque-mensal", "Changed in the lab", "The monthly stock adds up **one row per CDA and month**: DEBITO has "
+              "repeated rows in several months (e.g. 2020-04 to 06, 2025-06/07) and the paper added them up. Nothing else is "
+              "corrected; the quality table is just below, in [Quality of the monthly snapshots](#lab-qualidade)."),
+    "s-a-1-4": ("lab-agregados", "Changed in the lab", "Instead of the paper's sample of 10 rows of the snapshot (individual "
+                "records), the schema of the DEBITO table without the person columns. The lab shows aggregates only."),
+    "s-b-5-24": ("lab-agregados-b524", "Changed in the lab", "Aggregates only: the paper showed the first rows with the hash."),
 }
-STAR_TEXT = ("Estrelas de significância nas tabelas e nos mapas de correlação: \\* p ≤ 0,10; \\*\\* p ≤ 0,05; \\*\\*\\* "
-             "p ≤ 0,01 (sem correção para testes múltiplos). Nas tabelas, cada coluna de p ganha ao lado uma coluna "
-             "“(sig.)” com as estrelas, e as linhas com p ≤ 0,10 na primeira coluna de p ficam em **negrito** (sem cor de "
-             "fundo). A legenda acima de cada tabela diz qual coluna define o negrito. Todas as tabelas saem completas, "
-             "com estrelas e negrito em todas as linhas; as com mais de 25 linhas ficam numa caixa rolável. Nos mapas de calor, a cor é o sinal e a força da "
-             "correlação e as estrelas são a significância.")
+STAR_TEXT = ("Significance stars in tables and correlation maps: \\* p ≤ 0.10; \\*\\* p ≤ 0.05; \\*\\*\\* p ≤ 0.01 (no "
+             "correction for multiple testing). In tables, each p column gets a “(sig.)” column with the stars next to it, "
+             "and rows with p ≤ 0.10 in the first p column are in **bold** (no background colour). The caption above each "
+             "table says which column defines the bold rows. All tables are complete, with stars and bold in every row; "
+             "tables with more than 25 rows sit in a scrollable box. In heat maps, the colour is the sign and strength of "
+             "the correlation and the stars are the significance.")
 
 HEAD_RE = re.compile(r"^(#{2,4}) (.+?)\s*$")
 NUM_RE = re.compile(r"^(Part [A-E]|[0-9A-E](?:\.\d+)*)\b")
@@ -166,9 +267,9 @@ def transform(md: str, state: dict) -> str:
     md = re.sub(r"\(0[1-8]_[a-z0-9_]+\.qmd(#[\w-]+)\)", r"(\1)", md)
     # 3) títulos do laboratório
     md = md.replace("#### lab: qualidade das fotos mensais {#lab-qualidade}",
-                    "#### Novo no lab: qualidade das fotos mensais do DEBITO {#lab-qualidade}")
+                    "#### New in the lab: quality of the monthly DEBITO snapshots {#lab-qualidade}")
     md = md.replace("#### lab: recorte do laboratório",
-                    "### Novo no lab: recorte em 2025, sem 2026 {#lab-recorte}")
+                    "### 1.8 New in the lab: window ending in 2025, no 2026 {#lab-recorte}")
     if "{#lab-qualidade}" in md:
         state["anchors"].add("lab-qualidade")
     if "{#lab-recorte}" in md:
@@ -201,13 +302,13 @@ def sectionize(md: str, state: dict) -> str:
         notes = []
         if sec["eras"]:
             uniq = list(dict.fromkeys(sec["eras"]))
-            items = "; ".join(f"**{ERA_NOVO.get(e, '?')}** ({e})" for e in uniq)
-            notes.append(callout("note", "Alterado no lab (IMP-12): corte em 2025",
-                                 f"Texto do paper ajustado ao [recorte do laboratório](#lab-recorte): {items}."))
+            items = "; ".join(f"**{ERA_NOVO.get(e, ('?', e))[0]}** (was {ERA_NOVO.get(e, ('?', e))[1]})" for e in uniq)
+            notes.append(callout("note", "Changed in the lab (IMP-12): data cut at 2025",
+                                 f"Paper text adjusted to the [lab window](#lab-recorte): {items}."))
             state["n_era_sections"] += 1
         if sec["stars"]:
             anc = f"lab-sig-{sec['anchor'] or len(state['star_secs'])}"
-            notes.append(callout("note", "Alterado no lab (MAC-05/06): estrelas de significância", STAR_TEXT, anc))
+            notes.append(callout("note", "Changed in the lab (MAC-05/06): significance stars", STAR_TEXT, anc))
             state["star_secs"].append((anc, sec["title"]))
         if sec["anchor"] in EXTRA:
             anc, label, body = EXTRA[sec["anchor"]]
@@ -276,14 +377,14 @@ def externalize_figs(md: str, state: dict) -> str:
         h = re.search(r"height:(\d+)px", html)
         height = int(h.group(1)) + 20 if h else 540
         (FIGS / f"{cell}.html").write_text(
-            "<!doctype html>\n<html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><title>Figura " + cell +
+            "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>Figure " + cell +
             "</title></head>\n<body style=\"margin:0\">\n" + html + "\n</body></html>\n", encoding="utf-8")
         state["figs"].append((cell, len(html)))
         mb = len(html) / 1e6
-        frame = (f'<iframe src="paper_eda_figs/{cell}.html" loading="lazy" title="Figura da célula {cell}" '
+        frame = (f'<iframe src="paper_eda_figs/{cell}.html" loading="lazy" title="Figure of cell {cell}" '
                  f'style="width:100%;height:{height}px;border:0"></iframe>\n'
-                 f'<p class="small text-muted">Figura interativa carregada à parte ({mb:.0f} MB: o histograma leva todos '
-                 f'os pontos). <a href="paper_eda_figs/{cell}.html" target="_blank">Abrir em outra aba</a>.</p>')
+                 f'<p class="small text-muted">Interactive figure loaded separately ({mb:.0f} MB: the histogram carries all '
+                 f'points). <a href="paper_eda_figs/{cell}.html" target="_blank">Open in another tab</a>.</p>')
         return f"{head}```{{=html}}\n{frame}\n```\n"
     return pat.sub(_ext, md)
 
@@ -306,16 +407,17 @@ def header(state: dict, includes: list[str]) -> str:
                     and "tex-svg.min.js" not in l)
     inc_yaml = "\n".join("      " + l for l in inc.split("\n"))
     return f"""---
-title: "EDA do paper (v1) no laboratório"
-subtitle: "O paper_eda_v1 inteiro numa página, com as mudanças das reuniões de outubro de 2026"
-description: "Partes 0–1 e A a E do EDA do artigo, com corte em 2025, Selic over, estrelas de significância e avisos de qualidade do DEBITO."
-date: 2026-10-26
-date-format: "DD/MM/YYYY"
+title: "The paper's EDA (v1) in the lab"
+subtitle: "The whole paper_eda_v1 on one page, with the lab analyses inside their thematic sections and the changes from the October 2026 meetings"
+description: "Sections 0 to 8 of the article's exploratory data analysis, with data up to 2025, the overnight Selic rate, significance stars and DEBITO quality warnings."
+date: 2026-10-28
+date-format: "D MMMM YYYY"
+lang: en
 toc: true
 toc-depth: 4
 toc-expand: true
 toc-location: left
-toc-title: "Sumário"
+toc-title: "Contents"
 include-after-body:
   - _toc_colapsavel.html   # sumário fixo na rolagem, setinha para abrir/fechar cada tópico, figuras na largura do corpo
 format:
@@ -326,7 +428,7 @@ format:
       margin-width: 120px
 number-sections: false
 code-fold: true
-code-summary: "Código"
+code-summary: "Code"
 resources:
   - paper_eda_figs/*.html
 include-in-header:
@@ -336,75 +438,139 @@ include-in-header:
 """
 
 
+GUIDE_MERMAID = """```{mermaid}
+%%| fig-width: 7
+flowchart TD
+  S0["0 Computational environment"] --> S1["1 Data<br/>1.8 Lab window · 1.9 Firm registry enrichment (RFB)"]
+  S1 --> S2["2 The portfolio across tax types<br/>2.8 Concentration by tax type and by debtor"]
+  S2 --> S3["3 The VAT (ICMS) portfolio<br/>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE"]
+  S3 --> S4["4 Statistical properties"]
+  S4 --> S5["5 Macroeconomic conditions<br/>5.8 Overnight Selic and correlation check"]
+  S5 --> S6["6 Discussion"]
+  S6 --> S7["7 Correspondence with the manuscript"]
+  S1 -.-> S8["8 Appendix: the full EDA notebook"]
+  classDef paper fill:#FFF4E5,stroke:#154C56,color:#154C56
+  classDef app fill:#ffffff,stroke:#8A9499,color:#4D4D4D,stroke-dasharray: 4 3
+  class S0,S1,S2,S3,S4,S5,S6,S7 paper
+  class S8 app
+```"""
+
+
+def guide(state: dict) -> str:
+    rows = [("0", "s-0", "Paths, memory, caching, seed, figure style and statistical utilities."),
+            ("1", "s-1", "Sources, extracts, panel, monthly and macro series, glossary; **1.8** the lab window (data up to 2025); **1.9** firm registry enrichment."),
+            ("2", "s-part-a", "All tax types: volume, missing values, grouping, value, age, recovery; **2.8** concentration "
+                              "by tax type and by debtor."),
+            ("3", "s-part-b", "VAT (ICMS): evolution, debt types, declared × assessed, concentration, top CDAs, age, "
+                              "recovery, payments, judicial filing, seasonality, programmes; **3.12** K-means, **3.13** "
+                              "municipalities, **3.14** firm status and CNAE."),
+            ("4", "s-part-c", "Distribution, correlation choice, stationarity, persistence."),
+            ("5", "s-part-d", "Monthly, quarterly, annual and panel correlations, models; **5.8** overnight Selic and the "
+                              "correlation check."),
+            ("6", "s-part-e", "Synthesis, limitations, ethics, future research."),
+            ("7", "s-7", "Where each result goes in the manuscript and the dissertation."),
+            ("8", "lab-edac", "The full EDA notebook, converted as is (includes partial 2026 data; read with care).")]
+    lst = "\n".join(f"- [**{n}** {SEC_TITLE[n]}](#{a}): {d}" for n, a, d in rows)
+    return f"""## Contents and reading guide {{#guia}}
+
+**VAT (ICMS).** ICMS is the Brazilian states' tax on the circulation of goods and on interstate and inter-municipal
+transport and communication services. It is a subnational value-added tax: an OECD Economics Department working paper
+describes Brazil's consumption taxes as including "a state-level VAT (ICMS)" (Arnold et al., 2025), and the OECD
+classification of taxes records it under value added taxes (heading 5111). It is written "VAT (ICMS)" throughout; the
+names of the raw debt types in the data (e.g. *ICMS Declarado*, *ICMS Autuação*) are kept as they appear in the database.
+
+**How the page is organised.** One numbering scheme for the whole page (1, 1.1, 1.1.1, …). Sections 0 to 7 follow the
+paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 2.8, 3.12–3.14, 5.8), each opened by a
+**New in the lab** box; section 8 is an appendix. The diagram shows the reading order; dashed = appendix.
+
+{GUIDE_MERMAID}
+
+{lst}
+
+*Reference:* Arnold, J. M., Battiau, P., Fall, F., & Spies, K. (2025). *The reform of Brazil's consumption tax system*.
+OECD Economics Department Working Papers, No. 1848. https://doi.org/10.1787/2a85e559-en
+"""
+
+
 def novidades(state: dict) -> str:
     stars = state["star_secs"]
     star_links = ", ".join(f"[{t.split(' ')[0]}](#{a})" for a, t in stars[:12]) + (" …" if len(stars) > 12 else "")
     return f"""<!-- Gerado por lab/paper_eda/_pagina_unica.py a partir do _freeze das partes. Não editar à mão. -->
 
-## Novidades em relação ao paper publicado {{#novidades}}
+{guide(state)}
 
-::: {{.callout-important title="Quadro de novidades (o que o laboratório mudou)"}}
-Texto do paper mantido em inglês e sem reescrever conclusões. Cada mudança abaixo leva à seção afetada, onde há um
-aviso **Novo no lab** ou **Alterado no lab**. Os números que mudaram aparecem nas tabelas e figuras da própria seção.
+## What changed relative to the published paper {{#novidades}}
 
-1. **Corte em 2025, sem 2026 (IMP-12).** Último ano completo: 2025; foto de referência: dezembro de 2025 (era março de
-   2026). [Recorte do laboratório](#lab-recorte). O texto do paper foi ajustado em {state['n_markers']} trechos de
-   {state['n_era_sections']} seções, cada uma com um aviso “Alterado no lab (IMP-12)”.
-2. **Selic over no lugar da meta (MAC-03).** A variável `selic` passa a ser a Selic over (SGS 4189), não a meta (SGS 432).
-   [1.6 Séries macroeconômicas](#lab-selic) · [Parte D](#s-part-d) · [página de checagem]({LINK_MACRO}).
-3. **Estrelas de significância e linhas significativas em negrito (MAC-05/06).** \\* p ≤ 0,10; \\*\\* p ≤ 0,05;
-   \\*\\*\\* p ≤ 0,01; negrito = p ≤ 0,10 na coluna indicada na legenda de cada tabela; em
-   {len(stars)} seções: {star_links}.
-4. **B.8.5 com valor em R$ no eixo Y (IMP-09).** [B.8.5 Time to settlement](#lab-b885).
-5. **Concentração por tipo de tributo e por devedor (IMP-10).** [B.4 Concentration](#lab-concentracao) · [página de
-   concentração]({LINK_CONC}).
-6. **Correlações macro corrigidas (MAC-07).** Uma convenção de defasagem (macro em t − k), sem 2026, PIB mensal e
-   crédito PJ deflacionados pelo IPCA (R$ de dez/2025) e PNAD Contínua em trimestres civis no trimestre e no ano.
-   **Aviso:** a correlação anual emprego × estoque vem da tendência comum e da queda de 2020, que parece efeito da
-   extração do DEBITO (EQ-02/EQ-05), e não deve ir para o texto. [1.6](#lab-selic) · [D.3 Annual correlations](#lab-emprego) ·
-   [antes e depois](#lab-macro).
-7. **Figura 5.18 legível (IMP-11, 27/10/2026):** um painel por origem, contagem de CDAs por célula e PC1 em escala log, no B.5.18 e no L.1. [B.5.18 Distance structure](#lab-b518) · [L.1 K-means no top 1%]({LINK_KM}).
-8. **K-means com k = 4 como solução principal (IMP-13, CTF-03).** k = 4 por decisão do autor (27/10/2026); k = 2 a 8 ficam como diagnóstico. [B.5.19 Clustering](#lab-k) ·
-   [K-means no top 1%]({LINK_KM}).
-9. **Qualidade do DEBITO sinalizada, sem correção.** Fotos ausentes (2018-12; 2020-10 a 12), parciais (2018-11, 2024-03,
-   **2024-12**) e linhas repetidas (ex.: 2020-04 a 06, **2025-06 e 2025-07**); o estoque mensal soma uma linha por CDA e mês.
-   [Tabela de qualidade](#lab-qualidade) · [1.5 Monthly series](#lab-estoque-mensal).
-10. **CNPJ × sem CNPJ no lugar de CPF × CNPJ.** A coluna de CPF não é lida. [1.2](#lab-cnpj-1-2) ·
+::: {{.callout-important title="What the lab changed"}}
+The paper's text is kept and its conclusions are not rewritten. Each change below links to the section it affects, where
+a **New in the lab** or **Changed in the lab** box explains it. Numbers that changed appear in the tables and figures of
+that section.
+
+1. **Data cut at 2025, no 2026 (IMP-12).** Last full year: 2025; reference snapshot: December 2025 (was March 2026).
+   [1.8 Lab window](#lab-recorte). The paper's text was adjusted in {state['n_markers']} places in
+   {state['n_era_sections']} sections, each with a “Changed in the lab (IMP-12)” box.
+2. **Overnight Selic instead of the target rate (MAC-03).** The variable `selic` is now the overnight Selic rate
+   (SGS 4189), not the policy target (SGS 432). [1.6 Macroeconomic series](#lab-selic) · [Section 5](#s-part-d) ·
+   [5.8 Overnight Selic and correlation check]({LINK_MACRO}).
+3. **Significance stars and significant rows in bold (MAC-05/06).** \\* p ≤ 0.10; \\*\\* p ≤ 0.05;
+   \\*\\*\\* p ≤ 0.01; bold = p ≤ 0.10 in the column named in each table's caption; in
+   {len(stars)} sections: {star_links}.
+4. **3.8.5 with value in BRL on the y-axis (IMP-09).** [3.8.5 Time to settlement](#lab-b885).
+5. **Concentration by tax type and by debtor (IMP-10).** [3.4 Concentration](#lab-concentracao) ·
+   [2.8 Concentration by tax type and by debtor]({LINK_CONC}).
+6. **Macroeconomic correlations corrected (MAC-07).** One lag convention (macro at t − k), no 2026, monthly GDP and
+   credit to firms deflated by the IPCA (BRL of December 2025) and PNAD Contínua in calendar quarters, by quarter and by
+   year. **Warning:** the annual employment × stock correlation comes from the common trend and from the 2020 drop, which
+   looks like an artefact of the DEBITO extraction (EQ-02/EQ-05), and must not go into the text.
+   [1.6](#lab-selic) · [5.3 Annual correlations](#lab-emprego) · [before and after]({LINK_MACRO}).
+7. **Figure 3.5.18 made legible (IMP-11, 27 Oct 2026):** one panel per origin, count of CDAs per cell and PC1 on a log
+   scale, in 3.5.18 and in 3.12. [3.5.18 Distance structure](#lab-b518) · [3.12 K-means in the top 1%]({LINK_KM}).
+8. **K-means with k = 4 as the main solution (IMP-13, CTF-03).** k = 4 by the author's decision (27 Oct 2026); k = 2 to 8
+   are kept as diagnostics. [3.5.19 Clustering](#lab-k) · [3.12 K-means in the top 1%]({LINK_KM}).
+9. **DEBITO quality flagged, not corrected.** Missing snapshots (2018-12; 2020-10 to 12), partial ones (2018-11, 2024-03,
+   **2024-12**) and repeated rows (e.g. 2020-04 to 06, **2025-06 and 2025-07**); the monthly stock adds up one row per CDA
+   and month. [Quality table](#lab-qualidade) · [1.5 Monthly series](#lab-estoque-mensal).
+10. **CNPJ × no CNPJ instead of CPF × CNPJ.** The CPF column is not read. [1.2](#lab-cnpj-1-2) ·
     [1.3.1 Debtor identification](#lab-cnpj).
-11. **Só agregados.** Nada por CPF, nome ou CDA individual. [A.1.4](#lab-agregados) · [B.5.24](#lab-agregados-b524).
-12. **Todas as análises do laboratório nesta página (CTF-03).** As entradas de `lab/eda/` e `lab/dados/` estão inteiras em
-    [L. Análises do laboratório](#s-lab), com subtópicos no sumário: [L.1 K-means](#lab-km) · [L.2 Concentração](#lab-conc) ·
-    [L.3 Selic over e checagem macro](#lab-macro) · [L.4 Enriquecimento CNPJ](#lab-cnpj-rfb) · [L.5 EDA completo](#lab-edac) · [L.6 CNPJs por município](#lab-cnpj-geo) · [L.7 Situação cadastral e CNAE](#lab-cnpj-firmas).
-13. **Gráficos agregados antes de publicar (DADOS-14).** Nenhuma figura leva mais um valor por CDA ou por devedor: os
-    histogramas viram barras com a contagem por faixa (B.5.4, B.5.5, B.5.16, B.8.5 em R$, B.9.3), as caixas do B.2.3 são
-    desenhadas com quartis, cercas e média já calculados, sem pontos individuais, as nuvens de pontos do B.5.18 e do
-    [L.1](#lab-km) viram mapa de densidade 2D (60 × 60 células; contorno de cada grupo na cor dele) e as curvas longas
-    (B.5.9, Lorenz do B.5.13) ficam com 500 pontos. Nada usa WebGL.
-14. **CNPJs devedores por município de SP (GEO-01, 27/10/2026).** Mapa coroplético (malha do IBGE, sem tiles externos) com
-    contagem, valor e CNPJs devedores por mil estabelecimentos ativos; município do cadastro RFB 2026-03; municípios com
-    menos de 5 CNPJs suprimidos. [L.6](#lab-cnpj-geo).
-15. **Situação cadastral e CNAE dos CNPJs devedores (LAB-CNPJ, 27/10/2026).** As análises da §10 do artigo AVD-01:
-    situação cadastral (RFB 2026-03) × recuperação por origem, com Kaplan–Meier até o 1º pagamento (coorte 2016–2025),
-    e CNAE por divisão × origem (peso do autuado e recuperação); divisões com célula de menos de 5 CNPJs agrupadas
-    inteiras. [L.7](#lab-cnpj-firmas).
+11. **Aggregates only.** Nothing by CPF, name or individual CDA. [2.1.4](#lab-agregados) · [3.5.24](#lab-agregados-b524).
+12. **All lab analyses on this page, inside their sections (CTF-03; 28 Oct 2026).** The entries of `lab/eda/` and
+    `lab/dados/` are complete here: [1.9 Firm registry enrichment](#lab-cnpj-rfb) · [2.8 Concentration](#lab-conc) ·
+    [3.12 K-means](#lab-km) · [3.13 Municipalities](#lab-cnpj-geo) · [3.14 Firm status and CNAE](#lab-cnpj-firmas) ·
+    [5.8 Overnight Selic and correlation check](#lab-macro) · [8 Full EDA notebook](#lab-edac).
+13. **Charts aggregated before publication (DADOS-14).** No figure carries one value per CDA or per debtor: histograms
+    become bars with the count per bin (3.5.4, 3.5.5, 3.5.16, 3.8.5 in BRL, 3.9.3), the boxes of 3.2.3 are drawn from
+    quartiles, fences and means computed beforehand, without individual points, the point clouds of 3.5.18 and of
+    [3.12](#lab-km) become 2D density maps (60 × 60 cells; outline of each group in its colour) and long curves (3.5.9,
+    the Lorenz curve of 3.5.13) keep 500 points. Nothing uses WebGL.
+14. **Debtor firms by municipality of São Paulo state (GEO-01, 27 Oct 2026).** Choropleth map (IBGE boundaries, no
+    external tiles) with the count, the value and debtor firms per thousand active establishments; municipality from the
+    RFB registry of March 2026; municipalities with fewer than 5 CNPJs suppressed. [3.13](#lab-cnpj-geo).
+15. **Registration status and CNAE of debtor firms (LAB-CNPJ, 27 Oct 2026).** The analyses of section 10 of the AVD-01
+    article: registration status (RFB, March 2026) × recovery by origin, with Kaplan–Meier curves to the first payment
+    (2016–2025 cohort), and CNAE division × origin (weight of assessed debt and recovery); divisions with any cell of fewer
+    than 5 CNPJs are pooled whole. [3.14](#lab-cnpj-firmas).
+16. **The whole lab in English, one numbering scheme (28 Oct 2026).** Paper sections A to E are now 2 to 6; the lab
+    analyses moved into their sections; VAT (ICMS) naming as in the papers. [Reading guide](#guia).
 :::
 
-::: {{.callout-warning title="Qualidade do DEBITO (só sinalizado, nada corrigido)"}}
-- Faltam as fotos de **2018-12** e de **2020-10 a 2020-12**. O arquivo de 2020 M10–M12 repete o de M04–M06, e o de
-  2018 M10–M12 está truncado (2018-11 parcial). As fotos de **2024-03** e de **2024-12** estão parciais (menos de 80% da
-  mediana móvel de CDAs; 2024-12 tem cerca de 1,27 milhão de CDAs contra cerca de 2,1 milhões nos meses vizinhos).
-- Há linhas repetidas em vários meses, inclusive **2025-06 e 2025-07**. No laboratório o estoque mensal soma uma linha
-  por CDA e mês (o paper somava as repetidas).
-- Consequência no painel: o “fim de ano” de 2018 é a última foto em que cada CDA aparece (out. ou nov.), e o de 2020 é
-  setembro. O de 2024 vem da foto parcial de dezembro. [Tabela completa](#lab-qualidade).
+::: {{.callout-warning title="DEBITO quality (flagged only, nothing corrected)"}}
+- The snapshots of **2018-12** and of **2020-10 to 2020-12** are missing. The 2020 M10–M12 file repeats M04–M06, and
+  the 2018 M10–M12 file is truncated (2018-11 partial). The snapshots of **2024-03** and **2024-12** are partial (fewer
+  than 80% of the rolling median of CDAs; 2024-12 has about 1.27 million CDAs against about 2.1 million in the
+  neighbouring months).
+- There are repeated rows in several months, including **2025-06 and 2025-07**. In the lab the monthly stock adds up one
+  row per CDA and month (the paper added up the repeated ones).
+- Consequence for the panel: the “year end” of 2018 is the last snapshot in which each CDA appears (October or
+  November), and that of 2020 is September. That of 2024 comes from the partial December snapshot.
+  [Full table](#lab-qualidade).
 :::
 
-::: {{.callout-tip collapse="true" title="Como esta página é feita"}}
-Gerada por `lab/paper_eda/_gerar_paginas.py` (código de cada parte, a partir de `paper_eda_v1.ipynb`, sem rodar nem
-alterar o notebook) e montada por `lab/paper_eda/_pagina_unica.py`, que junta o resultado já executado das 8 partes
-(`lab/_freeze/paper_eda/`). Comentários `# lab:` no código marcam o que foi trocado. Figuras muito pesadas abrem em
-arquivo à parte ({len(state['figs'])} figuras). Figuras e tabelas exportadas (só sob pedido, `LAB_EXPORT_FIGS=1`) vão
-para `interim/paper_eda_lab/` no HD, com os rótulos `fig_*`/`tab_*` do paper.
+::: {{.callout-tip collapse="true" title="How this page is built"}}
+Generated by `lab/paper_eda/_gerar_paginas.py` (code of each part, from `paper_eda_v1.ipynb`, without running or
+changing the notebook) and assembled by `lab/paper_eda/_pagina_unica.py`, which joins the already executed output of
+the 8 parts (`lab/_freeze/paper_eda/`) and of the lab entries. `# lab:` comments in the code mark what was changed.
+Very heavy figures open in a separate file ({len(state['figs'])} figures). Exported figures and tables (only on request,
+`LAB_EXPORT_FIGS=1`) go to `interim/paper_eda_lab/` on the external drive, with the paper's `fig_*`/`tab_*` labels.
 :::
 """
 
@@ -424,7 +590,7 @@ def lab_links(md: str) -> str:
             return f"](#{LAB_PREFIX[slug]}-{frag[1:]})"
         return f"](#{LAB_ANCHOR[slug]})"
     md = LAB_LINK_RE.sub(_r, md)
-    return SITE_LINK_RE.sub(lambda m: f"]({m.group(1) or '#novidades'})", md)
+    return SITE_LINK_RE.sub(lambda m: f"]({m.group(1) or '#guia'})", md)
 
 
 def _slug(t: str) -> str:
@@ -460,7 +626,10 @@ def escape_reais(md: str) -> str:
     return "".join(out)
 
 
-def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, state: dict) -> tuple[str, list[str]]:
+INNER_NUM = re.compile(r"^(?:\d+[a-z]?(?:\.\d+)*\.?|\d+[A-Z](?:-\w+)?\s+—|[A-E]\.\d+(?:\.\d+)*)\s+")
+
+
+def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, codes: str, state: dict) -> tuple[str, list[str]]:
     md, inc = load_lab_page(src)
     m = re.match(r"\A---\n(.*?)\n---\n", md, flags=re.S)
     yml = m.group(1) if m else ""
@@ -468,6 +637,8 @@ def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, state: di
     md = escape_reais(md)
     desc = re.search(r'^description:\s*"(.*)"\s*$', yml, flags=re.M)
     title = re.search(r'^title:\s*"(.*)"\s*$', yml, flags=re.M)
+    appendix = "." not in num          # o apêndice é um título de nível 2 (## 8. ...)
+    shift = 1 if appendix else 2
     # ids internos com prefixo da página (fig-x -> fig-km-x; cell-fig-x -> cell-fig-km-x; setup -> km-setup)
     ids = set(re.findall(r"\{#([\w-]+)", md)) | set(re.findall(r"\bid=\"([\w-]+)\"", md))
     def newid(i):
@@ -477,63 +648,105 @@ def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, state: di
         return "{#" + newid(m.group(1))
     md = re.sub(r"\{#([\w-]+)", _id, md)
     md = re.sub(r"@((?:fig|tbl)-[\w-]+)", lambda m: "@" + newid(m.group(1)), md)
-    md = re.sub(r"\]\(#([\w-]+)\)", lambda m: f"](#{newid(m.group(1))})" if m.group(1) in ids or True else m.group(0), md)
-    # títulos: ## -> ####, ### -> #####, #### -> ###### (fora das cercas de código); todo título ganha id fixo
-    out, fence, seen = [], False, set()
+    md = re.sub(r"\]\(#([\w-]+)\)", lambda m: f"](#{newid(m.group(1))})", md)
+    # títulos: ## e ### ganham número da seção (num.k, num.k.j), sem o número antigo; #### fica sem número.
+    # Todos descem de nível (2 -> 4 numa subseção, 2 -> 3 no apêndice) e ganham id fixo.
+    out, fence, seen, k, j = [], False, set(), 0, 0
     for ln in md.split("\n"):
         if ln.lstrip().startswith("```"):
             fence = not fence
         hm = None if fence else re.match(r"^(#{2,4}) (.+?)\s*$", ln)
         if hm:
-            t = hm.group(2)
+            lvl, t = len(hm.group(1)), hm.group(2)
             if "{#" not in t:
                 base = f"{pfx}-{_slug(t)}"
-                sid, k = base, 2
+                sid, n = base, 2
                 while sid in seen:
-                    sid = f"{base}-{k}"; k += 1
+                    sid = f"{base}-{n}"; n += 1
                 seen.add(sid)
                 t = f"{t} {{#{sid}}}"
-            ln = "#" * (len(hm.group(1)) + 2) + " " + t
+            if lvl == 2:
+                k += 1; j = 0
+                t = f"{num}.{k} " + INNER_NUM.sub("", t)
+            elif lvl == 3:
+                j += 1
+                t = f"{num}.{k}.{j} " + INNER_NUM.sub("", t)
+            ln = "#" * (lvl + shift) + " " + t
         out.append(ln)
     md = "\n".join(out)
     md = lab_links(md)
-    head = (f"### {num} {short} {{#{anchor}}}\n\n"
-            f"::: {{.callout-tip appearance=\"simple\" title=\"Novo no lab: {title.group(1) if title else short}\"}}\n"
-            f"{desc.group(1) if desc else ''} Conteúdo completo da entrada do laboratório `lab/{src}.qmd`, montado do "
-            f"_freeze dela (nada é executado aqui).\n:::\n\n")
+    hl = "##" if appendix else "###"
+    sep = ". " if appendix else " "
+    head = (f"{hl} {num}{sep}{short} {{#{anchor}}}\n\n"
+            f"::: {{.callout-tip appearance=\"simple\" title=\"New in the lab ({codes}): {title.group(1) if title else short}\"}}\n"
+            f"{desc.group(1) if desc else ''} Full content of the lab entry `lab/{src}.qmd`, assembled from its _freeze "
+            f"(nothing is executed here).\n:::\n\n")
     state["anchors"].add(anchor)
     state["lab_pages"].append((num, short, anchor))
     return head + md.strip("\n") + "\n", inc
 
 
-def lab_block(state: dict) -> tuple[str, list[str]]:
-    bodies, incs = [], []
-    for src, num, short, anchor, pfx in LAB_PAGES:
-        b, inc = lab_section(src, num, short, anchor, pfx, state)
-        bodies.append(f"<!-- lab: {src} -->\n\n{b}")
+def lab_blocks(state: dict) -> tuple[dict, list[str]]:
+    """Seções do lab agrupadas pela parte do paper depois da qual entram ("APPENDIX" = depois de todas)."""
+    by_part, incs = {}, []
+    for src, num, short, anchor, pfx, part, codes in LAB_PAGES:
+        b, inc = lab_section(src, num, short, anchor, pfx, codes, state)
+        by_part.setdefault(part, []).append(f"<!-- lab: {src} -->\n\n{b}")
         incs += inc
-    intro = ("## L. Análises do laboratório {#s-lab}\n\n"
-             "As análises novas do laboratório, inteiras, nesta mesma página. Cada uma é uma entrada datada em `lab/eda/` ou "
-             "`lab/dados/`, com a pergunta, os dados, o que foi encontrado e o que **não** concluir. Os avisos “Novo no "
-             "lab” e “Alterado no lab” nas seções do paper levam até aqui.\n\n"
-             + "\n".join(f"- [{n} {t}](#{a})" for n, t, a in state["lab_pages"]) + "\n")
-    return intro + "\n\n" + "\n\n".join(bodies), incs
+    return by_part, incs
+
+
+VAT_RE = re.compile(r"(?<![\w(/`-])ICMS(?![\w)/`-]|\s+(?:Declarado|Autuação|Autuacao|Fecoep|Alteração|Alteracao|Simples)\b)")
+
+
+def renumber_and_vat(md: str) -> str:
+    """Numeração única (A..E -> 2..6, 'Part X' -> seção N) e 'VAT (ICMS)' no texto. Código, HTML e `código` intactos."""
+    def sec(m):
+        return SEC_NUM[m.group(1)]
+    def fix_text(t: str) -> str:
+        t = re.sub(r"^(#{2,6}) Part ([A-E])\. ", lambda m: f"{m.group(1)} {SEC_NUM[m.group(2)]}. ", t, flags=re.M)
+        t = re.sub(r"^## Correspondence with the manuscript and the dissertation\s*$",
+                   "## 7. Correspondence with the manuscript and the dissertation {#s-7}", t, flags=re.M)
+        t = re.sub(r"\bParts ([A-E])\s*(?:–|-|to)\s*([A-E])\b", lambda m: f"Sections {sec(m)}–{SEC_NUM[m.group(2)]}", t)
+        t = re.sub(r"\bParts ([A-E]) and ([A-E])\b", lambda m: f"Sections {sec(m)} and {SEC_NUM[m.group(2)]}", t)
+        t = re.sub(r"\bPart ([A-E])\b", lambda m: f"Section {sec(m)}", t)
+        t = re.sub(r"(?<![\w.#/-])([A-E])\.(\d+(?:\.\d+)*)(?![\w-])", lambda m: f"{sec(m)}.{m.group(2)}", t)
+        return t
+    def fix_vat(line: str) -> str:
+        if line.lstrip().startswith("<"):
+            return line
+        pieces = re.split(r"(`[^`]*`)", line)
+        return "".join(p if p.startswith("`") else VAT_RE.sub("VAT (ICMS)", p) for p in pieces)
+    out = []
+    for text, code in blocks(md):
+        if code:
+            out.append(text); continue
+        text = fix_text(text)
+        text = "\n".join(fix_vat(l) for l in text.split("\n"))
+        out.append(text)
+    return "\n".join(out)
 
 
 def main() -> int:
-    state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": []}
-    bodies, includes = [], []
+    state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": [], "pt2en": {}, "lab_pages": []}
+    includes = []
+    lab_by_part, lab_inc = lab_blocks(state)
+    includes += lab_inc
+    bodies = []
     for name in PARTS:
         md, inc = load_part(name)
         includes += inc
-        md = transform(strip_part(md), state)
+        md = translate_part(strip_part(md), state)
+        md = transform(md, state)
         md = sectionize(md, state)
         bodies.append(f"<!-- parte: {name} -->\n\n{md}")
-    state["lab_pages"] = []
-    lab_md, lab_inc = lab_block(state)
-    includes += lab_inc
-    body = "\n\n".join(bodies)
-    body = lab_links(body) + "\n\n" + lab_md
+        bodies += lab_by_part.get(name, [])
+    bodies += lab_by_part.get("APPENDIX", [])
+    falta = [k for k, n in state["pt2en"].items() if n == 0 and k not in OPTIONAL_PT]
+    if falta:
+        sys.exit(f"tradução sem casamento no _freeze das partes: {[f[:60] for f in falta]}")
+    body = lab_links("\n\n".join(bodies))
+    body = renumber_and_vat(body)
     body = drop_plotly_mathjax(body)
     # scattergl (WebGL) -> scatter (SVG): alguns navegadores/máquinas não têm WebGL e o plot some com
     # "WebGL is not supported". Só o tipo do trace muda; os dados vêm do _freeze, que não é alterado.
@@ -541,7 +754,7 @@ def main() -> int:
     body = body.replace('"type":"scattergl"', '"type":"scatter"')
     assert "scattergl" not in body, "sobrou scattergl em outra forma"
     body = externalize_figs(body, state)
-    page = header(state, includes) + "\n" + novidades(state) + "\n" + body
+    page = header(state, includes) + "\n" + renumber_and_vat(novidades(state)) + "\n" + body
     # ids únicos (CTF-03): uma célula com o mesmo rótulo de um título (ex.: lab-recorte) vira cell-<rótulo>;
     # os links continuam indo para o título.
     heads = set(re.findall(r"^#+ .*\{#([\w-]+)[\s}]", page, flags=re.M))
@@ -553,7 +766,7 @@ def main() -> int:
         sys.exit(f"ids repetidos: {dup[:20]}")
     # todo link #âncora interno precisa existir
     targets = set(re.findall(r"\]\(#([\w-]+)\)", page))
-    defined = set(re.findall(r"\{#([\w-]+)[\s}]", page)) | {"novidades"}
+    defined = set(re.findall(r"\{#([\w-]+)[\s}]", page)) | {"novidades", "guia"}
     missing = sorted(targets - defined)
     if missing:
         sys.exit(f"âncoras sem destino: {missing}")

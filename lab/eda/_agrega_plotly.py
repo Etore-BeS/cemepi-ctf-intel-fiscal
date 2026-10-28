@@ -144,7 +144,7 @@ def _density(traces, go, layout):
         tot += h; per.append((t, h))
     z = np.where(tot > 0, tot, np.nan).T
     out.append(go.Heatmap(x=cx, y=cy, z=z, colorscale=[[0, "#E6EEF0"], [1, "#154C56"]], showscale=False,
-                          name="CDAs por célula", hovertemplate="x %{x:.3g}, y %{y:.3g}: %{z} CDAs<extra></extra>",
+                          name="CDAs per cell", hovertemplate="x %{x:.3g}, y %{y:.3g}: %{z} CDAs<extra></extra>",
                           xaxis=ref.xaxis, yaxis=ref.yaxis, showlegend=False))
     if len(per) > 1:
         for t, h in per:

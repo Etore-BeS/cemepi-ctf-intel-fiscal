@@ -3,7 +3,7 @@
 
 Uso (fish, na raiz do worktree):
     uv run --no-sync python lab/paper_eda/_html_unico.py
-Saída: lab/_site/paper_eda/EDA_paper_CEMEPI.html e uma cópia em ~/Desktop/EDA_paper_CEMEPI.html
+Saída: lab/_site/paper_eda/EDA_paper_CEMEPI.html e uma cópia em ~/Downloads/EDA_paper_CEMEPI.html (nunca no ~/Desktop)
 (--sem-desktop não copia; --sem-render usa o lab/_site/paper_eda/index.html que já existe).
 
 Não executa nenhuma célula: (1) remonta lab/paper_eda/index.qmd do _freeze (_pagina_unica.py), (2) renderiza só
@@ -35,7 +35,7 @@ LAB = HERE.parent
 SITE = LAB / "_site"
 PAGE = SITE / "paper_eda" / "index.html"
 OUT = SITE / "paper_eda" / "EDA_paper_CEMEPI.html"
-DESKTOP = Path.home() / "Desktop" / "EDA_paper_CEMEPI.html"
+DESKTOP = Path.home() / "Downloads" / "EDA_paper_CEMEPI.html"   # regra do Étore (28/10): nada no ~/Desktop
 CACHE = Path.home() / ".cache" / "cemepi-lab" / "cdn"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 MATHJAX = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-svg.min.js"
@@ -107,7 +107,7 @@ def heavy_fig(cell: str) -> str:
     body = body.replace('"type":"scattergl"', '"type":"scatter"')
     b64 = base64.b64encode(gzip.compress(body.encode("utf-8"), 9)).decode()
     return (f'<div class="lab-fig-lenta" data-cell="{cell}"><div class="lab-fig-alvo"></div>'
-            f'<p class="small text-muted lab-fig-aviso">Carregando a figura (histograma com todos os pontos)…</p>'
+            f'<p class="small text-muted lab-fig-aviso">Loading the figure (histogram with all points)…</p>'
             f'<script type="application/octet-stream" class="lab-fig-dados">{b64}</script></div>')
 
 
@@ -123,7 +123,7 @@ LAZY_JS = r"""
       alvo.appendChild(document.createRange().createContextualFragment(txt));
       var av = el.querySelector(".lab-fig-aviso"); if (av) av.remove();
     } catch (e) {
-      el.querySelector(".lab-fig-aviso").textContent = "Não foi possível desenhar esta figura neste navegador (" + e + ").";
+      el.querySelector(".lab-fig-aviso").textContent = "This figure could not be drawn in this browser (" + e + ").";
     }
   }
   function init() {
@@ -206,6 +206,7 @@ def build() -> tuple[str, dict]:
         sys.exit(f"link para conteúdo fora do arquivo: {rel}")
     h = re.sub(r'href="((?:\.\./|\./)[^"#]*\.html)', _href, h)
     h = h.replace('<div id="quarto-search" class="" title="Procurar"></div>', "")   # a busca precisa de servidor
+    h = h.replace('<div id="quarto-search" class="" title="Search"></div>', "")     # idem, com lang: en
     h = h.replace('"type":"scattergl"', '"type":"scatter"')
     return h, st
 

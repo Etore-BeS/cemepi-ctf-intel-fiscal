@@ -1,12 +1,12 @@
 ---
-title: "Grandes dívidas de ICMS: estrutura de distância (B.5.18) e K-means com várias inicializações"
-description: "K-means com 100 inicializações por k no top 1%, sem 2026: solução principal k = 4 (decisão do autor, IMP-13), com k = 2 a 8, cotovelo, silhueta e HDBSCAN como diagnóstico."
+title: "Large VAT (ICMS) debts: distance structure (Figure 3.5.18) and K-means with many initialisations"
+description: "K-means with 100 initialisations per k on the top 1%, no 2026: main solution k = 4 (author's decision, IMP-13), with k = 2 to 8, elbow, silhouette and HDBSCAN as diagnostics."
 date: 2026-10-23
 jupyter: python3
 ---
 
-**Dados:** extrato ICMS só de PJ do paper EDA v1 (seção 1.3), `extracao=2026-03`. **Base principal:** top 1% das CDAs por valor na foto de **dezembro de 2025**, com pagamentos até 31/12/2025 (sem 2026). **Base de comparação:** a do paper, com a foto de março de 2026 e todos os pagamentos.
-**Status:** exploração. **Solução principal: k = 4, por decisão do autor (IMP-13, 27/10/2026).** k = 2 a 8, cotovelo, silhueta, hierárquico e HDBSCAN ficam como diagnóstico. A página não tira conclusões substantivas dos grupos.
+**Data:** the legal-entity-only VAT (ICMS) extract of paper EDA v1 (subsection 1.3), `extracao=2026-03`. **Main base:** top 1% of CDAs by value in the **December 2025** snapshot, with payments up to 31/12/2025 (no 2026). **Comparison base:** the paper's, with the March 2026 snapshot and all payments.
+**Status:** exploration. **Main solution: k = 4, by the author's decision (IMP-13, 27/10/2026).** k = 2 to 8, elbow, silhouette, hierarchical clustering and HDBSCAN are kept as diagnostics. The subsection draws no substantive conclusions from the groups.
 
 ```{python}
 #| label: setup
@@ -42,45 +42,45 @@ for nome, cfg in BASES.items():
     D = B.cached_memmap("B.5.18:gower", X_num.shape[0], K.gower_blocks(X_num, X_cat), params=cfg["params"])
     sub = np.sort(np.random.default_rng(B.SEED).choice(D.shape[0], size=min(N_SUB, D.shape[0]), replace=False))
     R[nome] = dict(f=f, X_raw=X_raw, X_num=X_num, X_cat=X_cat, D=D, sub=sub, params=cfg["params"])
-print(f"scikit-learn {sklearn.__version__}; semente {B.SEED}; {N_SEEDS} inicializações por k; k = 2 a 8")
+print(f"scikit-learn {sklearn.__version__}; seed {B.SEED}; {N_SEEDS} initialisations per k; k = 2 to 8")
 ```
 
-## Pergunta e plano de análise
+## Question and analysis plan
 
-**Pergunta.** As grandes dívidas de ICMS (top 1% por valor) formam 2 ou 4 grupos estáveis? A silhueta do agrupamento hierárquico do paper (seção B.5.19) indicou k = 2. Na discussão de pesquisa falou-se em 4 grupos, pelo cotovelo (a tabela de critérios abaixo mostra onde a curvatura é maior).
+**Question.** Do the large VAT (ICMS) debts (top 1% by value) form 2 or 4 stable groups? The silhouette of the paper's hierarchical clustering (subsection 3.5.19) pointed to k = 2. In the research discussion 4 groups were mentioned, from the elbow (the criteria table below shows where the curvature is largest).
 
-**Plano (definido antes de olhar o resultado):**
+**Plan (set before looking at the result):**
 
-| Item | Escolha | Por quê |
+| Item | Choice | Why |
 |---|---|---|
-| Unidade | CDA de ICMS de PJ no top 1% por valor na foto | Mesma base do paper (B.5.1) |
-| Variáveis | 6 numéricas: log do valor, idade, recuperação, tempo até o 1º pagamento, nº de pagamentos, parcela paga em programas (PEP 2019, Acordo Paulista 2024). 3 categóricas: origem, situação, ajuizamento | As mesmas do paper (B.5.17) |
-| Nulos | Tempo até o 1º pagamento nulo (nunca pagou) recebe a idade, como no paper. As demais não têm nulos | Mantém comparabilidade |
-| Escala no K-means | Numéricas divididas pela amplitude e categóricas em one-hot × 1/√2: cada variável contribui no máximo 1 para a distância ao quadrado | É a escala do Gower usado no paper. A escala do paper por mediana/IQR deixa recuperação e nº de pagamentos (IQR = 0) na escala bruta, e o nº de pagamentos chega a 257 |
-| Método | K-means (Lloyd, k-means++) com 100 inicializações por k, guardando a de menor custo (inércia) | O K-means para em mínimos locais que dependem do ponto de partida. No scikit-learn ≥ 1.4, `n_init="auto"` com k-means++ roda **uma** inicialização só |
-| Alternativa | Hierárquico (average linkage) sobre Gower, que é o método do paper | Comparação direta com o k = 2 do paper |
-| Critérios de k | Cotovelo (curvatura da inércia mínima), silhueta (euclidiana e Gower), estabilidade entre sementes (ARI), tamanho do menor grupo | Nenhum critério sozinho decide |
-| Reprodutibilidade | Semente 2026 + 1000·k + s; silhuetas na mesma subamostra de 5.000 CDAs do paper | |
+| Unit | Legal-entity VAT (ICMS) CDA in the top 1% by value in the snapshot | Same base as the paper (3.5.1) |
+| Variables | 6 numerical: log of value, age, recovery, time to first payment, number of payments, share paid under programmes (PEP 2019, Acordo Paulista 2024). 3 categorical: origin, status, court filing | The same as the paper (3.5.17) |
+| Nulls | A null time to first payment (never paid) takes the age, as in the paper. The others have no nulls | Keeps comparability |
+| Scaling in the K-means | Numerical variables divided by their range and categorical ones one-hot × 1/√2: each variable contributes at most 1 to the squared distance | It is the scaling of the Gower distance used in the paper. The paper's median/IQR scaling leaves recovery and number of payments (IQR = 0) on the raw scale, and the number of payments reaches 257 |
+| Method | K-means (Lloyd, k-means++) with 100 initialisations per k, keeping the one with the lowest cost (inertia) | K-means stops at local minima that depend on the starting point. In scikit-learn ≥ 1.4, `n_init="auto"` with k-means++ runs **a single** initialisation |
+| Alternative | Hierarchical (average linkage) on Gower, the paper's method | Direct comparison with the paper's k = 2 |
+| Criteria for k | Elbow (curvature of the minimum inertia), silhouette (Euclidean and Gower), stability across seeds (ARI), size of the smallest group | No single criterion decides |
+| Reproducibility | Seed 2026 + 1000·k + s; silhouettes on the paper's same subsample of 5,000 CDAs | |
 
-**Definições.** *Inércia* = soma das distâncias euclidianas ao quadrado de cada ponto ao centro do seu grupo. *Silhueta* de um ponto = $(b-a)/\max(a,b)$, em que $a$ é a distância média ao próprio grupo e $b$ a distância média ao grupo vizinho mais próximo; a média vai de −1 a 1. *ARI* (Adjusted Rand Index; Hubert e Arabie, 1985) mede a concordância entre duas partições: 1 é idêntica, 0 é o esperado ao acaso.
+**Definitions.** *Inertia* = sum of the squared Euclidean distances from each point to the centre of its group. *Silhouette* of a point = $(b-a)/\max(a,b)$, where $a$ is the mean distance to its own group and $b$ the mean distance to the nearest neighbouring group; the mean ranges from −1 to 1. *ARI* (Adjusted Rand Index; Hubert and Arabie, 1985) measures the agreement between two partitions: 1 is identical, 0 is what is expected by chance.
 
 ```{python}
 #| label: tbl-bases
-#| tbl-cap: "As duas bases do top 1%."
-pl.DataFrame([{"base": n, "CDAs": r["f"].height, "valor mínimo (R$ mi)": float(r["f"]["value"].min() / 1e6),
-               "valor somado (R$ bi)": float(r["f"]["value"].sum() / 1e9),
-               "% com algum pagamento": float(100 * (r["f"]["n_payments"] > 0).mean())} for n, r in R.items()]).to_pandas().round(2)
+#| tbl-cap: "The two top-1% bases."
+pl.DataFrame([{"base": n, "CDAs": r["f"].height, "minimum value (BRL mn)": float(r["f"]["value"].min() / 1e6),
+               "total value (BRL bn)": float(r["f"]["value"].sum() / 1e9),
+               "% with any payment": float(100 * (r["f"]["n_payments"] > 0).mean())} for n, r in R.items()]).to_pandas().round(2)
 ```
 
-## B.5.18 Estrutura de distância (corrigida)
+## Distance structure (Figure 3.5.18, corrected)
 
-**O que estava errado no gráfico do paper.** No painel de componentes principais (PCA) do paper, o primeiro componente é dominado pelo **número de pagamentos**. Essa variável fica na escala bruta porque o IQR dela é zero (mais de 75% das CDAs não têm pagamento; o número exato está no "Como ler" da figura), e por isso quase todos os pontos se amontoam em PC1 ≈ 0. Além disso, as cores de "declarado" e "outro" eram dois tons de verde-petróleo quase iguais.
+**What was wrong with the paper's chart.** In the paper's principal components (PCA) panel, the first component is dominated by the **number of payments**. This variable stays on the raw scale because its IQR is zero (more than 75% of CDAs have no payment; the exact figure is in the figure's "How to read"), so almost all points pile up at PC1 ≈ 0. In addition, the colours of "declared" and "other" were two almost identical shades of teal.
 
-**O que foi corrigido:** o PCA passa a ser calculado na mesma escala do Gower e do K-means (amplitude e one-hot), as três origens recebem cores bem distintas e a tabela mostra a variância explicada e as cargas. O t-SNE continua calculado sobre o Gower de uma subamostra de 5.000 CDAs. Os três painéis usam a mesma subamostra.
+**What was corrected:** the PCA is now computed on the same scale as the Gower distance and the K-means (range and one-hot), the three origins get clearly distinct colours and the table shows the explained variance and the loadings. The t-SNE is still computed on the Gower distance of a subsample of 5,000 CDAs. The three panels use the same subsample.
 
 ```{python}
 #| label: fig-b518
-#| fig-cap: "Top 1%, base dez/2025, subamostra de 5.000 CDAs. Colunas: PCA como no paper (escala mediana/IQR; eixo horizontal em log), PCA corrigido (escala do Gower) e t-SNE sobre a distância de Gower. Linhas: todas as origens e cada origem com pelo menos 5 CDAs. Tom = CDAs por célula (grade 50 × 50, escala log); contorno cinza = todas as origens (DADOS-14: sem um ponto por CDA)."
+#| fig-cap: "Top 1%, December 2025 base, subsample of 5,000 CDAs. Columns: PCA as in the paper (median/IQR scaling; horizontal axis in log), corrected PCA (Gower scaling) and t-SNE on the Gower distance. Rows: all origins and each origin with at least 5 CDAs. Shade = CDAs per cell (50 × 50 grid, log scale); grey outline = all origins (DADOS-14: no point per CDA)."
 import _b518
 r = R["2025-12"]
 X_km = K.kmeans_design(r["X_raw"], r["X_cat"])
@@ -94,13 +94,13 @@ emb_tsne = B.collect(B.cached("B.5.18:tsne", lambda: pl.DataFrame(
     params={**r["params"], "n_embed": N_SUB}))
 r["tsne"] = emb_tsne
 origem = r["f"]["ICMS_ORIGIN"].to_numpy()
-ROT = {"declared": "declarado", "assessed": "autuado", "other": "outro"}
+ROT = {"declared": "declared", "assessed": "assessed", "other": "other"}
 ORDEM = ["declared", "assessed", "other"]
 old_x = np.column_stack([_b518.log_shift(emb_old[:, 0]), emb_old[:, 1]])
 sub = r["sub"]
 fig, omit = _b518.fig_por_origem(
-    [dict(titulo="PCA do paper (mediana/IQR)", xy=old_x[sub], idx=sub, eixo_x="PC1 − mínimo (escala log)", eixo_y="PC2", log_x=True),
-     dict(titulo="PCA corrigido (escala Gower)", xy=emb_new[sub], idx=sub, eixo_x="PC1", eixo_y="PC2"),
+    [dict(titulo="Paper's PCA (median/IQR)", xy=old_x[sub], idx=sub, eixo_x="PC1 − minimum (log scale)", eixo_y="PC2", log_x=True),
+     dict(titulo="Corrected PCA (Gower scaling)", xy=emb_new[sub], idx=sub, eixo_x="PC1", eixo_y="PC2"),
      dict(titulo="t-SNE (Gower)", xy=np.column_stack([emb_tsne["x"].to_numpy(), emb_tsne["y"].to_numpy()]), idx=sub,
           eixo_x="t-SNE 1", eixo_y="t-SNE 2")],
     origem, ORDEM, ROT, {o: B.color(i) for i, o in enumerate(ORDEM)})
@@ -112,34 +112,34 @@ fig.show()
 #| output: asis
 _np0 = float(np.mean(r["f"]["n_payments"].to_numpy() == 0))
 _cont = {ROT[o]: int((origem == o).sum()) for o in ORDEM}
-print(f"**Como ler.** Cada coluna é uma projeção e cada linha mostra só as CDAs de uma origem, na mesma janela da coluna; o "
-      f"tom é o número de CDAs na célula (mais escuro, mais CDAs) e o contorno cinza é o total, para comparar onde cada origem "
-      f"se concentra. No PCA do paper o PC1 é quase só o número de pagamentos ({100 * _np0:.0f}% das CDAs do top 1% não têm "
-      f"pagamento e ficam empilhadas no mínimo), por isso o eixo está em log de (PC1 − mínimo + 1). "
+print(f"**How to read.** Each column is a projection and each row shows only the CDAs of one origin, in the same window as the column; the "
+      f"shade is the number of CDAs in the cell (darker, more CDAs) and the grey outline is the total, to compare where each origin "
+      f"is concentrated. In the paper's PCA, PC1 is almost only the number of payments ({100 * _np0:.0f}% of the top-1% CDAs have no "
+      f"payment and are stacked at the minimum), so the axis is in log of (PC1 − minimum + 1). "
       f"Base: " + ", ".join(f"{k} {_b518._br(v)}" for k, v in _cont.items()) + " CDAs"
-      + (f". {', '.join(omit).capitalize()} tem menos de {_b518.MIN_N} CDAs e não ganha linha própria (nem contorno): mostrar a "
-         f"posição de tão poucas CDAs seria mostrar CDAs individuais." if omit else "."))
+      + (f". {', '.join(omit).capitalize()} has fewer than {_b518.MIN_N} CDAs and gets no row of its own (nor outline): showing the "
+         f"position of so few CDAs would mean showing individual CDAs." if omit else "."))
 ```
 
 ```{python}
 #| label: tbl-pca
-#| tbl-cap: "Variância explicada e as três maiores cargas (em módulo) de cada componente, PCA do paper e PCA corrigido."
+#| tbl-cap: "Explained variance and the three largest loadings (in absolute value) of each component, paper's PCA and corrected PCA."
 nomes_km = K.NUM + [f"{c}={v}" for j, c in enumerate(K.CAT) for v in np.unique(r["f"][c].cast(pl.Utf8).fill_null("NA").to_numpy()[np.argsort(r["X_cat"][:, j], kind="stable")][np.unique(np.sort(r["X_cat"][:, j]), return_index=True)[1]])]
 def cargas(p, nomes):
     out = []
     for i in range(2):
         top = np.argsort(-np.abs(p.components_[i]))[:3]
-        out.append({"componente": f"PC{i + 1}", "variância explicada (%)": round(100 * float(p.explained_variance_ratio_[i]), 1),
-                    "maiores cargas": "; ".join(f"{nomes[j]} ({p.components_[i][j]:+.2f})" for j in top)})
+        out.append({"component": f"PC{i + 1}", "explained variance (%)": round(100 * float(p.explained_variance_ratio_[i]), 1),
+                    "largest loadings": "; ".join(f"{nomes[j]} ({p.components_[i][j]:+.2f})" for j in top)})
     return out
-pl.DataFrame([{"versão": "paper", **d} for d in cargas(pca_old, K.NUM)] +
-             [{"versão": "corrigida", **d} for d in cargas(pca_new, nomes_km)]).to_pandas()
+pl.DataFrame([{"version": "paper", **d} for d in cargas(pca_old, K.NUM)] +
+             [{"version": "corrected", **d} for d in cargas(pca_new, nomes_km)]).to_pandas()
 ```
 
-**Como ler:** no painel da esquerda, um único eixo carrega quase toda a variância, e a tabela mostra qual variável o domina. No do meio, as variáveis pesam de forma comparável. O t-SNE preserva só a vizinhança local: distâncias entre grupos e tamanhos das manchas no mapa não têm significado.
-**O que não concluir:** separação visual no t-SNE não prova que existam grupos. Isso é testado abaixo.
+**How to read:** in the left panel, a single axis carries almost all the variance, and the table shows which variable dominates it. In the middle one, the variables weigh comparably. The t-SNE preserves only local neighbourhoods: distances between groups and sizes of the blobs on the map carry no meaning.
+**What not to conclude:** visual separation in the t-SNE does not prove that groups exist. That is tested below.
 
-## K-means com 100 inicializações por k
+## K-means with 100 initialisations per k
 
 ```{python}
 #| label: kmeans
@@ -160,37 +160,37 @@ cols = ["base", "k", "inertia_min", "inertia_median", "share_seeds_at_min", "ari
 tab.select(cols).to_pandas().round(4)
 ```
 
-**Como ler a tabela:**
+**How to read the table:**
 
-- `inertia_min` é o menor custo entre as 100 inicializações e `share_seeds_at_min` é a fração de inicializações que chegou a ele (a menos de 0,1%).
-- `ari_vs_best_mean` e `ari_vs_best_p05` dizem quanto as soluções de cada inicialização concordam com a melhor (média e 5º percentil).
-- `ari_block_best_min` é o pior ARI entre as melhores soluções de 5 blocos independentes de 20 inicializações. Perto de 1 quer dizer que a melhor partição se repete.
-- As silhuetas usam a mesma subamostra de 5.000 CDAs: euclidiana no espaço do K-means, Gower para o K-means e Gower para o hierárquico do paper.
-- `rel_drop_from_prev` é a queda relativa da inércia em relação ao k anterior e `curvature` é a segunda diferença (o "cotovelo" é o k de maior curvatura).
+- `inertia_min` is the lowest cost among the 100 initialisations and `share_seeds_at_min` is the fraction of initialisations that reached it (within 0.1%).
+- `ari_vs_best_mean` and `ari_vs_best_p05` say how much the solutions of each initialisation agree with the best one (mean and 5th percentile).
+- `ari_block_best_min` is the worst ARI among the best solutions of 5 independent blocks of 20 initialisations. Close to 1 means the best partition repeats.
+- The silhouettes use the same subsample of 5,000 CDAs: Euclidean in the K-means space, Gower for the K-means and Gower for the paper's hierarchical clustering.
+- `rel_drop_from_prev` is the relative drop in inertia from the previous k and `curvature` is the second difference (the "elbow" is the k with the largest curvature).
 
 ```{python}
 #| label: fig-k-criterios
-#| fig-cap: "Base dez/2025. Esquerda: inércia mínima (linha) e faixa entre a mínima e a máxima das 100 inicializações. Direita: silhueta média por k."
+#| fig-cap: "December 2025 base. Left: minimum inertia (line) and band between the minimum and maximum of the 100 initialisations. Right: mean silhouette by k."
 t = tab.filter(pl.col("base") == "2025-12").sort("k")
 fig = make_subplots(rows=1, cols=2, horizontal_spacing=0.12)
 fig.add_trace(go.Scatter(x=t["k"], y=t["inertia_max"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), 1, 1)
 fig.add_trace(go.Scatter(x=t["k"], y=t["inertia_min"], mode="lines+markers", fill="tonexty", fillcolor="rgba(21,76,86,0.15)",
-                         line=dict(color=B.CEMEPI["deep_teal"]), name="Inércia mínima (faixa: mín.–máx.)"), 1, 1)
-for i, (c, n) in enumerate((("silhouette_euclid", "K-means, euclidiana"), ("silhouette_gower", "K-means, Gower"),
-                            ("silhouette_agglomerativo_gower", "Hierárquico (paper), Gower"))):
+                         line=dict(color=B.CEMEPI["deep_teal"]), name="Minimum inertia (band: min–max)"), 1, 1)
+for i, (c, n) in enumerate((("silhouette_euclid", "K-means, Euclidean"), ("silhouette_gower", "K-means, Gower"),
+                            ("silhouette_agglomerativo_gower", "Hierarchical (paper), Gower"))):
     fig.add_trace(go.Scatter(x=t["k"], y=t[c], mode="lines+markers", name=n, line=dict(color=B.color(i + 1), dash=B.DASHES[i])), 1, 2)
 fig.update_xaxes(title_text="k", dtick=1)
-fig.update_yaxes(title_text="Soma dos quadrados dentro dos grupos", row=1, col=1)
-fig.update_yaxes(title_text="Silhueta média", row=1, col=2)
+fig.update_yaxes(title_text="Within-group sum of squares", row=1, col=1)
+fig.update_yaxes(title_text="Mean silhouette", row=1, col=2)
 fig.update_layout(height=420)
 fig.show()
 ```
 
-## Solução principal: k = 4
+## Main solution: k = 4
 
-**A escolha de k = 4 é decisão do autor (IMP-13, 27/10/2026).** Esta seção descreve a partição de menor inércia com k = 4
-(base dez/2025). Os rótulos G1 a G4 só numeram os grupos por tamanho (G1 é o maior); não são nomes de perfis. As partições
-com k = 2 e 3, o cotovelo e as silhuetas de k = 2 a 8 ficam abaixo, como diagnóstico.
+**The choice of k = 4 is the author's decision (IMP-13, 27/10/2026).** This subsection describes the lowest-inertia partition with k = 4
+(December 2025 base). The labels G1 to G4 only number the groups by size (G1 is the largest); they are not profile names. The partitions
+with k = 2 and 3, the elbow and the silhouettes for k = 2 to 8 are below, as diagnostics.
 
 ```{python}
 #| label: k4-base
@@ -214,73 +214,73 @@ _k_hier = int(max(_sil_lab, key=_sil_lab.get))
 hdb = B.collect(B.cached("lab26v1:B.5.19:labels", _so_cache("lab26v1:B.5.19:labels"),
                          params={**_top_lab, "k": _k_hier, "n_fit": N_SUB})).select("ID_DEBITO", "hdbscan")
 hk = f.select("ID_DEBITO").with_columns(pl.Series("G", g4)).join(hdb, on="ID_DEBITO", how="inner")
-print(f"HDBSCAN do B.5.19 casado por CDA com o K-means: {hk.height:,} de {f.height:,} CDAs".replace(",", "."))
+print(f"HDBSCAN of 3.5.19 matched by CDA with the K-means: {hk.height:,} of {f.height:,} CDAs")
 ```
 
 ```{python}
 #| label: tbl-k4-tamanhos
-#| tbl-cap: "K-means k = 4 (base dez/2025): tamanho de cada grupo e parcela do valor."
-d4 = f.with_columns(pl.Series("G", g4), pl.Series("grupo K-means", lab[4]))
-d4.group_by("G", "grupo K-means").agg(pl.len().alias("CDAs"), (100 * pl.len() / d4.height).alias("% das CDAs"),
-                                      (100 * pl.col("value").sum() / d4["value"].sum()).alias("% do valor")
+#| tbl-cap: "K-means k = 4 (December 2025 base): size of each group and share of value."
+d4 = f.with_columns(pl.Series("G", g4), pl.Series("K-means group", lab[4]))
+d4.group_by("G", "K-means group").agg(pl.len().alias("CDAs"), (100 * pl.len() / d4.height).alias("% of CDAs"),
+                                      (100 * pl.col("value").sum() / d4["value"].sum()).alias("% of value")
                                       ).sort("G").to_pandas().round(2)
 ```
 
 ```{python}
 #| label: tbl-k4-perfis
-#| tbl-cap: "Perfis agregados do K-means k = 4 (base dez/2025): medianas das variáveis numéricas e categoria mais frequente (com a sua parcela)."
+#| tbl-cap: "Aggregate profiles of the K-means k = 4 (December 2025 base): medians of the numerical variables and most frequent category (with its share)."
 def perfil(k, rot=None):
-    d = f.with_columns(pl.Series("grupo", rot if rot is not None else lab[k].astype(str)))
-    out = d.group_by("grupo").agg(
-        pl.len().alias("CDAs"), (100 * pl.col("value").sum() / d["value"].sum()).alias("% do valor"),
+    d = f.with_columns(pl.Series("group", rot if rot is not None else lab[k].astype(str)))
+    out = d.group_by("group").agg(
+        pl.len().alias("CDAs"), (100 * pl.col("value").sum() / d["value"].sum()).alias("% of value"),
         *[pl.col(c).median().alias(c) for c in K.NUM],
-        *[pl.col(c).mode().first().alias(f"{c} (moda)") for c in K.CAT],
-        *[(100 * (pl.col(c) == pl.col(c).mode().first()).mean()).alias(f"{c} (% moda)") for c in K.CAT])
-    return out.with_columns(pl.lit(k).alias("k")).sort("grupo")
-perfil(4, g4).select("grupo", pl.exclude("k", "grupo")).to_pandas().round(3)
+        *[pl.col(c).mode().first().alias(f"{c} (mode)") for c in K.CAT],
+        *[(100 * (pl.col(c) == pl.col(c).mode().first()).mean()).alias(f"{c} (% mode)") for c in K.CAT])
+    return out.with_columns(pl.lit(k).alias("k")).sort("group")
+perfil(4, g4).select("group", pl.exclude("k", "group")).to_pandas().round(3)
 ```
 
 ```{python}
 #| label: criterios-k4-texto
 #| output: asis
-# Texto montado da tabela de critérios e do cruzamento com o HDBSCAN, sem números digitados à mão
+# Text built from the criteria table and the HDBSCAN cross-tab, with no hand-typed numbers
 t = tab.filter(pl.col("base") == "2025-12").sort("k")
-br = lambda v, d=3: f"{v:.{d}f}".replace(".", ",")
+br = lambda v, d=3: f"{v:.{d}f}"
 row = {k: dict(zip(t.columns, v)) for k, v in zip(t["k"].to_list(), t.rows())}
 ke = int(t.sort("silhouette_euclid", descending=True)["k"][0]); kg = int(t.sort("silhouette_gower", descending=True)["k"][0])
-sil = (f"a silhueta do K-means é máxima em k = 4 entre k = 2 e 8, nas duas métricas: {br(row[4]['silhouette_euclid'])} "
-       f"(euclidiana) e {br(row[4]['silhouette_gower'])} (Gower)" if ke == kg == 4 else
-       f"**atenção:** a silhueta máxima não está em k = 4 (euclidiana em k = {ke}, Gower em k = {kg})")
+sil = (f"the K-means silhouette is highest at k = 4 among k = 2 to 8, in both metrics: {br(row[4]['silhouette_euclid'])} "
+       f"(Euclidean) and {br(row[4]['silhouette_gower'])} (Gower)" if ke == kg == 4 else
+       f"**warning:** the highest silhouette is not at k = 4 (Euclidean at k = {ke}, Gower at k = {kg})")
 ok = hk.filter(pl.col("hdbscan") >= 0)
 cx = ok.group_by("hdbscan", "G").len()
 mx = cx.group_by("hdbscan").agg(pl.col("G").sort_by("len").last().alias("G"), (pl.col("len").max() / pl.col("len").sum()).alias("pur"))
 n_h, n_noise = mx.height, int((hk["hdbscan"] < 0).sum())
 cobre = sorted(set(mx["G"].to_list()))
 from sklearn.metrics import adjusted_rand_score as _ari
-print(f"**O que sustenta k = 4.** (1) Na base dez/2025, {sil}. A melhor partição com k = 4 se repete nos 5 blocos "
-      f"independentes de 20 inicializações (pior ARI entre blocos {br(row[4]['ari_block_best_min'])}), e o menor grupo tem "
-      f"{br(row[4]['smallest_cluster_pct'], 1)}% das CDAs. (2) O HDBSCAN do B.5.19 (Gower, min_cluster_size = 50), que não "
-      f"recebe k, acha **{n_h} grupos** e marca {n_noise} CDAs como ruído. Cada um dos {n_h} grupos cai quase inteiro num só grupo do "
-      f"K-means k = 4 (no mínimo {br(100 * mx['pur'].min(), 2)}% das CDAs de cada um), e os {n_h} se juntam em "
-      f"{len(cobre)} grupos do K-means ({', '.join(cobre)}). ARI HDBSCAN × K-means k = 4, sem o ruído: "
+print(f"**What supports k = 4.** (1) On the December 2025 base, {sil}. The best partition with k = 4 repeats in the 5 independent "
+      f"blocks of 20 initialisations (worst ARI between blocks {br(row[4]['ari_block_best_min'])}), and the smallest group has "
+      f"{br(row[4]['smallest_cluster_pct'], 1)}% of the CDAs. (2) The HDBSCAN of 3.5.19 (Gower, min_cluster_size = 50), which is not "
+      f"given k, finds **{n_h} groups** and flags {n_noise} CDAs as noise. Each of the {n_h} groups falls almost entirely into a single "
+      f"K-means k = 4 group (at least {br(100 * mx['pur'].min(), 2)}% of the CDAs of each), and the {n_h} merge into "
+      f"{len(cobre)} K-means groups ({', '.join(cobre)}). ARI HDBSCAN × K-means k = 4, without the noise: "
       f"{br(_ari(ok['hdbscan'].to_numpy(), ok['G'].to_numpy()))}.")
 print()
 kc = int(t.filter(pl.col("curvature").is_not_null()).sort("curvature", descending=True)["k"][0])
-print(f"**Critérios que apontam outro k (diagnóstico).** O cotovelo da inércia (maior curvatura) está em k = {kc}, e a "
-      f"silhueta do hierárquico do paper é maior em k = {_k_hier}. A decisão por k = 4 é do autor; a página mostra a evidência.")
+print(f"**Criteria pointing to another k (diagnostics).** The inertia elbow (largest curvature) is at k = {kc}, and the "
+      f"silhouette of the paper's hierarchical clustering is highest at k = {_k_hier}. The decision for k = 4 is the author's; the subsection shows the evidence.")
 ```
 
 ```{python}
 #| label: tbl-hdb-k4
-#| tbl-cap: "HDBSCAN do B.5.19 (linhas; −1 = ruído) × K-means k = 4 (colunas), número de CDAs, base dez/2025."
+#| tbl-cap: "HDBSCAN of 3.5.19 (rows; −1 = noise) × K-means k = 4 (columns), number of CDAs, December 2025 base."
 ct = hk.group_by("hdbscan", "G").len().pivot(on="G", index="hdbscan", values="len").fill_null(0)
 ct.select("hdbscan", *sorted(c for c in ct.columns if c != "hdbscan")).sort("hdbscan").to_pandas()
 ```
 
 ```{python}
 #| label: fig-tsne-k
-#| fig-cap: "t-SNE da base dez/2025 (mesma subamostra do B.5.18), em mapa de densidade 2D (tom = CDAs por célula) com o contorno de cada grupo do K-means: k = 4, a solução principal (esquerda), e k = 2, diagnóstico (direita). Legenda abaixo dos painéis (DADOS-14: sem um ponto por CDA)."
-fig = make_subplots(rows=1, cols=2, subplot_titles=("K-means k = 4 (principal)", "K-means k = 2 (diagnóstico)"),
+#| fig-cap: "t-SNE of the December 2025 base (same subsample as Figure 3.5.18), as a 2D density map (shade = CDAs per cell) with the outline of each K-means group: k = 4, the main solution (left), and k = 2, diagnostic (right). Legend below the panels (DADOS-14: no point per CDA)."
+fig = make_subplots(rows=1, cols=2, subplot_titles=("K-means k = 4 (main)", "K-means k = 2 (diagnostic)"),
                     horizontal_spacing=0.08)
 tx, ty = r["tsne"]["x"].to_numpy(), r["tsne"]["y"].to_numpy()
 l4 = g4[r["sub"]]
@@ -292,31 +292,31 @@ l2 = lab[2][r["sub"]]
 for g in range(2):
     m = l2 == g
     fig.add_trace(go.Scatter(x=tx[m], y=ty[m], mode="markers", marker=dict(size=3, color=B.color(4 + g), opacity=0.6),
-                             name=f"k = 2: grupo {g}", legendgroup=f"k2-{g}"), 1, 2)
-# legenda embaixo: no alto ela encostava no título do painel da esquerda
+                             name=f"k = 2: group {g}", legendgroup=f"k2-{g}"), 1, 2)
+# legend at the bottom: at the top it touched the left panel's title
 fig.update_layout(height=470, margin=dict(t=50, b=80),
                   legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.08, yanchor="top"))
 fig.show()
 ```
 
-## Diagnóstico: k = 2 a 8, k = 2 e k = 3
+## Diagnostics: k = 2 to 8, k = 2 and k = 3
 
 ```{python}
 #| label: tbl-k2-k3-perfis
-#| tbl-cap: "Diagnóstico: perfis agregados das partições de menor inércia com k = 2 e 3 (base dez/2025), mesmas colunas da tabela de k = 4."
-pl.concat([perfil(2), perfil(3)]).select("k", "grupo", pl.exclude("k", "grupo")).to_pandas().round(3)
+#| tbl-cap: "Diagnostics: aggregate profiles of the lowest-inertia partitions with k = 2 and 3 (December 2025 base), same columns as the k = 4 table."
+pl.concat([perfil(2), perfil(3)]).select("k", "group", pl.exclude("k", "group")).to_pandas().round(3)
 ```
 
 ```{python}
 #| label: tbl-k2-k4-cruzada
-#| tbl-cap: "Tabela cruzada das partições k = 2 (linhas) e k = 4 (colunas, G1 a G4), número de CDAs, base dez/2025."
+#| tbl-cap: "Cross-tab of the partitions k = 2 (rows) and k = 4 (columns, G1 to G4), number of CDAs, December 2025 base."
 ct = pl.DataFrame({"k2": lab[2], "k4": g4}).group_by("k2", "k4").len().pivot(on="k4", index="k2", values="len").fill_null(0)
 ct.select("k2", *sorted([c for c in ct.columns if c != "k2"])).sort("k2").to_pandas()
 ```
 
 ```{python}
 #| label: tbl-ari
-#| tbl-cap: "Concordância (ARI) entre partições."
+#| tbl-cap: "Agreement (ARI) between partitions."
 K_STAR = {n: int(max(r["agg_sil"], key=r["agg_sil"].get)) for n, r in R.items()}
 fit_idx = {n: np.sort(np.random.default_rng(B.SEED + 1).choice(r["D"].shape[0], size=min(N_SUB, r["D"].shape[0]), replace=False))
            for n, r in R.items()}
@@ -325,39 +325,39 @@ agg = {n: np.array(B.cached_json("lab.kmeans:agg_labels", lambda n=n, r=r: K.agg
 linhas = []
 for n, r in R.items():
     b = {k: np.array(r["km"]["best"][str(k)]) for k in KS}
-    linhas.append({"base": n, "comparação": "K-means k=2 × K-means k=4", "ARI": adjusted_rand_score(b[2], b[4])})
+    linhas.append({"base": n, "comparison": "K-means k=2 × K-means k=4", "ARI": adjusted_rand_score(b[2], b[4])})
     for k in (2, 4):
-        linhas.append({"base": n, "comparação": f"K-means k={k} × hierárquico k={K_STAR[n]} (maior silhueta)",
+        linhas.append({"base": n, "comparison": f"K-means k={k} × hierarchical k={K_STAR[n]} (highest silhouette)",
                        "ARI": adjusted_rand_score(b[k], agg[n])})
 ids = {n: r["f"]["ID_DEBITO"].to_numpy() for n, r in R.items()}
 comuns, ia, ib = np.intersect1d(ids["2025-12"], ids["2026-03 (paper)"], return_indices=True)
 for k in (2, 4):
     a = np.array(R["2025-12"]["km"]["best"][str(k)])[ia]
     b2 = np.array(R["2026-03 (paper)"]["km"]["best"][str(k)])[ib]
-    linhas.append({"base": f"CDAs nas duas bases (n = {comuns.size:,})".replace(",", "."),
-                   "comparação": f"K-means k={k}: dez/2025 × mar/2026", "ARI": adjusted_rand_score(a, b2)})
+    linhas.append({"base": f"CDAs in both bases (n = {comuns.size:,})",
+                   "comparison": f"K-means k={k}: Dec 2025 × Mar 2026", "ARI": adjusted_rand_score(a, b2)})
 pl.DataFrame(linhas).to_pandas().round(3)
 ```
 
 ```{python}
 #| label: tbl-agg-tamanhos
-#| tbl-cap: "Tamanho dos grupos do hierárquico (average linkage, Gower) no k de maior silhueta, nas duas bases."
-pl.DataFrame([{"base": n, "grupo": int(g), "CDAs": int(c), "% das CDAs": round(100 * c / agg[n].size, 2)}
+#| tbl-cap: "Size of the hierarchical clustering groups (average linkage, Gower) at the k with the highest silhouette, in both bases."
+pl.DataFrame([{"base": n, "group": int(g), "CDAs": int(c), "% of CDAs": round(100 * c / agg[n].size, 2)}
               for n in R for g, c in zip(*np.unique(agg[n], return_counts=True))]).to_pandas()
 ```
 
-**Como ler:** se um dos dois grupos do hierárquico for minúsculo, a silhueta alta em k = 2 vem de separar poucos pontos atípicos do resto, e não de dividir a base em dois perfis. Isso explica um ARI perto de zero com o K-means.
+**How to read:** if one of the two hierarchical groups is tiny, the high silhouette at k = 2 comes from separating a few outliers from the rest, not from splitting the base into two profiles. This explains an ARI close to zero with the K-means.
 
-**Como ler:** a tabela cruzada k = 2 × k = 4 mostra se os 4 grupos são subdivisões dos 2 (cada coluna cai quase toda numa linha) ou se cortam a base de outro jeito. O ARI entre as bases diz se a partição muda quando se tiram os meses de 2026.
+**How to read:** the k = 2 × k = 4 cross-tab shows whether the 4 groups are subdivisions of the 2 (each column falls almost entirely in one row) or cut the base another way. The ARI between the bases says whether the partition changes when the 2026 months are removed.
 
-## O que não concluir
+## What not to conclude
 
 ```{python}
 #| label: criterios-k-texto
 #| output: asis
-# Texto montado da tabela acima (base dez/2025), para não depender de números digitados à mão
+# Text built from the table above (December 2025 base), so as not to depend on hand-typed numbers
 t = tab.filter(pl.col("base") == "2025-12").sort("k")
-br = lambda v, d=3: f"{v:.{d}f}".replace(".", ",")
+br = lambda v, d=3: f"{v:.{d}f}"
 kc = int(t.filter(pl.col("curvature").is_not_null()).sort("curvature", descending=True)["k"][0])
 cv = dict(zip(t["k"].to_list(), t["curvature"].to_list()))
 dr = dict(zip(t["k"].to_list(), t["rel_drop_from_prev"].to_list()))
@@ -365,18 +365,18 @@ ke = int(t.sort("silhouette_euclid", descending=True)["k"][0]); kg = int(t.sort(
 ka = int(t.sort("silhouette_agglomerativo_gower", descending=True)["k"][0])
 se = dict(zip(t["k"].to_list(), t["silhouette_euclid"].to_list())); sg = dict(zip(t["k"].to_list(), t["silhouette_gower"].to_list()))
 sa = dict(zip(t["k"].to_list(), t["silhouette_agglomerativo_gower"].to_list()))
-print(f"- Nenhum critério decide k sozinho, e eles não apontam o mesmo k. Na base dez/2025, a maior curvatura da inércia "
-      f"(o cotovelo) está em **k = {kc}** ({br(cv[kc])}, contra {br(cv[4])} em k = 4); a inércia mínima cai "
-      f"{br(100 * dr[3], 1)}% de k = 2 para k = 3 e {br(100 * dr[4], 1)}% de k = 3 para k = 4. A silhueta do K-means é maior "
-      + (f"em k = {ke} nas duas métricas (euclidiana {br(se[ke])}; Gower {br(sg[kg])})" if ke == kg else
-         f"em k = {ke} (euclidiana, {br(se[ke])}) e em k = {kg} (Gower, {br(sg[kg])})") + "; a do hierárquico do paper, em "
-      f"k = {ka} ({br(sa[ka])}). A silhueta favorece poucos grupos bem separados e o cotovelo mostra onde o ganho de custo "
-      f"diminui. A solução principal é k = 4, por decisão do autor (IMP-13); estes critérios ficam como diagnóstico.")
+print(f"- No criterion decides k alone, and they do not point to the same k. On the December 2025 base, the largest curvature of inertia "
+      f"(the elbow) is at **k = {kc}** ({br(cv[kc])}, against {br(cv[4])} at k = 4); the minimum inertia falls "
+      f"{br(100 * dr[3], 1)}% from k = 2 to k = 3 and {br(100 * dr[4], 1)}% from k = 3 to k = 4. The K-means silhouette is highest "
+      + (f"at k = {ke} in both metrics (Euclidean {br(se[ke])}; Gower {br(sg[kg])})" if ke == kg else
+         f"at k = {ke} (Euclidean, {br(se[ke])}) and at k = {kg} (Gower, {br(sg[kg])})") + "; that of the paper's hierarchical clustering, at "
+      f"k = {ka} ({br(sa[ka])}). The silhouette favours a few well-separated groups and the elbow shows where the cost gain "
+      f"diminishes. The main solution is k = 4, by the author's decision (IMP-13); these criteria are kept as diagnostics.")
 ```
 
-- O K-means minimiza distância euclidiana ao quadrado. O Gower do paper usa diferenças absolutas. Por isso, as partições dos dois métodos podem diferir mesmo com a mesma escala.
-- A amplitude é dominada por poucos valores extremos (recuperação acima de 100% e mais de 200 pagamentos), o que comprime a variação da maioria. Uma transformação, como log(1 + x), mudaria os resultados. Fica como questão.
-- Grupos descrevem perfis. Não são causas de recuperação nem regras de cobrança.
+- K-means minimises squared Euclidean distance. The paper's Gower uses absolute differences. So the partitions of the two methods can differ even with the same scaling.
+- The range is dominated by a few extreme values (recovery above 100% and more than 200 payments), which compresses the variation of the majority. A transformation such as log(1 + x) would change the results. Left as an open question.
+- Groups describe profiles. They are not causes of recovery nor collection rules.
 
 ```{python}
 #| label: cache

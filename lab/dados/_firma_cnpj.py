@@ -43,6 +43,29 @@ SECAO = {"A": "Agropecuária", "B": "Indústrias extrativas", "C": "Indústrias 
          "T": "Serviços domésticos", "U": "Organismos internacionais"}
 
 
+# Rótulos em inglês só para exibição (28/10/2026: lab inteiro em inglês). O cálculo e o cache usam os rótulos acima,
+# que não mudam (a chave do cache não muda e os números são os mesmos).
+ORIGIN_EN = {"assessed": "assessed", "declared": "declared"}
+STATUS_EN = {"ativa": "active", "inapta": "unfit (inapta)", "suspensa": "suspended", "baixada": "closed (baixada)",
+             "nula": "null", "outro código": "other code", "só a raiz (situação desconhecida)": "root only (status unknown)",
+             "não encontrado no cadastro": "not found in the registry", SUP: "others (suppressed)"}
+SECTION_EN = {"A": "Agriculture, forestry and fishing", "B": "Mining and quarrying", "C": "Manufacturing",
+              "D": "Electricity and gas", "E": "Water, sewerage and waste", "F": "Construction",
+              "G": "Trade and repair of motor vehicles", "H": "Transportation and storage",
+              "I": "Accommodation and food", "J": "Information and communication", "K": "Financial and insurance",
+              "L": "Real estate", "M": "Professional, scientific and technical", "N": "Administrative and support services",
+              "O": "Public administration", "P": "Education", "Q": "Health and social work", "R": "Arts, culture and sport",
+              "S": "Other services", "T": "Domestic services", "U": "International organisations"}
+
+
+def division_en(label: str) -> str:
+    if label == SUP:
+        return "others (suppressed)"
+    if label.startswith("sem CNAE"):
+        return "no CNAE (no establishment match)"
+    return label
+
+
 def _workdir() -> Path:
     from dotenv import dotenv_values
     return Path(dotenv_values(B.REPO / ".env")["CNPJ_PIPELINE_WORKDIR"])  # só esta chave do .env

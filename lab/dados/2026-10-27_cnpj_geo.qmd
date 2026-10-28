@@ -1,13 +1,13 @@
 ---
-title: "CNPJs devedores por município de SP (GEO-01)"
-description: "Onde estão os CNPJs com dívida ativa na foto de dez/2025: contagem, valor e taxa por mil estabelecimentos ativos, por município do estado de São Paulo, só em agregados."
+title: "Debtor firms (CNPJs) by municipality of São Paulo state (GEO-01)"
+description: "Where are the CNPJs with enrolled debt in the December 2025 snapshot: count, value and rate per thousand active establishments, by municipality of São Paulo state, aggregates only."
 date: 2026-10-27
 jupyter: python3
 ---
 
-**Dados:** CNPJs de 14 dígitos com CDA na foto de **dezembro de 2025** do DEBITO (todos os tributos; valor sem honorários, uma linha por CDA). O município é o do estabelecimento no cadastro da Receita Federal de **março de 2026** (enriquecimento RFB, `pipelines/cnpj_enrich`), com o código TOM da RFB convertido para o código IBGE pela tabela do próprio pipeline. O denominador são os estabelecimentos **ativos** (situação cadastral 02) de cada município nos arquivos abertos da RFB de março de 2026. A malha é a municipal do IBGE (API de malhas, qualidade mínima), com coordenadas arredondadas a 3 casas para caber no HTML.
-**O que aparece:** só agregados por município. Nenhum CNPJ, nenhum ponto. **Municípios com menos de 5 CNPJs devedores ficam suprimidos** (em cinza no mapa, "—" na tabela) nas três medidas.
-**Status:** exploração (GEO-01). Não há conclusão aqui.
+**Data:** 14-digit CNPJs with a CDA in the **December 2025** snapshot of DEBITO (all tax types; value without fees, one row per CDA). The municipality is that of the establishment in the Federal Revenue (RFB) registry of **March 2026** (RFB enrichment, `pipelines/cnpj_enrich`), with the RFB's TOM code converted to the IBGE code by the pipeline's own table. The denominator is the number of **active** establishments (registration status 02) in each municipality in the RFB open files of March 2026. The boundaries are IBGE's municipal mesh (mesh API, minimum quality), with coordinates rounded to 3 decimals to fit in the HTML.
+**What is shown:** aggregates by municipality only. No CNPJ, no point. **Municipalities with fewer than 5 debtor CNPJs are suppressed** (grey on the map, "—" in the table) in all three measures.
+**Status:** exploration (GEO-01). No conclusion is drawn here.
 
 ```{python}
 #| label: setup
@@ -18,54 +18,56 @@ sys.path.insert(0, str(Path.cwd().parent / "eda"))
 import numpy as np
 import pandas as pd
 pd.set_option("display.max_colwidth", None)
+from IPython.display import HTML
+show = lambda df: HTML(df.to_html(index=False, border=0, classes="dataframe"))   # tables without the pandas index
 import polars as pl
 import plotly.graph_objects as go
 import _lab_base as B
 import _geo_cnpj as G
 tab, info = G.tabela_municipios()
 geo = G.malha_simplificada()
-br = lambda v, d=0: f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-print(f"Malha: {len(geo['features'])} municípios; {len(json.dumps(geo, separators=(',', ':'))) / 1e3:.0f} kB depois de simplificar")
+br = lambda v, d=0: f"{v:,.{d}f}"
+print(f"Mesh: {len(geo['features'])} municipalities; {len(json.dumps(geo, separators=(',', ':'))) / 1e3:.0f} kB after simplification")
 ```
 
-## Cobertura
+## Coverage
 
 ```{python}
 #| label: tbl-cobertura-geo
-#| tbl-cap: "De onde vêm os CNPJs do mapa (foto dez/2025)."
-pd.DataFrame([
-    {"item": "CNPJs (14 dígitos) com CDA na foto", "CNPJs": br(info["cnpjs_foto"]), "valor (R$ bi)": br(info["valor_foto"] / 1e9, 1)},
-    {"item": "com estabelecimento em SP no cadastro RFB (no mapa)", "CNPJs": br(info["cnpjs_sp"]), "valor (R$ bi)": br(info["valor_sp"] / 1e9, 1)},
-    {"item": "com estabelecimento fora de SP (fora do mapa)", "CNPJs": br(info["cnpjs_fora_sp"]), "valor (R$ bi)": br(info["valor_fora_sp"] / 1e9, 1)},
-    {"item": "sem cadastro na RFB 2026-03 (fora do mapa)", "CNPJs": br(info["cnpjs_sem_cadastro"]), "valor (R$ bi)": br(info["valor_sem_cadastro"] / 1e9, 1)},
-    {"item": f"municípios de SP suprimidos (menos de {G.MIN_N} CNPJs)", "CNPJs": f"{info['municipios_suprimidos']} de {info['municipios']} municípios", "valor (R$ bi)": "—"},
-])
+#| tbl-cap: "Where the CNPJs on the map come from (December 2025 snapshot)."
+show(pd.DataFrame([
+    {"item": "CNPJs (14 digits) with a CDA in the snapshot", "CNPJs": br(info["cnpjs_foto"]), "value (BRL bn)": br(info["valor_foto"] / 1e9, 1)},
+    {"item": "with an establishment in SP in the RFB registry (on the map)", "CNPJs": br(info["cnpjs_sp"]), "value (BRL bn)": br(info["valor_sp"] / 1e9, 1)},
+    {"item": "with an establishment outside SP (off the map)", "CNPJs": br(info["cnpjs_fora_sp"]), "value (BRL bn)": br(info["valor_fora_sp"] / 1e9, 1)},
+    {"item": "not in the RFB 2026-03 registry (off the map)", "CNPJs": br(info["cnpjs_sem_cadastro"]), "value (BRL bn)": br(info["valor_sem_cadastro"] / 1e9, 1)},
+    {"item": f"SP municipalities suppressed (fewer than {G.MIN_N} CNPJs)", "CNPJs": f"{info['municipios_suprimidos']} of {info['municipios']} municipalities", "value (BRL bn)": "—"},
+]))
 ```
 
-## Mapas
+## Maps
 
 ```{python}
 #| label: fig-geo
-#| fig-cap: "CNPJs devedores por município de SP (foto dez/2025; município do estabelecimento na RFB 2026-03). Os botões trocam a medida: número de CNPJs devedores, valor da dívida e CNPJs devedores por mil estabelecimentos ativos. Cores em 6 faixas de quantis da medida (legenda). Cinza: suprimido (menos de 5 CNPJs). Desenho em SVG com a malha do IBGE embutida, sem mapa de fundo nem acesso à internet."
+#| fig-cap: "Debtor CNPJs by municipality of SP (December 2025 snapshot; municipality of the establishment in the RFB 2026-03 registry). The buttons switch the measure: number of debtor CNPJs, value of the debt and debtor CNPJs per thousand active establishments. Colours in 6 quantile bands of the measure (legend). Grey: suppressed (fewer than 5 CNPJs). Drawn in SVG with the IBGE mesh embedded, no background map and no internet access."
 d = tab.to_pandas().set_index("codigo_ibge")
 ok = d["cnpjs"].notna()
 def _txt(r):
     if pd.isna(r.cnpjs):
-        return f"{r.nome_ibge}<br>suprimido (menos de {G.MIN_N} CNPJs)"
+        return f"{r.nome_ibge}<br>suppressed (fewer than {G.MIN_N} CNPJs)"
     taxa = "—" if pd.isna(r.por_mil_ativos) else br(r.por_mil_ativos, 1)
-    return (f"{r.nome_ibge}<br>CNPJs devedores: {br(r.cnpjs)}<br>valor: R$ {br(r.valor / 1e6, 1)} mi"
-            f"<br>por mil estab. ativos: {taxa}<br>estab. ativos: {br(r.estab_ativos or 0)}")
+    return (f"{r.nome_ibge}<br>debtor CNPJs: {br(r.cnpjs)}<br>value: BRL {br(r.valor / 1e6, 1)} mn"
+            f"<br>per thousand active estab.: {taxa}<br>active establishments: {br(r.estab_ativos or 0)}")
 d["txt"] = [_txt(r) for r in d.itertuples()]
 CORES = ["#FFF4E5", "#E3CBA8", "#BD9869", "#5E9AA5", "#267586", "#154C56"]
 CINZA = "#C8CCCE"
-fmt = {"CNPJs devedores": lambda v: br(v), "Valor (R$ mi)": lambda v: br(v, 1), "Por mil estab. ativos": lambda v: br(v, 1)}
-serie = {"CNPJs devedores": d["cnpjs"], "Valor (R$ mi)": d["valor"] / 1e6, "Por mil estab. ativos": d["por_mil_ativos"]}
+fmt = {"Debtor CNPJs": lambda v: br(v), "Value (BRL mn)": lambda v: br(v, 1), "Per thousand active estab.": lambda v: br(v, 1)}
+serie = {"Debtor CNPJs": d["cnpjs"], "Value (BRL mn)": d["valor"] / 1e6, "Per thousand active estab.": d["por_mil_ativos"]}
 faixas = {}
 for k, s in serie.items():
     q = np.unique(np.nanquantile(s[s.notna()], np.linspace(0, 1, len(CORES) + 1)))
     b = np.clip(np.searchsorted(q, s.fillna(-1), side="right") - 1, 0, len(q) - 2)
     cor = [CINZA if pd.isna(v) else CORES[min(int(i), len(CORES) - 1)] for v, i in zip(s, b)]
-    rot = [f"{fmt[k](q[i])} a {fmt[k](q[i + 1])}" for i in range(len(q) - 1)]
+    rot = [f"{fmt[k](q[i])} to {fmt[k](q[i + 1])}" for i in range(len(q) - 1)]
     faixas[k] = (cor, rot)
 fig = go.Figure()
 cx, cy, cods = [], [], []
@@ -73,7 +75,7 @@ for f in geo["features"]:
     cod = f["properties"]["codarea"]
     ring = np.array(f["geometry"]["coordinates"][0])
     fig.add_trace(go.Scatter(x=ring[:, 0], y=ring[:, 1], mode="lines", fill="toself", line=dict(color="white", width=0.4),
-                             fillcolor=faixas["CNPJs devedores"][0][d.index.get_loc(cod)], hoverinfo="skip", showlegend=False))
+                             fillcolor=faixas["Debtor CNPJs"][0][d.index.get_loc(cod)], hoverinfo="skip", showlegend=False))
     cx.append(float(ring[:, 0].mean())); cy.append(float(ring[:, 1].mean())); cods.append(cod)
 n_poly = len(cods)
 fig.add_trace(go.Scatter(x=cx, y=cy, mode="markers", marker=dict(size=6, opacity=0), text=d.loc[cods, "txt"],
@@ -84,7 +86,7 @@ for j, k in enumerate(serie):
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", marker=dict(size=12, color=CORES[i], symbol="square",
                                  line=dict(color="#8A9499", width=0.5)), name=r, legendgroup=k, visible=(j == 0)))
 fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", marker=dict(size=12, color=CINZA, symbol="square"),
-                         name=f"suprimido (< {G.MIN_N} CNPJs)"))
+                         name=f"suppressed (< {G.MIN_N} CNPJs)"))
 pos = {cod: i for i, cod in enumerate(d.index)}
 botoes = []
 for j, k in enumerate(serie):
@@ -96,31 +98,31 @@ for j, k in enumerate(serie):
 fig.update_layout(updatemenus=[dict(type="buttons", direction="right", x=0, y=1.07, xanchor="left", buttons=botoes,
                                     showactive=True, bgcolor="white")],
                   xaxis=dict(visible=False), yaxis=dict(visible=False, scaleanchor="x", scaleratio=1 / np.cos(np.radians(22.5))),
-                  legend=dict(title="faixa", orientation="v", x=1.0, y=0.5, yanchor="middle"),
+                  legend=dict(title="band", orientation="v", x=1.0, y=0.5, yanchor="middle"),
                   height=620, margin=dict(l=0, r=0, t=60, b=0), plot_bgcolor="white")
 fig.show()
 ```
 
-**Como ler.** Cada município de SP tem a cor da medida escolhida nos botões acima do mapa; passe o mouse para ver as três medidas e o número de estabelecimentos ativos. As cores são 6 faixas de quantis da medida (cada faixa tem cerca de um sexto dos municípios não suprimidos), com os limites na legenda. A taxa por mil compara CNPJs devedores (ativos ou não) com estabelecimentos ativos; não é a fração de empresas devedoras.
+**How to read.** Each SP municipality has the colour of the measure chosen with the buttons above the map; hover to see the three measures and the number of active establishments. The colours are 6 quantile bands of the measure (each band holds about one sixth of the non-suppressed municipalities), with the limits in the legend. The rate per thousand compares debtor CNPJs (active or not) with active establishments; it is not the share of firms in debt.
 
-**O que não concluir:** o município é o endereço do estabelecimento no cadastro de março de 2026, não necessariamente onde a dívida nasceu; matriz e filial contam como CNPJs separados; e a taxa mistura CNPJs baixados no numerador com só ativos no denominador.
+**What not to conclude:** the municipality is the address of the establishment in the March 2026 registry, not necessarily where the debt arose; head office and branches count as separate CNPJs; and the rate mixes closed CNPJs in the numerator with active ones only in the denominator.
 
-## Tabela por município
+## Table by municipality
 
 ```{python}
 #| label: tbl-geo-municipios
-#| tbl-cap: "Todos os municípios de SP (ordem decrescente de CNPJs devedores). — = suprimido (menos de 5 CNPJs)."
+#| tbl-cap: "All SP municipalities (in decreasing order of debtor CNPJs). — = suppressed (fewer than 5 CNPJs)."
 t = d.sort_values("cnpjs", ascending=False, na_position="last")
-out = pd.DataFrame({"código IBGE": t.index, "município": t["nome_ibge"],
-                    "CNPJs devedores": [("—" if pd.isna(v) else br(v)) for v in t["cnpjs"]],
-                    "valor (R$ mi)": [("—" if pd.isna(v) else br(v / 1e6, 1)) for v in t["valor"]],
-                    "estab. ativos (RFB)": [("—" if pd.isna(v) else br(v)) for v in t["estab_ativos"]],
-                    "por mil estab. ativos": [("—" if pd.isna(v) else br(v, 1)) for v in t["por_mil_ativos"]]})
+out = pd.DataFrame({"IBGE code": t.index, "municipality": t["nome_ibge"],
+                    "debtor CNPJs": [("—" if pd.isna(v) else br(v)) for v in t["cnpjs"]],
+                    "value (BRL mn)": [("—" if pd.isna(v) else br(v / 1e6, 1)) for v in t["valor"]],
+                    "active establishments (RFB)": [("—" if pd.isna(v) else br(v)) for v in t["estab_ativos"]],
+                    "per thousand active estab.": [("—" if pd.isna(v) else br(v, 1)) for v in t["por_mil_ativos"]]})
 from IPython.display import HTML
 HTML("<style>.lab-tabela-rolavel{max-height:34em;overflow:auto;border:1px solid #d9d9d9}"
      ".lab-tabela-rolavel thead th{position:sticky;top:0;background:#fff;z-index:1}</style>"
      f"<div class='lab-tabela-rolavel'>{out.to_html(index=False, border=0, classes='dataframe')}</div>"
-     f"<p style='font-size:0.8em'>Tabela completa: {len(out)} municípios (role dentro da caixa).</p>")
+     f"<p style='font-size:0.8em'>Complete table: {len(out)} municipalities (scroll inside the box).</p>")
 ```
 
 ```{python}

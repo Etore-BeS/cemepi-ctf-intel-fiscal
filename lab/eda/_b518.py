@@ -27,7 +27,7 @@ def _rgba(hexcor: str, a: float) -> str:
 
 
 def _br(n: int) -> str:
-    return f"{n:,}".replace(",", ".")
+    return f"{n:,}"
 
 
 def log_shift(v: np.ndarray) -> np.ndarray:
@@ -37,7 +37,7 @@ def log_shift(v: np.ndarray) -> np.ndarray:
 
 def fig_por_origem(paineis, origem, ordem, rotulos, cores, cor_total="#8A9499"):
     """paineis: lista de dicts {titulo, xy (n×2), eixo_x, eixo_y, idx (linhas de `origem`), log_x (bool)}."""
-    linhas = [("__todas__", "todas as origens", cor_total)]
+    linhas = [("__todas__", "all origins", cor_total)]
     omitidas = []
     for o in ordem:
         n_max = max(int((origem[p["idx"]] == o).sum()) for p in paineis)
@@ -53,8 +53,8 @@ def fig_por_origem(paineis, origem, ordem, rotulos, cores, cor_total="#8A9499"):
         p["_lo"], p["_hi"] = lo, hi
         p["_in"] = np.all((xy >= lo) & (xy <= hi), axis=1)
         fora = int((~p["_in"]).sum())
-        tit_col.append(f"{p['titulo']}<br><span style='font-size:11px'>{_br(len(xy))} CDAs; {_br(fora)} fora da janela "
-                       f"({JANELA[0]:g}–{JANELA[1]:g}%)</span>".replace("0.5", "0,5").replace("99.5", "99,5"))
+        tit_col.append(f"{p['titulo']}<br><span style='font-size:11px'>{_br(len(xy))} CDAs; {_br(fora)} outside the window "
+                       f"({JANELA[0]:g}–{JANELA[1]:g}%)</span>")
     fig = make_subplots(rows=nr, cols=nc, subplot_titles=tit_col + [""] * (nc * (nr - 1)),
                         row_titles=[rot for _, rot, _ in linhas], horizontal_spacing=0.06, vertical_spacing=0.07)
     for c, p in enumerate(paineis, start=1):
@@ -69,11 +69,11 @@ def fig_por_origem(paineis, origem, ordem, rotulos, cores, cor_total="#8A9499"):
             z = np.where(h > 0, np.log10(np.maximum(h, 1)), np.nan).T
             fig.add_trace(go.Heatmap(x=cx, y=cy, z=z, customdata=h.T.astype(int), zmin=0, zmax=zmax, showscale=False,
                                      colorscale=[[0, _rgba(cor, 0.25)], [1, _rgba(cor, 1.0)]], hoverongaps=False,
-                                     name=rot, hovertemplate=f"{rot}<br>CDAs na célula: %{{customdata}}<extra></extra>"), r, c)
+                                     name=rot, hovertemplate=f"{rot}<br>CDAs in the cell: %{{customdata}}<extra></extra>"), r, c)
             if o != "__todas__":
                 fig.add_trace(go.Contour(x=cx, y=cy, z=np.log10(tot + 1).T, showscale=False, ncontours=6,
                                          contours=dict(coloring="none"), line=dict(color=cor_total, width=0.7),
-                                         hoverinfo="skip", name="todas as origens (contorno)"), r, c)
+                                         hoverinfo="skip", name="all origins (outline)"), r, c)
             fig.update_xaxes(range=[ex[0], ex[-1]], row=r, col=c, showticklabels=(r == nr))
             fig.update_yaxes(range=[ey[0], ey[-1]], row=r, col=c)
         fig.update_xaxes(title_text=p["eixo_x"], row=nr, col=c)

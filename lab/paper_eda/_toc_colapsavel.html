@@ -63,7 +63,7 @@ document.addEventListener("DOMContentLoaded", function () {
   document.body.appendChild(wrap);
   var box = wrap;
   var btn = document.createElement("button");
-  btn.id = "lab-toc-botao"; btn.type = "button"; btn.textContent = "☰ Sumário";
+  btn.id = "lab-toc-botao"; btn.type = "button"; btn.textContent = "☰ Contents";
   btn.addEventListener("click", function () { document.body.classList.toggle("lab-toc-aberto"); place(); });
   document.body.appendChild(btn);
   toc.addEventListener("click", function (e) {    // no modo painel, escolher uma seção fecha o painel
@@ -93,7 +93,7 @@ document.addEventListener("DOMContentLoaded", function () {
     var b = document.createElement("button");
     b.type = "button";
     b.className = "lab-toc-toggle";
-    b.title = "Abrir/fechar subtópicos";
+    b.title = "Expand/collapse subsections";
     li.classList.add("lab-has-sub");
     li.insertBefore(b, li.firstChild);
     b.addEventListener("click", function (e) {
