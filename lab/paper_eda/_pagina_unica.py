@@ -142,6 +142,10 @@ PT2EN = [
     ("<td>foto parcial? (&lt; 80% da mediana móvel de 7 meses)</td>", "<td>partial snapshot? (&lt; 80% of the 7-month rolling median)</td>"),
     ("Recorte: 2016–2025; foto de referência 2025-12; extração congelada 2026-03.",
      "Window: 2016–2025; reference snapshot 2025-12; frozen extraction 2026-03."),
+    ("Lab: sem ler CPF_DEVEDOR, CDAs com CNPJ e CPF ao mesmo tempo contam como CNPJ na fonte; o extrato (1.3) exclui "
+     "essas CDAs, então a diferença fonte − extrato mede esse grupo.",
+     "Lab: without reading CPF_DEVEDOR, CDAs with both a CNPJ and a CPF count as CNPJ in the source; the extract (1.3) "
+     "excludes these CDAs, so the source − extract difference measures this group."),
 ]
 OPTIONAL_PT = {'"foto ausente"', "<td>foto ausente</td>", "<td>foto parcial? (&lt; 80% da mediana móvel de 7 meses)</td>"}
 
