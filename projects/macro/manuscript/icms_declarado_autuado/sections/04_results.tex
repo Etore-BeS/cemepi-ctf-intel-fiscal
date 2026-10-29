@@ -1,0 +1,104 @@
+\section{Results}\label{sec:results}
+
+\subsection{Two portfolios of very different size and profile}\label{sec:res-profile}
+Assessed debt is \pctCdaAssessed\% of the \vat{} CDAs and \pctStockAssessed\% of the stock (Table~\ref{tab:profile}).
+The mean legal-entity assessed CDA is BRL~\meanValueAssessed, against BRL~\meanValueDeclared{} for declared debt; the medians are BRL~\medianValueAssessed{} and BRL~\medianValueDeclared.
+By the thresholds fixed in Section~\ref{sec:method}, the difference in value between the two origins is substantial ($|r|=\rBisValue$), and so is the difference in age ($|r|=\rBisAge$; median \medianAgeAssessed{} against \medianAgeDeclared{} years).
+\pctAnyPaymentAssessed\% of assessed and \pctAnyPaymentDeclared\% of declared CDAs in the panel received any payment; the median time to the first payment is \yearsFirstPaymentAssessed{} and \yearsFirstPaymentDeclared{} years.
+The difference in the CDA recovery rate is non-negligible but below the substantial threshold ($|r|=\rBisRate$; Kruskal--Wallis $H={}$\kwRateH{} across the five raw types).
+
+\begin{table}[H]\centering\small
+\caption{Profile of the two origins. Value, age and filing: December 2025 snapshot, legal entities; payment: 2016--2025 panel.}\label{tab:profile}
+\input{tables/tab_ms_profile}
+\end{table}
+
+\subsection{Concentration}\label{sec:res-conc}
+Across all \vat{} debt, the largest 1\% of CDAs hold \topOneCdaVat\% of the stock, and \kFiftyDebtorVat{} debtors owe half of it.
+Half of the assessed stock is owed by \kFiftyDebtorAssessed{} debtors and half of the declared stock by \kFiftyDebtorDeclared{} (Table~\ref{tab:conc}, Figure~\ref{fig:conc}).
+Within each origin, the largest 1\% of debtors hold \topOneDebtorDeclared\% of the declared stock and \topOneDebtorAssessed\% of the assessed stock (Gini \giniDebtorDeclared{} and \giniDebtorAssessed).
+The two measures point in different directions because the declared portfolio has many more debtors, so the same fraction means many more firms.
+\discutir{joint reading of the two concentration measures}
+
+\begin{table}[H]\centering\small
+\caption{Concentration of the stock by debtor (CNPJ root), December 2025.}\label{tab:conc}
+\resizebox{\linewidth}{!}{\input{tables/tab_ms_concentration}}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_concentration_origin.png}
+\caption{Share of each origin's stock held by the largest debtors (a) and cumulative stock by number of debtors, log scale (b). December 2025.}\label{fig:conc}
+\end{figure}
+
+\subsection{Recovery over time, and three open questions}\label{sec:res-series}
+From 2016 to 2025, the annual recovery rate ranged from \rateMinDeclared\% (\rateMinYearDeclared) to \rateMaxDeclared\% (\rateMaxYearDeclared) for declared debt and from \rateMinAssessed\% (\rateMinYearAssessed) to \rateMaxAssessed\% (\rateMaxYearAssessed) for assessed debt (Figure~\ref{fig:series}).
+In 2025 the rates were \rateTwentyFiveDeclared\% and \rateTwentyFiveAssessed\%.
+
+The assessed series has three features this paper does not explain, registered as open research questions:
+\begin{itemize}
+\item \textbf{RQ-A, the 2020 fall.} The number of assessed CDAs in the panel falls from \cdaAssessedNineteen{} in 2019 to \cdaAssessedTwenty{} in 2020. Is it an artefact of the missing October--December 2020 snapshots, or a change in the assessed portfolio?
+\item \textbf{RQ-B, the 2019 and 2024 peaks.} Assessed payments reach BRL~\paidAssessedNineteen{} billion in 2019 and BRL~\paidAssessedTwentyFour{} billion in 2024. Are the peaks related to instalment programmes or settlement agreements in those years, or to a few very large payments? Answering requires payment-level timing and the programme rules.
+\item \textbf{RQ-C, data.} Do the comparisons by origin hold when the panel is re-run on a \texttt{DEBITO} table without missing and partial snapshots?
+\end{itemize}
+No cause is asserted for any of them; the series will be re-run once the missing snapshots are restored.
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_annual_series_origin.png}
+\caption{Year-end stock (a) and annual recovery rate, log scale (b), by origin, legal entities, 2016--2025. Shaded years have missing (2018, 2020) or partial (2024) snapshots.}\label{fig:series}
+\end{figure}
+
+\subsection{The largest debts}\label{sec:res-top}
+Among the largest 1\% of legal-entity CDAs (\kmN{} CDAs, at least BRL~\kmMinValueMn{} million each, BRL~\kmSumBn{} billion in total), \topOnePctCdaAssessed\% are assessed and they carry \topOnePctValueAssessed\% of the value.
+In the rest of the portfolio (outside the top 1\%), \restOnePctCdaAssessed\% of the CDAs are assessed, with \restOnePctValueAssessed\% of the value (Table~\ref{tab:top}).
+In the finer cut of the top 0.1\%, \topTenthPctCdaAssessed\% of the CDAs are assessed.
+
+\begin{table}[H]\centering\small
+\caption{Assessed share among the largest legal-entity CDAs, December 2025. The rest is everything outside the top 1\%.}\label{tab:top}
+\input{tables/tab_ms_top_composition}
+\end{table}
+
+Inside the top 1\%, the silhouette at $k=4$ is \kmSilEuclid{} (Euclidean) and \kmSilGower{} (Gower).
+The four groups split mainly by origin (Table~\ref{tab:km}); the largest, G1, has \kmGOnePctCda\% of the CDAs and \kmGOnePctValue\% of the value.
+Origin is one of the clustering inputs, so this separation is partly built in.
+Without origin, the adjusted Rand index between the two partitions is \kmNoOriginAri{} (1 = same partition, 0 = chance agreement) and the origin purity of the clusters falls from \kmPurityWith\% to \kmPurityWithout\%, the level of the largest origin in the top 1\% (\kmPurityBase\%).
+\discutir{whether origin should be read as the axis that separates the largest debts}
+
+\begin{table}[H]\centering\small
+\caption{K-means ($k=4$) on the top 1\% of legal-entity CDAs, December 2025. Modal labels are translated from the raw database values.}\label{tab:km}
+\resizebox{\linewidth}{!}{\input{tables/tab_ms_kmeans}}
+\end{table}
+
+\subsection{Debtor firm characteristics (descriptors only)}\label{sec:res-firms}
+Registration status and economic activity are measured in March 2026, after the outcomes, and describe the debtors of each origin; they are not causes.
+
+\paragraph{Registration status.}
+Firms active in March 2026 hold \stPctStockAssessedActive\% of the assessed and \stPctStockDeclaredActive\% of the declared stock; firms declared unfit (\emph{inapta}) hold \stPctStockAssessedUnfit\% and \stPctStockDeclaredUnfit\% (Table~\ref{tab:status}).
+The pooled 2016--2025 recovery rate of assessed debt is \stRecoveryAssessedActive\% for active firms and \stRecoveryAssessedUnfit\% for unfit firms; for declared debt it is \stRecoveryDeclaredActive\% and \stRecoveryDeclaredUnfit\%.
+In the 2016--2025 enrolment cohort, \kmPaidFiveYrAssessedActive\% of assessed CDAs of active firms had a first payment within 60 months, against \kmPaidFiveYrAssessedUnfit\% for unfit firms (Figure~\ref{fig:km}).
+A firm may be closed or unfit \emph{because} of its debts, so these differences are associations.
+
+\begin{table}[H]\centering\small
+\caption{Registration status of the debtor CNPJ (RFB, March 2026) by origin. Descriptors only. KM: Kaplan--Meier share of CDAs of the 2016--2025 enrolment cohort with a first payment by 12 and 60 months; empty cells have no CDA in the cohort.}\label{tab:status}
+\resizebox{\linewidth}{!}{\input{tables/tab_ms_status}}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_km_status_origin.png}
+\caption{Kaplan--Meier share of CDAs with a first payment by months since enrolment, by registration status: assessed (a) and declared (b). Enrolment cohort 2016--2025.}\label{fig:km}
+\end{figure}
+
+\paragraph{Economic activity.}
+The ten largest CNAE divisions hold \cnaeTenPctStock\% of the December 2025 \vat{} stock (Table~\ref{tab:cnae}).
+The largest is division \cnaeTopDivision{} (\cnaeTopDivisionName), with \cnaeTopDivisionPctStock\% of the stock, \cnaeTopDivisionAssessedWeight\% of it assessed; the second is division \cnaeSecondDivision{} (\cnaeSecondDivisionName), with \cnaeSecondDivisionPctStock\%, \cnaeSecondDivisionAssessedWeight\% assessed.
+Across the \cnaeNDivShown{} divisions shown, the assessed share of the stock ranges from \cnaeAssessedWeightMin\% to \cnaeAssessedWeightMax\%, and its Spearman correlation with the division's pooled recovery rate is \cnaeSpearman{} (Figure~\ref{fig:cnae}); this is an ecological description, not a within-division comparison.
+\cnaeNDivSuppressed{} divisions are pooled for disclosure control.
+\discutir{which divisions, if any, the text names and comments on}
+
+\begin{table}[H]\centering\small
+\caption{Ten largest CNAE 2.0 divisions by December 2025 \vat{} stock. Assessed weight: assessed share of the division's stock. Recovery: pooled 2016--2025 rate by origin. English names translated from the official Portuguese names. Descriptors only.}\label{tab:cnae}
+\resizebox{\linewidth}{!}{\input{tables/tab_ms_cnae_top10}}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_cnae_division_origin.png}
+\caption{CNAE divisions: assessed share of the December 2025 stock (horizontal) and pooled 2016--2025 recovery rate, log scale (vertical). Bubble area is proportional to the division's stock; the ten largest are labelled with their code.}\label{fig:cnae}
+\end{figure}

@@ -1,0 +1,24 @@
+\section{Measures}\label{sec:method}
+
+\paragraph{Concentration.}
+For units with values $v_1 \ge \dots \ge v_n$ and total $V$, we report the share of the largest units $S(p)=V^{-1}\sum_{i=1}^{m(p)} v_i$ with $m(p)=\max\{1,\operatorname{round}(pn)\}$ and $p\in\{0.1\%,1\%,10\%\}$, the number of units that add up to half of the stock, $k_{50}$, and the Gini coefficient from the Lorenz curve \citep{lorenz1905}.
+Units are CDAs or debtors (CNPJ roots).
+
+\paragraph{Profiles and tests.}
+Value, age, court filing and payment are described by origin.
+With millions of CDAs every difference is statistically significant, so decisions rely on effect sizes fixed before looking at the data: the rank-biserial correlation $r$ of the Mann--Whitney test \citep{mann1947,kerby2014} ($|r|\ge 0.1$ non-negligible, $|r|\ge 0.3$ substantial), the Kruskal--Wallis test across the five raw types \citep{kruskal1952}, and the Benjamini--Hochberg correction \citep{benjamini1995}.
+
+\paragraph{Recovery.}
+For origin $o$ and year $t$, the annual recovery rate is $\rho_{ot}=100\,P_{ot}/E_{ot}$, payments in the year over year-end stock.
+It is a ratio of aggregates, not a mean of CDA rates.
+The pooled rate over 2016--2025 is $\bar\rho_g = 100\sum_t P_{gt}/\sum_t E_{gt}$.
+
+\paragraph{The largest debts.}
+The top 1\% of legal-entity CDAs in December 2025 (\topOneNCda{} CDAs) is compared with the rest of the portfolio, defined as everything outside the top 1\%.
+Inside the top 1\%, K-means \citep{lloyd1982} with $k=4$ (the authors' choice; 100 initialisations) groups CDAs on six numeric inputs and three categorical ones, one of which is origin; the silhouette \citep{rousseeuw1987} is computed with Euclidean and Gower \citep{gower1971} distances.
+Because origin is an input, the clustering is repeated without it and compared with the adjusted Rand index.
+
+\paragraph{Firm characteristics.}
+Time from enrolment to first payment is described with Kaplan--Meier curves \citep{kaplan1958} for the 2016--2025 enrolment cohort, by origin and registration status, censored on 31 December 2025.
+Across CNAE divisions, the Spearman correlation \citep{spearman1904} between the assessed share of the stock and the pooled recovery rate is a description of the cross-section.
+Any status or division cell with fewer than five distinct CNPJs is pooled.

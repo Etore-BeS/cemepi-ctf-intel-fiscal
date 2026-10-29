@@ -1,0 +1,4 @@
+solution,ari_vs_main,silhouette_euclid,origin_purity
+with origin (main),1.0,0.6759230006596254,98.3334768753768
+without origin,0.20271607568410357,0.3300603453311096,78.73137541986048
+reference: single cluster,,,78.73137541986047

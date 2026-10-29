@@ -1,0 +1,7 @@
+variable,comparison,n_a,n_b,U,p_value,rank_biserial,p_bh
+value,Assessed vs Declared (raw types),58476,2254387,124924367757.5,0.0,0.8952697325977654,1e-300
+value,assessed vs declared (origin),59294,2254387,126399896011.5,0.0,0.891200142328237,1e-300
+age,Assessed vs Declared (raw types),58476,2254387,92155565881.0,0.0,0.3981231831705043,1e-300
+age,assessed vs declared (origin),59294,2254387,93045147881.0,0.0,0.39214510824826454,1e-300
+rate,Assessed vs Declared (raw types),157013,4770484,327116717317.0,0.0,-0.1265567764019747,1e-300
+rate,assessed vs declared (origin),158258,4770484,330319495342.0,0.0,-0.12494351950947291,1e-300

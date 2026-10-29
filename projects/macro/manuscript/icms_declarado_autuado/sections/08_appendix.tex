@@ -1,0 +1,26 @@
+\section{Quality of the monthly snapshots}\label{app:quality}
+Missing snapshots: \qualMissingSnapshots.
+Possibly partial snapshots (fewer than 80\% of the CDAs of the centred 7-snapshot rolling median): \qualPartialSnapshots.
+Snapshots with duplicated rows (counted once): \qualDuplicatedSnapshots.
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_debito_quality.png}
+\caption{Distinct \vat{} CDAs of legal entities in each monthly snapshot, 2016--2025, with the rolling reference and flagged snapshots.}\label{fig:quality}
+\end{figure}
+
+\section{Additional tables}\label{app:tables}
+
+\begin{table}[H]\centering\small
+\caption{K-means on the top 1\%: silhouette by $k$ (5,000-CDA subsample; 100 initialisations per $k$).}
+\input{tables/tab_kmeans_selection}
+\end{table}
+
+\begin{table}[H]\centering\small
+\caption{Coverage of the join with the RFB register (March 2026), legal-entity \vat{} CDAs, by origin.}
+\resizebox{\linewidth}{!}{\input{tables/tab_firm_coverage}}
+\end{table}
+
+\begin{figure}[H]\centering
+\includegraphics[width=\linewidth]{figures/fig_kmeans_k4_top1.png}
+\caption{Composition of the four K-means clusters in the top 1\% of CDAs, by number and by value.}\label{fig:kmfig}
+\end{figure}
