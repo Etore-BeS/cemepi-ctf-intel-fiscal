@@ -4,30 +4,30 @@
 The lowest test sMAPE depends on the series and on the grain.
 Pooling the twelve cells into one winner would contradict Table~\ref{tab:best}.
 
-On the month, boosting leads the total (sMAPE 12.94, skill 0.513) and Autuado (20.91, skill 0.523).
-SARIMAX leads Declarado (6.79, skill 0.602).
-The paired test rejects the seasonal naive for the total and for Declarado.
-It does not reject it for Autuado (p-value 0.077).
+On the month, boosting leads the total (sMAPE 12.94, skill 0.513) and Assessed (20.91, skill 0.523).
+SARIMAX leads Declared (6.79, skill 0.602).
+The paired test rejects the seasonal naive for the total and for Declared.
+It does not reject it for Assessed (p-value 0.077).
 The model confidence set on the month still contains the seasonal naive.
 E2 does not lead.
 TimesFM does not lead.
 
-On the week, ridge leads the total and Declarado, and least squares leads Autuado.
+On the week, ridge leads the total and Declared, and least squares leads Assessed.
 Skill is about 0.14 to 0.18.
 The paired test does not reject the seasonal naive.
 The confidence set is essentially the whole field.
 TimesFM is worse than that naive on all three weekly series.
 
-On calendar-day A, the forest leads the total and Declarado, and TimesFM leads Autuado.
+On calendar-day A, the forest leads the total and Declared, and TimesFM leads Assessed.
 The paired test does not reject the seasonal naive at the 5 percent level.
-The confidence set isolates the forest only on Declarado, and the paired p-value there is 0.069.
+The confidence set isolates the forest only on Declared, and the paired p-value there is 0.069.
 We do not call that a settled win.
 Zeros from weekends and empty slips are inside the score.
 
 On Monday to Friday, TimesFM leads all three series, with sMAPE 65.05, 61.35, and 90.32.
 The paired test rejects the lag-5 naive on each series.
 The confidence set also drops that naive, and it keeps other models beside TimesFM.
-Boosting is within 5 percent of TimesFM on the total and on Declarado.
+Boosting is within 5 percent of TimesFM on the total and on Declared.
 
 The seasonal naive remains the reference forecast on each grain.
 E1 is the rule that can abstain by energy, and this run does not contain an E1 score.

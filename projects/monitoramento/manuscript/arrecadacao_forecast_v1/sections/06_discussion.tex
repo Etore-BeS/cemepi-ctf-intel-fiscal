@@ -7,15 +7,15 @@
 Table~\ref{tab:top3} does not support one best model.
 The monthly panel is short, seasonal, and paired with a stock lag.
 There, the leader depends on the series.
-Boosting has the lowest test sMAPE on the total and on Autuado.
-SARIMAX has the lowest test sMAPE on Declarado.
+Boosting has the lowest test sMAPE on the total and on Assessed.
+SARIMAX has the lowest test sMAPE on Declared.
 E2, which switches between boosting and the seasonal naive, does not win that comparison on these VAT series.
 The switch is still in the candidate list.
 It is not the lowest sMAPE.
 
 The Monday to Friday series are longer.
 TimesFM has the lowest test sMAPE on all three, and the paired test rejects the lag-5 naive on all three.
-TimesFM does not have the lowest test sMAPE on the month, on the week, or on calendar-day total and Declarado.
+TimesFM does not have the lowest test sMAPE on the month, on the week, or on calendar-day total and Declared.
 The same weights can lead one grain and lose to a seasonal naive on another.
 Publishing one name for every grain would contradict Table~\ref{tab:best}.
 
@@ -36,16 +36,16 @@ Scoring only days with a slip would answer a different question.
 Ranking A is the error on the calendar, zeros included.
 
 Grain B drops weekends and keeps national holidays (Table~\ref{tab:ablation}).
-Test sMAPE falls on the total and on Declarado, and TimesFM leads with a paired test below 0.001.
+Test sMAPE falls on the total and on Declared, and TimesFM leads with a paired test below 0.001.
 Skill on B uses lag 5.
 Those scores do not transfer to grain A, where the reference is lag 7.
 Weekday holidays remain in the series.
 No model, including Prophet, receives a holiday indicator.
 
-Autuado stays the harder series on both daily grains.
+Assessed stays the harder series on both daily grains.
 Its Monday to Friday sMAPE is 90.32, against 65.05 on the total.
 The stock share in Figure~\ref{fig:shares} is not a forecast, and it does line up with this gap.
-Autuado is most of the enrolled balance and a smaller, more irregular part of the cash.
+Assessed is most of the enrolled balance and a smaller, more irregular part of the cash.
 
 \subsection{What the leading rules return on the holdout}
 \label{sec:rules}
@@ -77,8 +77,8 @@ The calendar-day holdout is in Appendix~\ref{app:pred-a}.
   \includegraphics[width=\linewidth]{figures/fig_pred_monthly.pdf}
   \caption{Monthly test block.
   On the total, boosting stays in a band and misses the April and October peaks.
-  On Declarado, SARIMAX follows the May peak and misses part of October.
-  On Autuado, boosting misses the April spike.
+  On Declared, SARIMAX follows the May peak and misses part of October.
+  On Assessed, boosting misses the April spike.
   The vertical axis is millions of BRL.}
   \label{fig:pred-m}
 \end{figure}
@@ -88,8 +88,8 @@ The calendar-day holdout is in Appendix~\ref{app:pred-a}.
   \includegraphics[width=\linewidth]{figures/fig_pred_business_daily.pdf}
   \caption{Grain B, Monday to Friday.
   TimesFM follows the quiet days and understates the peaks on all three series.
-  Boosting is close to TimesFM on the total and on Declarado, which matches a test sMAPE within 5 percent of the leader.
-  On Autuado the peaks are a larger share of the line, and the sMAPE is 90.3.
+  Boosting is close to TimesFM on the total and on Declared, which matches a test sMAPE within 5 percent of the leader.
+  On Assessed the peaks are a larger share of the line, and the sMAPE is 90.3.
   The vertical axis is millions of BRL.}
   \label{fig:pred-b}
 \end{figure}
@@ -99,8 +99,8 @@ The calendar-day holdout is in Appendix~\ref{app:pred-a}.
   \includegraphics[width=\linewidth]{figures/fig_pred_weekly.pdf}
   \caption{Weekly test block.
   Ridge and least squares follow the peaks and sit below the largest weeks.
-  On the total and on Declarado the two lines are hard to separate, which matches sMAPE values within 5 percent.
-  On Autuado, least squares and kernel ridge both miss the late-October peak.
+  On the total and on Declared the two lines are hard to separate, which matches sMAPE values within 5 percent.
+  On Assessed, least squares and kernel ridge both miss the late-October peak.
   The vertical axis is millions of BRL.}
   \label{fig:pred-w}
 \end{figure}
@@ -118,7 +118,7 @@ The Monday to Friday residuals spike down on the peak days and stay near zero on
   \caption{Holdout residual, forecast minus actual, for the sMAPE leader.
   Zero is a perfect level match.
   Negative values are under-forecasts.
-  The monthly total and monthly Autuado show a deep miss in April.
+  The monthly total and monthly Assessed show a deep miss in April.
   Monday to Friday residuals are near zero on quiet days and large on peak days.}
   \label{fig:residual}
 \end{figure}
@@ -138,8 +138,8 @@ Color is again the model, and the panel title is the series.
   \includegraphics[width=\linewidth]{figures/fig_scatter_monthly.pdf}
   \caption{Monthly test block as a scatter.
   The total does not follow the diagonal: the April point is far to the right and low, so the low sMAPE is a statement about level, not about month order.
-  Declarado stays closer to the line, with one high month above it.
-  On Autuado the far-right point is the April spike, forecast too low.}
+  Declared stays closer to the line, with one high month above it.
+  On Assessed the far-right point is the April spike, forecast too low.}
   \label{fig:scatter-m}
 \end{figure}
 
@@ -150,7 +150,7 @@ Color is again the model, and the panel title is the series.
   Quiet days pile up near the origin.
   The large days fall below the diagonal on every series.
   TimesFM orders the days and understates the peaks.
-  Autuado is the loosest cloud, which matches its sMAPE of 90.3.}
+  Assessed is the loosest cloud, which matches its sMAPE of 90.3.}
   \label{fig:scatter-b}
 \end{figure}
 
@@ -158,12 +158,18 @@ Color is again the model, and the panel title is the series.
   \centering
   \includegraphics[width=\linewidth]{figures/fig_scatter_weekly.pdf}
   \caption{Weekly test block as a scatter.
-  Declarado follows the diagonal with a downward shift, so the order of weeks is right and the level is low.
+  Declared follows the diagonal with a downward shift, so the order of weeks is right and the level is low.
   The total has the same tilt, with the largest weeks under-forecast.
-  Autuado is more scattered around the line.
-  The sMAPE leader is ridge on the total and on Declarado, and least squares on Autuado.}
+  Assessed is more scattered around the line.
+  The sMAPE leader is ridge on the total and on Declared, and least squares on Assessed.}
   \label{fig:scatter-w}
 \end{figure}
+
+Section~\ref{sec:absolute} turns these scatters into checks on the leader.
+The Declared month is the tight cloud, and it is the one leader that passes every absolute check.
+The week has the right tilt and a downward shift, so the order is right and the level is low.
+The month on the total and on Assessed does not rise with the actual.
+Monday to Friday puts the large days below the line.
 
 The calendar-day scatter is in Appendix~\ref{app:pred-a}.
 Weekend zeros sit on the origin.
@@ -175,4 +181,4 @@ They pull all-day sMAPE up, and they are part of grain A.
 The ranks, the tests, and the figures above are the benchmark.
 They do not choose an operational rule.
 
-\discutir{what the office should do with a grain-specific model, and whether Declarado and Autuado should be forecast separately in production}
+\discutir{what the office should do with a grain-specific model, and whether Declared and Assessed should be forecast separately in production}
