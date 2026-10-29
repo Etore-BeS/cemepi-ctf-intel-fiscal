@@ -1,56 +1,237 @@
 \section{Results}
 \label{sec:results}
 
-Table~\ref{tab:best} is the lowest test sMAPE on each series and grain.
-The skill score uses the seasonal naive of that grain.
-The HLN column is the two-sided p-value of the best model against that naive.
-A p-value below 0.05 is marked in the text below, not in the table.
+Every number below is read from the saved tables for the three VAT series.
+The rank is test sMAPE.
+Lower is better.
+The skill score is higher when the model beats the seasonal naive of that grain.
+The HLN column is the two-sided p-value of the leader against that naive.
 The model confidence set uses level 0.10.
 
-\begin{table}[t]
-  \caption{Lowest test sMAPE.
-  Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\).
-  HLN \(p\) compares the best model with the seasonal naive.}
+\subsection{The lowest sMAPE is not the same model}
+\label{sec:top3}
+
+Table~\ref{tab:best} names the lowest test sMAPE on each series and grain.
+No model leads all twelve cells.
+Boosting leads the monthly total and monthly Autuado.
+SARIMAX leads monthly Declarado.
+Ridge leads the weekly total and weekly Declarado.
+Least squares leads weekly Autuado.
+TimesFM leads all three Monday to Friday series, and it also leads calendar-day Autuado.
+The forest leads calendar-day total and calendar-day Declarado.
+E2, the disagreement proxy, does not lead any cell.
+E1 has no row.
+
+\begin{table}[ht]
+  \caption{Lowest test sMAPE on each series and grain.
+  Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\) against the seasonal naive of that grain.
+  HLN \(p\) is the two-sided Diebold-Mariano test of that leader against the same naive, with the small-sample correction.
+  A p-value below 0.05 is discussed in the text.
+  It is not a second rank.}
   \label{tab:best}
   \centering
   \scriptsize
-  \begin{tabular}{llrrrr}
-    \toprule
-    Series & Grain & Best & sMAPE & Skill & HLN \(p\) \\
-    \midrule
-    Total & Month & M3 boosting & 12.94 & 0.513 & 0.023 \\
-    Total & Week & M1 ridge & 41.00 & 0.135 & 0.638 \\
-    Total & Daily B & M9 TimesFM & 65.05 & 0.393 & \(<0.001\) \\
-    Total & Daily A & M6 forest & 90.52 & 0.149 & 0.717 \\
-    Declarado & Month & M2 SARIMAX & 6.79 & 0.602 & 0.040 \\
-    Declarado & Week & M1 ridge & 27.48 & 0.180 & 0.246 \\
-    Declarado & Daily B & M9 TimesFM & 61.35 & 0.401 & \(<0.001\) \\
-    Declarado & Daily A & M6 forest & 78.43 & 0.221 & 0.069 \\
-    Autuado & Month & M3 boosting & 20.91 & 0.523 & 0.077 \\
-    Autuado & Week & M1 least squares & 52.50 & 0.139 & 0.590 \\
-    Autuado & Daily B & M9 TimesFM & 90.32 & 0.255 & \(<0.001\) \\
-    Autuado & Daily A & M9 TimesFM & 112.99 & 0.101 & 0.437 \\
-    \bottomrule
-  \end{tabular}
+  \input{tables/tab_best}
 \end{table}
 
-The best model changes with the series on three grains.
-On the month, boosting leads the total and Autuado, and SARIMAX leads Declarado.
-On the week, ridge leads the total and Declarado, and least squares leads Autuado.
-On daily A, the forest leads the total and Declarado, and TimesFM leads Autuado.
-On daily B, TimesFM leads all three series.
+Read the skill column before the p-value.
+Every leader has positive skill, so every leader beats its seasonal naive on sMAPE.
+The size of that win is not the same.
+Monthly Declarado has skill 0.602.
+The three weekly leaders have skill between 0.135 and 0.180.
+A small positive skill means the sMAPE values are close.
+The p-value then asks whether the test block can tell them apart.
 
-The HLN test rejects equal accuracy versus the seasonal naive on every daily B series, on the total month, and on the Declarado month.
-It does not reject on any weekly series, on total daily A, or on Autuado daily A.
-The Declarado daily A p-value is 0.069.
-The Autuado month p-value is 0.077.
+Table~\ref{tab:top3} lists the next two models.
+On several grains the second model is close to the leader.
+On the weekly total, ridge is 41.00 and least squares is 41.41.
+On Monday to Friday, boosting is within 5 percent of TimesFM on the total and on Declarado.
+A chart that draws only the leader would hide that tie.
+The forecast figures in Section~\ref{sec:discussion} draw the second model when its test sMAPE is within 5 percent of the leader.
+Family-level bars for every model are in Appendix~\ref{app:bars}.
 
-The 90 percent model confidence set is wide on the month and on the week, where the test block has 12 or 13 points.
-On total daily A the set is the forest and two seasonal naives (lag 7 and lag 365).
-On Declarado daily A the set contains only the forest.
-On daily B the lag-5 naive is outside the set for the total and for Declarado.
-TimesFM remains in a set with other models on daily B.
-E1 has no row.
-The TEM vendor tree is not in this worktree.
+\begin{table}[ht]
+  \caption{Three lowest test sMAPE values on each series and grain.
+  E2 is the disagreement proxy.
+  E2 is not TEM, and E2 is not in this top three except on weekly Declarado, where it is third.}
+  \label{tab:top3}
+  \centering
+  \scriptsize
+  \input{tables/tab_top3_by_grain}
+\end{table}
 
-[DISCUTIR E ESCREVER]
+\subsection{Monthly panel}
+\label{sec:monthly}
+
+On the monthly total, boosting has test sMAPE 12.94 and skill 0.513.
+The seasonal naive, lag 12, has sMAPE 26.55.
+Lag 1 is second, at 15.37, and kernel ridge is third, at 15.95.
+The HLN p-value against the seasonal naive is 0.022.
+That rejects equal accuracy with the lag-12 naive at the 5 percent level.
+It does not test boosting against lag 1.
+The gap from 12.94 to 15.37 is smaller than the gap from 12.94 to 26.55.
+
+On monthly Declarado, SARIMAX has test sMAPE 6.79 and skill 0.602.
+The seasonal naive is 17.07.
+TimeGrad is second, at 9.30, and Prophet is third, at 10.20.
+The HLN p-value is 0.040.
+Declarado is the smoothest of the three monthly series, and the absolute error is the smallest.
+
+On monthly Autuado, boosting has test sMAPE 20.91 and skill 0.523.
+The seasonal naive is 43.79.
+Kernel ridge is second, at 22.83.
+The HLN p-value is 0.077.
+The point rank favors boosting.
+The test does not reject equal accuracy with the seasonal naive at the 5 percent level.
+
+E2 does not lead the month on any series.
+On the total its sMAPE is about 21.6, behind boosting, lag 1, and kernel ridge.
+On Declarado it is about 16.4, close to the seasonal naive at 17.07 and behind SARIMAX.
+A gain for E2 would not be a gain for E1.
+E1 is not in the table.
+
+TimesFM does not lead the month.
+On the total its sMAPE is about 22.4, which still beats the seasonal naive and loses to boosting.
+On Declarado and on Autuado, TimesFM is worse than the seasonal naive.
+
+Table~\ref{tab:monthly} continues each monthly list to eight models.
+The order inside Declarado is not the order inside the total.
+Prophet and the perceptron sit near the top of Declarado and not at the top of the total.
+
+\begin{table}[t]
+  \caption{Monthly grain: eight lowest test sMAPE values on each series.}
+  \label{tab:monthly}
+  \centering
+  \small
+  \input{tables/tab_monthly_top8}
+\end{table}
+
+\subsection{Grain A and grain B}
+\label{sec:ablation}
+
+Table~\ref{tab:ablation} puts the two daily targets side by side.
+Grain A keeps every calendar day, including weekend and empty-slip zeros.
+Grain B keeps Monday to Friday and keeps national holidays.
+
+On grain A the sMAPE level is high: 90.52 on the total, 78.43 on Declarado, and 112.99 on Autuado.
+The forest leads the total and Declarado.
+TimesFM leads Autuado, and the forest is second there (114.36 against 112.99).
+On the total, the lag-365 naive (105.47) and TimesFM (105.52) are almost tied, and both are close to the lag-7 naive (106.41).
+The HLN p-values on grain A are 0.717 (total), 0.069 (Declarado), and 0.437 (Autuado).
+None of them is below 0.05.
+Positive skill on grain A is a small gap next to a naive that already copies last week, including the weekend zeros.
+
+On grain B the leader is TimesFM on all three series.
+Test sMAPE is 65.05 (total), 61.35 (Declarado), and 90.32 (Autuado).
+Skill is 0.393, 0.401, and 0.255 against the lag-5 naive.
+The HLN p-value is below 0.001 on every series.
+Dropping weekends lowers the sMAPE level on the total and on Declarado, and it changes the leader from the forest to TimesFM.
+On Autuado the leader is TimesFM on both daily grains, and the sMAPE level is still the highest of the three series.
+The seasonal naive is inside the top three on grain A for the total and for Declarado.
+It is outside the top three on grain B.
+
+\begin{table}[ht]
+  \caption{Three lowest test sMAPE values on grain A and on grain B.}
+  \label{tab:ablation}
+  \centering
+  \scriptsize
+  \input{tables/tab_ablation_A_vs_B}
+\end{table}
+
+The positive-day score on A is not the official rank.
+Scoring only days with a slip answers a different question.
+Ranking A is the error on the calendar, zeros included.
+
+\subsection{Weekly series}
+\label{sec:weekly}
+
+Ridge leads the weekly total at sMAPE 41.00, and least squares is 41.41.
+Ridge leads weekly Declarado at 27.48, and least squares is 27.89.
+Least squares leads weekly Autuado at 52.50, with kernel ridge at 53.80 and boosting at 54.01.
+The seasonal naive is 47.38, 33.50, and 60.99 on those three series.
+Skill is 0.135, 0.180, and 0.139.
+The HLN p-values are 0.638, 0.246, and 0.590.
+The week has a lowest sMAPE.
+The 13-point test does not separate that model from the seasonal naive.
+TimesFM is worse than the seasonal naive on all three weekly series.
+
+The test block has 13 weeks.
+The gap describes this window.
+It is not a standard error for a long-run difference.
+
+\subsection{What each test is saying}
+\label{sec:read-tests}
+
+The three tools answer three questions.
+They can disagree, and the disagreement is the result.
+
+The skill score is a ratio of two sMAPE values on the same test block.
+It is not a probability.
+Skill 0.513 on the monthly total means the leader's sMAPE is about half the seasonal naive's sMAPE.
+Skill 0.135 on the weekly total means the leader is only a little lower.
+Zero would mean a tie with that naive.
+A negative skill, which several non-leaders have, means a higher sMAPE than that naive.
+Appendix~\ref{app:bars} draws the skill of every model.
+The zero line in those figures is the seasonal naive.
+
+The HLN column tests one pair: the sMAPE leader against the seasonal naive.
+The loss is the summand inside sMAPE, so the test uses the same score as the rank.
+A small p-value means the paired losses are not compatible with equal accuracy.
+Five cells reject at the 5 percent level: the monthly total (0.022), monthly Declarado (0.040), and all three Monday to Friday series (each below 0.001).
+Seven cells do not: monthly Autuado (0.077), all three weeks, and all three calendar-day series.
+Declarado on grain A is the closest of the non-rejections, at 0.069.
+Rejecting the seasonal naive is not the same as isolating the leader.
+On Monday to Friday the total, boosting is within 5 percent of TimesFM.
+The test does not claim that TimesFM beats boosting.
+
+Table~\ref{tab:mcs} is the model confidence set at level 0.10.
+``In set'' is the number of models the block does not drop.
+``Naive in set'' asks whether the seasonal naive survives.
+A wide set means the block does not support a single published winner.
+
+\begin{table}[ht]
+  \caption{Model confidence set at level 0.10.
+  The set is the models the test block does not separate.
+  ``Naive in set'' refers to the seasonal naive used in the skill score.
+  A short left-out list is the models the set drops.
+  A long list is counted.}
+  \label{tab:mcs}
+  \centering
+  \scriptsize
+  \input{tables/tab_mcs}
+\end{table}
+
+On the month and on the week the set is wide, and the seasonal naive stays in it.
+The monthly total drops the multilayer perceptron, the forest, and the Gaussian process, and it keeps both boosting and the lag-12 naive.
+That is compatible with the HLN result.
+The paired test can reject the naive against the leader while the set still keeps the naive, because many other models sit between them and the set asks a different question.
+The week drops nobody on the total and on Autuado.
+Weekly Declarado drops only lag 1.
+Thirteen weeks do not separate this field.
+
+Monday to Friday is the grain where the set drops the seasonal naive on all three series.
+TimesFM stays in the set, and it is not alone.
+The total keeps nine models.
+Declarado keeps seven.
+Autuado keeps thirteen and drops the lag-5 naive, the lag-252 naive, and the score sampler.
+The HLN rejections and the sets agree that the lag-5 naive is worse than the surviving models.
+They do not agree on a single name.
+
+Calendar-day Declarado is the only cell whose set contains one model.
+That model is the forest.
+The seasonal naive is out.
+The HLN p-value against that naive is 0.069, which does not reject at 5 percent.
+The two procedures use different levels and different statistics.
+The set, at level 0.10, drops the naive.
+The paired test, at level 0.05, does not.
+We do not treat that cell as a settled win.
+On calendar-day total the set keeps the forest and two seasonal naives (lag 7 and lag 365), and it drops TimesFM.
+On calendar-day Autuado the set keeps TimesFM, the forest, and the same two seasonal naives.
+
+Use the columns in this order.
+The sMAPE rank names a lowest value.
+The skill score says how far that value is from the seasonal naive.
+The HLN p-value says whether the block can support that one comparison.
+The set says which other models are still in the race.
+On these twelve cells, only Monday to Friday puts the seasonal naive out of the set and also rejects it in the paired test.
+Even there, the set still contains more than TimesFM.

@@ -1,35 +1,71 @@
 \section{Introduction}
 \label{sec:intro}
 
-VAT (ICMS) is a value-added tax.
-This paper forecasts VAT (ICMS) collection, not the mix of all enrolled taxes.
-The book has more than one ICMS type.
+VAT (ICMS) is a state value-added tax.
+This paper forecasts VAT collection, not the mix of every enrolled tax.
+The legal-entity book has more than one ICMS type.
 Declarado is tax the debtor reported.
 Autuado is tax from an assessment (\texttt{ICMS Autua\c{c}\~ao}).
-Together those two types are almost the whole legal-entity book.
+Together those two types are almost the whole book.
+They are not the same series.
+Autuado is most of the stock.
+Declarado is most of the cash collected.
 Section~\ref{sec:data} reports the shares.
+A model that fits the total can hide a miss on one of the two types.
+
+The cash series is seasonal.
+At a daily step it is also full of zeros.
+A zero is a weekend, a holiday, or a day with no payment slip.
+Those zeros are part of grain A.
+They are not missing values to drop before scoring.
 
 A grain is the time step of a forecast.
-The grains are the v1 grains: month, calendar day (grain A), Monday--Friday (grain B), and week.
+This paper uses the four v1 grains: month, calendar day (grain A), Monday to Friday (grain B), and week.
 Grain B keeps national holidays.
+It is a different target.
 It is not grain A with weekends removed after the score.
 
-The protocol is the closed v1 benchmark.
-One series has one contiguous train block, one validation block, and one test block.
-The study does not use a rolling origin.
-It does not reconcile grains.
-It does not add a model family.
-The candidates are M0--M9 and E1--E4, as in v1.
-The official rank is test sMAPE.
-The skill score compares a model with the seasonal naive of the same grain.
-A Diebold-Mariano test with the small-sample correction compares the best model with that naive~\citep{diebold1995comparing,harvey1997testing}.
-A model confidence set lists the models the test block does not separate~\citep{hansen2011mcs}.
+sMAPE is the symmetric mean absolute percentage error.
+We define it in Section~\ref{sec:metrics}.
+Lower sMAPE is better.
+The official rank on every series and every grain is test sMAPE.
+The skill score compares a model with the seasonal naive of that same grain.
+We define it in Section~\ref{sec:ss}.
+A positive skill score means lower sMAPE than that naive forecast.
+A Diebold-Mariano test with the Harvey-Leybourne-Newbold correction asks whether that gap is larger than the noise in the test block~\citep{diebold1995comparing,harvey1997testing}.
+A model confidence set lists the models the same block does not separate~\citep{hansen2011mcs}.
+Neither test changes the rank.
 
-The questions are:
-\begin{enumerate}
-  \item Which model has the lowest test sMAPE on each series and each grain?
-  \item Does that model change between the total, Declarado, and Autuado?
-  \item Does the test separate that model from the seasonal naive, and from the other candidates?
-\end{enumerate}
+TEM is the Time-Energy Model~\citep{brusokas2025tem}.
+It scores candidate forecasts with an energy.
+Abstention means refusing the energy choice and returning the seasonal naive instead.
+We use abstention only for selective TEM, labeled E1.
+E2 is a separate rule.
+E2 switches between gradient boosting and the seasonal naive when those two forecasts disagree.
+E2 does not estimate an energy.
+E1 does not have a score in this run.
+The vendor code is not in this worktree.
 
-[DISCUTIR E ESCREVER]
+\paragraph{Questions.}
+Which model has the lowest test sMAPE on each series and each grain?
+Does that model change between the total, Declarado, and Autuado?
+Does the test block separate that model from the seasonal naive, and from the other candidates?
+
+\paragraph{What we report.}
+\begin{itemize}
+  \item One protocol for three series and four grains.
+        Models are chosen by validation sMAPE and ranked by test sMAPE.
+        The skill score, the corrected Diebold-Mariano test, and the model confidence set are further columns.
+        They are not the rank.
+  \item Separate labels for E1 and E2.
+        E1 abstains by an energy threshold.
+        E2 abstains by absolute disagreement.
+  \item The lowest test sMAPE belongs to different models on different series and on different grains.
+        Keeping calendar zeros (A) or dropping weekends (B) changes both the sMAPE level and the order of models.
+\end{itemize}
+
+Section~\ref{sec:related} places the models in the forecasting literature.
+Section~\ref{sec:data} defines each series.
+Section~\ref{sec:method} states the steps, the metrics, and each model.
+Section~\ref{sec:results} gives the test sMAPE and reads each test.
+Sections~\ref{sec:discussion} and~\ref{sec:limitations} say what those ranks do and do not support.

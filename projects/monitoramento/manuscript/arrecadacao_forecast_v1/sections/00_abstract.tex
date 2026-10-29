@@ -1,11 +1,17 @@
-VAT (ICMS) is the value-added tax in this study.
+VAT (ICMS) is the state value-added tax in this study.
 We forecast three collection series from one legal-entity book: the total, Declarado, and Autuado.
-The series end on 31 December 2025.
-Each series has four grains: month, calendar day, Monday--Friday, and week.
+Declarado is tax the debtor reported.
+Autuado is tax from an assessment.
+In the December stock, Autuado is 72.74 percent and Declarado is 27.21 percent.
+In collection from 2016 through 2025, Declarado is 64.63 percent and Autuado is 35.24 percent.
+Each series has four grains: month, calendar day (grain A), Monday to Friday (grain B), and week.
 The protocol is the closed v1 benchmark.
-The cut is one train block, one validation block, and one test block.
+One series has one train block, one validation block, and one test block.
 The rank is test sMAPE.
-The best model is not the same on every series.
-On the monthly grain, boosting leads the total and Autuado, and SARIMAX leads Declarado.
-On Monday--Friday, TimesFM leads all three series.
-[DISCUTIR E ESCREVER]
+The best model is not the same on every series or every grain.
+On the month, boosting leads the total and Autuado, and SARIMAX leads Declarado.
+On Monday to Friday, TimesFM leads all three series.
+A skill score, a Diebold-Mariano test with a small-sample correction, and a model confidence set sit beside that rank.
+They do not replace it.
+The Monday to Friday lead over the seasonal naive is the comparison those tests agree on.
+The monthly and weekly test blocks do not support one winner.

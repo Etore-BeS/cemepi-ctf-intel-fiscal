@@ -28,17 +28,18 @@ The threshold $\tau$ in those rules is chosen in step~3.
 
 \begin{figure}[H]
   \centering
+  \resizebox{\linewidth}{!}{%
   \begin{tikzpicture}[
       font=\normalsize,
       node distance=5.5mm and 3mm,
       wide/.style={draw, rounded corners=2pt, align=center,
-                   inner sep=5pt, minimum width=124mm, fill=white,
+                   inner sep=5pt, minimum width=124mm, fill=cemepiteal!12,
                    line width=0.5pt},
       grain/.style={draw, rounded corners=2pt, align=center,
                     inner sep=3.5pt, text width=28mm, minimum height=16mm,
-                    fill=white, line width=0.5pt},
+                    fill=cemepiteal!22, line width=0.5pt},
       stage/.style={draw, rounded corners=2pt, align=center,
-                    inner sep=5pt, fill=black!8, line width=0.5pt},
+                    inner sep=5pt, fill=cemepiteal!30, line width=0.5pt},
       rule/.style={draw, rounded corners=2pt, align=center,
                    inner sep=4pt, text width=56mm, fill=white,
                    line width=0.4pt, font=\normalsize},
@@ -51,7 +52,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \node[grain, below=8mm of build, anchor=north, xshift=-48mm] (gm)
       {Monthly\\stock and collection};
     \node[grain, right=of gm] (ga) {A\\calendar day\\zeros kept};
-    \node[grain, right=of ga] (gb) {B\\Mon--Fri\\holidays kept};
+    \node[grain, right=of ga] (gb) {B\\Mon-Fri\\holidays kept};
     \node[grain, right=of gb] (gw) {Weekly\\Sunday close};
 
     \node[wide, below=8mm of ga] (split)
@@ -60,7 +61,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
 
     \node[stage, below=8mm of split] (s1)
       {\parbox{118mm}{\centering
-        \textbf{Stage 1 --- point forecasts (M0--M9)}\\[3pt]
+        \textbf{Stage 1: point forecasts (M0--M9)}\\[3pt]
         {\small
         M0 naive\quad
         M1 least squares / ridge\quad
@@ -76,7 +77,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
 
     \node[stage, below=7mm of s1] (s2)
       {\parbox{118mm}{\centering
-        \textbf{Stage 2 --- after Stage 1}\\[3pt]
+        \textbf{Stage 2: after Stage 1}\\[3pt]
         {\small
         E1 TEM (may use Stage~1 forecasts as candidates)\\[1pt]
         E2 proxy, not TEM (needs Stage~1 boost $+$ seasonal naive)\\[1pt]
@@ -87,7 +88,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \node[wide, below=8mm of s2] (sel) {Select by validation sMAPE};
     \node[wide, below=of sel] (refit) {Refit on train $+$ validation};
     \node[wide, below=of refit] (fc) {Forecast the test block};
-    \node[wide, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
+    \node[wide, fill=cemepiteal!45, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
     \node[wide, below=of rank] (skill)
       {Secondary: skill score vs seasonal naive};
 
@@ -98,7 +99,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
        Else: seasonal naive.};
     \node[rule, anchor=north west, at={($(c1.north east)+(4mm,0)$)}] (c2)
       {\textbf{E2, not TEM.}\\
-       $|\mathrm{boost}-\mathrm{seas}| \gt \tau$: seasonal; else boost.};
+       $|\mathrm{boost}-\mathrm{seas}| \gt \tau$: seasonal. Else: boost.};
 
     \draw[arr] (ex) -- (build);
     \draw[arr] (build.south) -- ++(0,-4mm) coordinate (forkG);
@@ -120,11 +121,20 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \draw[arr] (refit) -- (fc);
     \draw[arr] (fc) -- (rank);
     \draw[arr] (rank) -- (skill);
-  \end{tikzpicture}
-  \caption{Every grain follows one contiguous train--validation--test cut.
-  Stage~1 fits the point-forecast families first; Stage~2 runs next (E2 needs Stage~1 boosting and seasonal-naive forecasts; E1 may use Stage~1 forecasts as energy candidates).
-  Settings are chosen by validation sMAPE, the chosen model is refit on train plus validation, and the official rank is test sMAPE (the skill score against that grain's seasonal naive is secondary).
-  The notes are forecast-time rules only: E1 returns the lowest-energy candidate when that energy is below $\tau$ and otherwise the seasonal naive; E2 returns the seasonal naive when boosting and the seasonal naive disagree by more than $\tau$, and returns boosting otherwise (E2 is not TEM).}
+  \end{tikzpicture}}
+  \caption{Every grain follows one contiguous train, validation, and test cut.
+  Stage~1 fits the point-forecast families first.
+  Stage~2 runs next.
+  E2 needs the Stage~1 boosting forecast and the seasonal naive.
+  E1 may use Stage~1 forecasts as energy candidates.
+  Settings are chosen by validation sMAPE.
+  The chosen model is refit on train plus validation.
+  The official rank is test sMAPE.
+  The skill score against that grain's seasonal naive is secondary.
+  The notes are forecast-time rules only.
+  E1 returns the lowest-energy candidate when that energy is below $\tau$, and otherwise the seasonal naive.
+  E2 returns the seasonal naive when boosting and the seasonal naive disagree by more than $\tau$, and returns boosting otherwise.
+  E2 is not TEM.}
   \label{fig:protocol}
 \end{figure}
 

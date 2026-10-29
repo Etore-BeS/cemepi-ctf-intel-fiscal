@@ -1,101 +1,262 @@
-\section{Other grains}
-\label{app:figures}
+\section{Calendar-day holdout}
+\label{app:pred-a}
 
-The monthly charts are in Section~\ref{sec:discussion}.
-This appendix holds the weekly grain, grain A, and grain B for the same three series.
-Each time chart has a zoom on the validation block and the test block.
-Each scatter is the test block and a 45-degree line.
-The blue dashed line is the lowest-sMAPE model on that series and grain.
+Grain A keeps every calendar day, including weekends with many zeros.
+Figure~\ref{fig:pred-a} uses the same holdout design as the main text.
+Figure~\ref{fig:scatter-a} is the same test block as a scatter.
+Figure~\ref{fig:residual-a} is the leader residual.
+Test sMAPE on this grain is higher than on grain B for the total and for Declarado.
+The forest leads those two series.
+TimesFM leads Autuado.
 
-[DISCUTIR E ESCREVER]
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_pred_daily.pdf}
+  \caption{Grain A, calendar days.
+  The forest leads the total and Declarado.
+  TimesFM leads Autuado, with the forest within 5 percent, so both lines are drawn there.
+  Weekend zeros sit on the axis.
+  The vertical axis is millions of BRL.}
+  \label{fig:pred-a}
+\end{figure}
 
-\begin{figure}[H]
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/total_weekly_forecast.png}
-  \caption{Total, weekly. Blue dashed: M1 ridge.}
+  \includegraphics[width=\linewidth]{figures/fig_scatter_daily.pdf}
+  \caption{Grain A test block as a scatter.
+  A mass of points at the origin is the weekend and empty-slip zeros.
+  The large days fall off the diagonal.
+  That cloud is why all-day sMAPE stays high even when the leader beats the lag-7 naive on the point rank.}
+  \label{fig:scatter-a}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/total_weekly_scatter.png}
-  \caption{Total, weekly test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_residual_daily.pdf}
+  \caption{Grain A residual, forecast minus actual, for the sMAPE leader.
+  Spikes away from zero are the days the leader misses.
+  The zeros pull many residuals toward a small value and do not remove the peak misses.}
+  \label{fig:residual-a}
 \end{figure}
-\begin{figure}[H]
+
+\section{Family-level bar charts}
+\label{app:bars}
+
+The main text ranks models with tables.
+Figures~\ref{fig:smape-total}--\ref{fig:abl-skill} repeat those ranks as bars.
+Teal is the lowest test sMAPE in that panel.
+Other bars share one blue, because the model name is already the category label.
+A missing bar means that naive is not a candidate on that grain.
+Each panel has its own horizontal scale.
+Read the printed number when you compare panels.
+Bar length is comparable inside a panel, from a zero baseline.
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/total_business_daily_forecast.png}
-  \caption{Total, daily B. Blue dashed: M9 TimesFM.}
+  \includegraphics[width=\linewidth]{figures/fig_smape_total.pdf}
+  \caption{Total series, test sMAPE.
+  Boosting leads the month, ridge leads the week, TimesFM leads Monday to Friday, and the forest leads the calendar day.
+  The seasonal naive for the month (lag 12) is far behind boosting.
+  The calendar-day seasonal naive (lag 7) is close to TimesFM and behind the forest.}
+  \label{fig:smape-total}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/total_business_daily_scatter.png}
-  \caption{Total, daily B test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_smape_declarado.pdf}
+  \caption{Declarado, test sMAPE.
+  SARIMAX leads the month by a wide margin.
+  Ridge leads the week.
+  TimesFM leads Monday to Friday.
+  The forest leads the calendar day and is the only short bar in that panel.}
+  \label{fig:smape-dec}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/total_daily_forecast.png}
-  \caption{Total, daily A. Blue dashed: M6 forest.}
+  \includegraphics[width=\linewidth]{figures/fig_smape_autuado.pdf}
+  \caption{Autuado, test sMAPE.
+  Boosting leads the month.
+  Least squares leads the week, with kernel ridge and boosting close behind.
+  TimesFM leads both daily grains.
+  The level is higher than on Declarado in every column.}
+  \label{fig:smape-aut}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/total_daily_scatter.png}
-  \caption{Total, daily A test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_skill_total.pdf}
+  \caption{Total series, skill score.
+  Zero is the seasonal naive of that grain.
+  Teal matches the sMAPE leader, which is also the highest skill in the panel.
+  Weekly skill is small.
+  Monday to Friday skill for TimesFM is large and positive.}
+  \label{fig:skill-total}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/declarado_weekly_forecast.png}
-  \caption{Declarado, weekly. Blue dashed: M1 ridge.}
+  \includegraphics[width=\linewidth]{figures/fig_skill_declarado.pdf}
+  \caption{Declarado, skill score.
+  Monthly SARIMAX is the tall positive bar.
+  Several calendar-day models sit left of zero, so they lose to the lag-7 naive.
+  The forest is the exception on that grain.}
+  \label{fig:skill-dec}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_weekly_scatter.png}
-  \caption{Declarado, weekly test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_skill_autuado.pdf}
+  \caption{Autuado, skill score.
+  Monthly boosting and Monday to Friday TimesFM are the clear positive bars.
+  Weekly skill is small and positive for the leader.
+  Models left of zero lose to the seasonal naive of that column.}
+  \label{fig:skill-aut}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/declarado_business_daily_forecast.png}
-  \caption{Declarado, daily B. Blue dashed: M9 TimesFM.}
+  \includegraphics[width=\linewidth]{figures/fig_ablation_smape.pdf}
+  \caption{Test sMAPE on grain A and on grain B.
+  Grain A keeps weekend zeros, so the bars are longer.
+  The teal model changes from the forest to TimesFM on the total and on Declarado.
+  On Autuado, TimesFM is teal in both columns.}
+  \label{fig:abl-smape}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_business_daily_scatter.png}
-  \caption{Declarado, daily B test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_ablation_skill.pdf}
+  \caption{Skill score on grain A and on grain B.
+  The reference is the lag-7 naive on A and the lag-5 naive on B.
+  Positive skill is easier to see on B.
+  A positive bar on B is not a claim about A.}
+  \label{fig:abl-skill}
 \end{figure}
-\begin{figure}[H]
+
+\section{Full model zoo}
+\label{app:small-multiples}
+
+Figures~\ref{fig:zoo-total-monthly}--\ref{fig:zoo-autuado-daily} show every saved forecast against realized collection.
+Gray is the actual in every panel.
+The forecast uses that model's color, the same color as in the main text.
+The teal frame is the lowest test sMAPE.
+The vertical scale is shared inside a figure, so a spike that leaves the gray line is a large level error.
+These panels replace a single overcrowded line plot.
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/declarado_daily_forecast.png}
-  \caption{Declarado, daily A. Blue dashed: M6 forest.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_total_monthly.pdf}
+  \caption{Total, month.
+  The teal frame is boosting, which stays in a band and misses the April peak.
+  The seasonal naive and the disagreement proxy both spike well above the gray line.}
+  \label{fig:zoo-total-monthly}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_daily_scatter.png}
-  \caption{Declarado, daily A test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_total_weekly.pdf}
+  \caption{Total, week.
+  The teal frame is ridge.
+  Least squares is nearly the same path.
+  TimesFM follows the peaks and sits below them.}
+  \label{fig:zoo-total-weekly}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/autuado_weekly_forecast.png}
-  \caption{Autuado, weekly. Blue dashed: M1 least squares.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_total_business_daily.pdf}
+  \caption{Total, Monday to Friday.
+  The teal frame is TimesFM.
+  The gray peaks rise above the forecast.
+  Quiet days are where the lines meet.}
+  \label{fig:zoo-total-bd}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_weekly_scatter.png}
-  \caption{Autuado, weekly test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_total_daily.pdf}
+  \caption{Total, calendar day.
+  The teal frame is the forest.
+  Weekend zeros hold the gray line on the axis.
+  Models that miss the non-zero days show spikes away from gray.}
+  \label{fig:zoo-total-daily}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/autuado_business_daily_forecast.png}
-  \caption{Autuado, daily B. Blue dashed: M9 TimesFM.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_declarado_monthly.pdf}
+  \caption{Declarado, month.
+  The teal frame is SARIMAX, which follows the May peak more closely than boosting.
+  The Gaussian process is almost flat.
+  That flat line is why its sMAPE is the worst in the monthly Declarado list.}
+  \label{fig:zoo-dec-monthly}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_business_daily_scatter.png}
-  \caption{Autuado, daily B test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_declarado_weekly.pdf}
+  \caption{Declarado, week.
+  The teal frame is ridge.
+  The path follows the gray peaks and sits slightly low, which is the downward shift in Figure~\ref{fig:scatter-w}.}
+  \label{fig:zoo-dec-weekly}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=\linewidth]{figures/segment/autuado_daily_forecast.png}
-  \caption{Autuado, daily A. Blue dashed: M9 TimesFM.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_declarado_business_daily.pdf}
+  \caption{Declarado, Monday to Friday.
+  The teal frame is TimesFM.
+  Boosting is close.
+  Both understate the tallest days.}
+  \label{fig:zoo-dec-bd}
 \end{figure}
-\begin{figure}[H]
+
+\begin{figure}[ht]
   \centering
-  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_daily_scatter.png}
-  \caption{Autuado, daily A test scatter.}
+  \includegraphics[width=\linewidth]{figures/fig_zoo_declarado_daily.pdf}
+  \caption{Declarado, calendar day.
+  The teal frame is the forest, and the confidence set on this cell contains only that model.
+  The other panels depart from the gray line on the non-zero days.}
+  \label{fig:zoo-dec-daily}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_zoo_autuado_monthly.pdf}
+  \caption{Autuado, month.
+  The teal frame is boosting, which misses the April spike in the gray line.
+  The seasonal naive spikes above that same peak.
+  TimesFM is almost flat.}
+  \label{fig:zoo-aut-monthly}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_zoo_autuado_weekly.pdf}
+  \caption{Autuado, week.
+  The teal frame is least squares.
+  Kernel ridge is close on sMAPE and smoother than the gray line.
+  The late-October peak is the shared miss.}
+  \label{fig:zoo-aut-weekly}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_zoo_autuado_business_daily.pdf}
+  \caption{Autuado, Monday to Friday.
+  The teal frame is TimesFM.
+  The gray peaks are sharper than the forecast.
+  This is the highest Monday to Friday sMAPE of the three series.}
+  \label{fig:zoo-aut-bd}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/fig_zoo_autuado_daily.pdf}
+  \caption{Autuado, calendar day.
+  The teal frame is TimesFM, with the forest close behind.
+  Zeros hold the gray line down.
+  The non-zero days are where the panels separate.}
+  \label{fig:zoo-autuado-daily}
 \end{figure}

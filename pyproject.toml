@@ -35,6 +35,7 @@ cnpj-pipeline = "cnpj_pipeline.cli:main"      # pipelines/cnpj_enrich (uv run cn
 # uv sync --group cnpj         → + pipelines/cnpj_enrich (Dados Abertos CNPJ da RFB; pglast só valida a DDL nos testes)
 dev = [
     "ipykernel>=7.1.0",
+    "matplotlib>=3.11.1",
     "nbconvert>=7.16.0",
     "nbstripout>=0.9.1",
     "pre-commit>=4.0.0",

@@ -15,6 +15,11 @@
         The rank still uses every day in grain A, including zeros.
   \item The skill score uses the Murphy ratio on sMAPE~\citep{murphy1988skill}.
         It compares a model only with the seasonal naive of the same grain.
+  \item A low sMAPE can still miss the peaks.
+        On the monthly total, boosting leads and the month-to-month order is weak.
+        Read the scatter next to the rank.
+  \item The HLN test compares the leader with the seasonal naive only.
+        It does not compare the leader with the second-best model.
   \item The HLN test in this paper uses horizon 1.
         Some models forecast the whole test block from one origin.
         Their errors are dependent.
