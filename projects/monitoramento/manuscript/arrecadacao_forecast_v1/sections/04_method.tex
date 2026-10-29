@@ -45,7 +45,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
       arr/.style={-{Stealth[length=2.2mm]}, line width=0.7pt},
       bus/.style={line width=0.7pt}
     ]
-    \node[wide] (ex) {Extract \texttt{extracao=2026-03}};
+    \node[wide] (ex) {Series end on 31 December 2025};
     \node[wide, below=of ex] (build) {Build one series per grain};
 
     \node[grain, below=8mm of build, anchor=north, xshift=-48mm] (gm)
@@ -121,7 +121,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \draw[arr] (fc) -- (rank);
     \draw[arr] (rank) -- (skill);
   \end{tikzpicture}
-  \caption{Every grain from the March 2026 extract follows one contiguous train--validation--test cut.
+  \caption{Every grain follows one contiguous train--validation--test cut.
   Stage~1 fits the point-forecast families first; Stage~2 runs next (E2 needs Stage~1 boosting and seasonal-naive forecasts; E1 may use Stage~1 forecasts as energy candidates).
   Settings are chosen by validation sMAPE, the chosen model is refit on train plus validation, and the official rank is test sMAPE (the skill score against that grain's seasonal naive is secondary).
   The notes are forecast-time rules only: E1 returns the lowest-energy candidate when that energy is below $\tau$ and otherwise the seasonal naive; E2 returns the seasonal naive when boosting and the seasonal naive disagree by more than $\tau$, and returns boosting otherwise (E2 is not TEM).}
@@ -377,7 +377,7 @@ A test sMAPE of at least 180 removes that fit from the rank.
 
 \paragraph{M9: TimesFM 3.0.}
 TimesFM is a pretrained forecasting model~\citep{das2024timesfm}.
-We load TimesFM 3.0 and do not update its weights~\citep{jain2026timesfm3}.
+We load TimesFM 3.0 and do not update its weights~\citep{das2024timesfm}.
 If $T$ is the last time in the validation block and $H$ is the test length,
 \begin{equation}
   (\hat y_{T+1},\ldots,\hat y_{T+H})
@@ -494,18 +494,37 @@ Monthly fits use lag 12, 30 steps, and 6 chains.
 Daily and weekly fits use 20 steps and 4 chains, with the same lags as E3.
 The network is small and is trained only on this series.
 
+\subsection{Tests after the rank}
+\label{sec:tests}
+
+The rank stays test sMAPE.
+Two tests describe that rank.
+They do not change it.
+
+The Diebold-Mariano test compares the best model with the seasonal naive of the same grain~\citep{diebold1995comparing}.
+The loss is the summand inside sMAPE.
+The horizon in the Harvey-Leybourne-Newbold correction is one step~\citep{harvey1997testing}.
+The corrected statistic is compared with a Student-$t$ distribution on $n-1$ degrees of freedom.
+The test is two-sided.
+A negative statistic means the best model has lower loss than the seasonal naive.
+
+The model confidence set uses level 0.10~\citep{hansen2011mcs}.
+The statistic is the largest $t$ of a model against the average loss of the other models.
+A circular block bootstrap with 999 draws gives the p-value.
+The block length is the cube root of the test length.
+A model leaves the set when the equivalence test rejects.
+
 \subsection{Where the numbers come from}
 \label{sec:repro}
 
 This paper states the series, the splits, the scores, and the decision rules.
-The code that produced the ranked tables is the notebook
+The model bodies are the v1 notebook
 \path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_paper_v1.ipynb}.
-The ranked metrics and stored forecasts for \texttt{extracao=2026-03} are in
-\path{projects/monitoramento/output/articles/arrecadacao_forecast_paper_v1/}.
-The figures in Section~\ref{sec:discussion} are stored in
-\path{projects/monitoramento/output/figures/articles/arrecadacao_forecast_paper_v1/}
-and copied into \path{figures/} next to this manuscript.
-E1 calls the published TEM code at \url{https://github.com/JonasBrusokas/Time-Energy-Model}, routine \texttt{Exp\_Main\_Energy}, with TimesNet as the backbone.
+The segment run is
+\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_v1_segmentado.ipynb}.
+The saved forecasts are under
+\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_v1_segmentado/results/}.
+E1 calls the published TEM code.
+That vendor tree is not in this worktree, so E1 has no score.
 M9 uses the public weights \texttt{google/timesfm-3.0-pytorch}.
 Every number in Section~\ref{sec:results} is read from those saved tables.
-The manuscript does not recompute them.

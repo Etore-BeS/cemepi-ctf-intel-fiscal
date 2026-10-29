@@ -1,96 +1,101 @@
-\section{Calendar-day holdout}
-\label{app:pred-a}
+\section{Other grains}
+\label{app:figures}
 
-Grain A keeps every calendar day, including weekends with many zeros.
-Figure~\ref{fig:pred-a} shows the same clean holdout style as in the main text (Actual + sMAPE leader).
-Test sMAPE on this grain is higher than on grain B for every family in Table~\ref{tab:top3}.
-TimesFM 3.0 still has the lowest test sMAPE among the models in the freeze.
+The monthly charts are in Section~\ref{sec:discussion}.
+This appendix holds the weekly grain, grain A, and grain B for the same three series.
+Each time chart has a zoom on the validation block and the test block.
+Each scatter is the test block and a 45-degree line.
+The blue dashed line is the lowest-sMAPE model on that series and grain.
 
-\begin{figure}[ht]
+[DISCUTIR E ESCREVER]
+
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_pred_vs_actual_daily_a.png}
-  \caption{Grain A, calendar days.
-  Solid black: realized collection.
-  Dashed: TimesFM, the lowest test-sMAPE forecast on this grain.
-  The vertical axis is millions of BRL.}
-  \label{fig:pred-a}
+  \includegraphics[width=\linewidth]{figures/segment/total_weekly_forecast.png}
+  \caption{Total, weekly. Blue dashed: M1 ridge.}
 \end{figure}
-
-\section{Family-level bar charts}
-\label{app:bars}
-
-The main text ranks models with tables.
-Figures~\ref{fig:smape_grain}--\ref{fig:abl_ss} repeat those ranks as grouped bars for readers who prefer a visual scan.
-They are not an additional experiment.
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_smape_by_grain.png}
-  \caption{Test sMAPE by model family and grain, for the March 2026 extract.
-  The vertical axis is percent.
-  Lower is better.
-  Each grain is ranked on its own.}
-  \label{fig:smape_grain}
+  \includegraphics[width=0.62\linewidth]{figures/segment/total_weekly_scatter.png}
+  \caption{Total, weekly test scatter.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_skill_by_grain.png}
-  \caption{Skill score~\eqref{eq:ss} by model family and grain.
-  Zero is the seasonal naive of that grain.
-  A positive value means lower test sMAPE than that naive.}
-  \label{fig:ss_grain}
+  \includegraphics[width=\linewidth]{figures/segment/total_business_daily_forecast.png}
+  \caption{Total, daily B. Blue dashed: M9 TimesFM.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_smape.png}
-  \caption{Test sMAPE on grain A and on grain B.
-  Grain A keeps every calendar day, including weekend and empty-slip zeros.
-  Grain B keeps Monday--Friday and keeps Brazilian national holidays.
-  Lower is better.}
-  \label{fig:abl_smape}
+  \includegraphics[width=0.62\linewidth]{figures/segment/total_business_daily_scatter.png}
+  \caption{Total, daily B test scatter.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_discussion_compare_ablation_skill.png}
-  \caption{Skill score on grain A and on grain B.
-  The reference is the lag-7 seasonal naive on A and the lag-5 seasonal naive on B.}
-  \label{fig:abl_ss}
+  \includegraphics[width=\linewidth]{figures/segment/total_daily_forecast.png}
+  \caption{Total, daily A. Blue dashed: M6 forest.}
 \end{figure}
-
-\section{Full model zoo (small multiples)}
-\label{app:small-multiples}
-
-Figures~\ref{fig:sm-m}--\ref{fig:sm-b} show every freeze forecast against realized collection, one panel per model, with a shared vertical axis inside each grain.
-Light gray is actual in every panel.
-These replace overcrowded multi-model line plots in the main text.
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_monthly.png}
-  \caption{Monthly holdout: every model versus actual (shared $y$).}
-  \label{fig:sm-m}
+  \includegraphics[width=0.62\linewidth]{figures/segment/total_daily_scatter.png}
+  \caption{Total, daily A test scatter.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_weekly.png}
-  \caption{Weekly holdout: every model versus actual (shared $y$).}
-  \label{fig:sm-w}
+  \includegraphics[width=\linewidth]{figures/segment/declarado_weekly_forecast.png}
+  \caption{Declarado, weekly. Blue dashed: M1 ridge.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_daily_a.png}
-  \caption{Grain A: every model versus actual (shared $y$).}
-  \label{fig:sm-a}
+  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_weekly_scatter.png}
+  \caption{Declarado, weekly test scatter.}
 \end{figure}
-
-\begin{figure}[ht]
+\begin{figure}[H]
   \centering
-  \includegraphics[width=\linewidth]{figures/paper_v1_appendix_small_multiples_daily_b.png}
-  \caption{Grain B: every model versus actual (shared $y$).}
-  \label{fig:sm-b}
+  \includegraphics[width=\linewidth]{figures/segment/declarado_business_daily_forecast.png}
+  \caption{Declarado, daily B. Blue dashed: M9 TimesFM.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_business_daily_scatter.png}
+  \caption{Declarado, daily B test scatter.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/segment/declarado_daily_forecast.png}
+  \caption{Declarado, daily A. Blue dashed: M6 forest.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/segment/declarado_daily_scatter.png}
+  \caption{Declarado, daily A test scatter.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/segment/autuado_weekly_forecast.png}
+  \caption{Autuado, weekly. Blue dashed: M1 least squares.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_weekly_scatter.png}
+  \caption{Autuado, weekly test scatter.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/segment/autuado_business_daily_forecast.png}
+  \caption{Autuado, daily B. Blue dashed: M9 TimesFM.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_business_daily_scatter.png}
+  \caption{Autuado, daily B test scatter.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\linewidth]{figures/segment/autuado_daily_forecast.png}
+  \caption{Autuado, daily A. Blue dashed: M9 TimesFM.}
+\end{figure}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\linewidth]{figures/segment/autuado_daily_scatter.png}
+  \caption{Autuado, daily A test scatter.}
 \end{figure}

@@ -40,7 +40,7 @@ PatchTST is context for that design.
 We do not fit PatchTST.
 TimesFM is a pretrained decoder-only forecaster~\citep{das2024timesfm}.
 Zero-shot means we do not update its weights on our series.
-The weights we load are the later TimesFM 3.0 release~\citep{jain2026timesfm3}.
+The weights we load are the later TimesFM 3.0 release~\citep{das2024timesfm}.
 TimeGrad forecasts by a conditional denoising diffusion process~\citep{rasul2021timegrad}.
 Score-based models estimate the gradient of the log-density and sample with Langevin steps~\citep{song2019score}.
 Our E3 and E4 models are small univariate versions of those two ideas.
@@ -57,3 +57,13 @@ It still emits a forecast at every test time.
 E1 is the TEM reject option at test time.
 E2 is not TEM.
 E2 only compares a boosting forecast with the seasonal naive.
+
+\paragraph{Tests of a forecast rank.}
+Diebold and Mariano test equal predictive accuracy from a loss differential~\citep{diebold1995comparing}.
+Harvey, Leybourne and Newbold correct that statistic for a short sample~\citep{harvey1997testing}.
+Hansen, Lunde and Nason build a set of models that survive a sequence of equivalence tests~\citep{hansen2011mcs}.
+This paper uses those three references for the tests in Section~\ref{sec:tests}.
+The tests do not choose the rank.
+The rank remains test sMAPE.
+
+[DISCUTIR E ESCREVER]

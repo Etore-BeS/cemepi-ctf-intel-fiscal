@@ -1,56 +1,35 @@
 \section{Introduction}
 \label{sec:intro}
 
-Enrolled debt (dívida inscrita) is tax debt that has been formally registered for collection.
-The stock of that debt is large and changes slowly.
-The cash actually collected is seasonal.
-At a daily step it is also full of zeros.
-A zero means a weekend, a holiday, or a day with no payment slip.
-Those zeros are part of the series.
-They are not missing values to drop before scoring.
+VAT (ICMS) is a value-added tax.
+This paper forecasts VAT (ICMS) collection, not the mix of all enrolled taxes.
+The book has more than one ICMS type.
+Declarado is tax the debtor reported.
+Autuado is tax from an assessment (\texttt{ICMS Autua\c{c}\~ao}).
+Together those two types are almost the whole legal-entity book.
+Section~\ref{sec:data} reports the shares.
 
-A grain is the time step we forecast.
-This paper uses four grains from one extract: month, calendar day, business day, and week.
-GARE is the payment-slip aggregate that supplies the daily and weekly totals.
-Grain A is the calendar-daily GARE series, zeros included.
-Grain B is the Monday--Friday slice of the same slips.
-Grain B is a different target.
-It is not a filter applied after scoring grain A.
+A grain is the time step of a forecast.
+The grains are the v1 grains: month, calendar day (grain A), Monday--Friday (grain B), and week.
+Grain B keeps national holidays.
+It is not grain A with weekends removed after the score.
 
-sMAPE is the symmetric mean absolute percentage error.
-We define it in Section~\ref{sec:metrics}.
-Lower sMAPE is better.
-The official rank on every grain is test sMAPE.
-The skill score compares a model with the seasonal naive forecast of that same grain.
-We define it in Section~\ref{sec:ss}.
-A positive skill score means lower sMAPE than that naive forecast.
+The protocol is the closed v1 benchmark.
+One series has one contiguous train block, one validation block, and one test block.
+The study does not use a rolling origin.
+It does not reconcile grains.
+It does not add a model family.
+The candidates are M0--M9 and E1--E4, as in v1.
+The official rank is test sMAPE.
+The skill score compares a model with the seasonal naive of the same grain.
+A Diebold-Mariano test with the small-sample correction compares the best model with that naive~\citep{diebold1995comparing,harvey1997testing}.
+A model confidence set lists the models the test block does not separate~\citep{hansen2011mcs}.
 
-TEM is the Time-Energy Model~\citep{brusokas2025tem}.
-It scores candidate forecasts with an energy.
-Abstention means refusing the energy choice and returning the seasonal naive instead.
-We use abstention only for selective TEM, labeled E1.
-E2 is a separate rule.
-E2 switches between gradient boosting and the seasonal naive when those two forecasts disagree.
-E2 does not estimate an energy.
+The questions are:
+\begin{enumerate}
+  \item Which model has the lowest test sMAPE on each series and each grain?
+  \item Does that model change between the total, Declarado, and Autuado?
+  \item Does the test separate that model from the seasonal naive, and from the other candidates?
+\end{enumerate}
 
-\paragraph{Questions.}
-Which model has the lowest test sMAPE on each grain?
-On the monthly panel, does selective TEM (E1) have lower test sMAPE than the seasonal naive, and does the disagreement proxy (E2)?
-
-\paragraph{What we report.}
-\begin{itemize}
-  \item One protocol for all four grains.
-        Models are chosen by validation sMAPE and ranked by test sMAPE.
-        The skill score is a second column, not the rank.
-  \item Separate labels for E1 and E2.
-        E1 abstains by an energy threshold.
-        E2 abstains by absolute disagreement.
-  \item On the March 2026 extract, the lowest test sMAPE belongs to different models on different grains.
-        Keeping calendar zeros (A) or dropping weekends (B) changes both the sMAPE level and the order of models.
-\end{itemize}
-
-Section~\ref{sec:related} places the models in the forecasting literature.
-Section~\ref{sec:data} defines each series.
-Section~\ref{sec:method} states the steps, the metrics, and each model.
-Section~\ref{sec:results} gives the test sMAPE.
-Sections~\ref{sec:discussion} and~\ref{sec:limitations} say what those ranks do and do not support.
+[DISCUTIR E ESCREVER]

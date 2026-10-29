@@ -1,94 +1,56 @@
 \section{Results}
 \label{sec:results}
 
-Every number below is taken from the saved tables for \texttt{extracao=2026-03}.
-The rank is test sMAPE.
-Lower is better.
-The skill score is higher when the model beats the seasonal naive of that grain.
-
-\subsection{The lowest sMAPE is not the same model on every grain}
-\label{sec:top3}
-
-Table~\ref{tab:top3} lists the three lowest test-sMAPE models on each grain.
-E2 has the lowest test sMAPE on the monthly panel.
-TimesFM 3.0 has the lowest test sMAPE on grain A, on grain B, and on the weekly series.
-A single winner across grains is not supported by this table.
-Family-level bar charts that duplicate these ranks are in Appendix~\ref{app:bars}.
-
-\begin{table}[ht]
-  \caption{Three lowest test sMAPE values on each grain.
-  E2 is the disagreement proxy.
-  E2 is not TEM.}
-  \label{tab:top3}
-  \centering
-  \small
-  \input{tables/tab_top3_by_grain}
-\end{table}
-
-\subsection{Monthly panel}
-\label{sec:monthly}
-
-E2 has the lowest test sMAPE on the monthly panel.
-The value is about 10.9, and the skill score is about 0.19.
-That is lower error than boosting alone and lower error than the lag-12 seasonal naive.
-
-Boosting is second.
-Its test sMAPE is about 13.3, and its skill score is about 0.015.
-The lag-12 seasonal naive is third, at about 13.5.
-Its skill score is zero by~\eqref{eq:ss}.
-
-Selective TEM does not have the lowest monthly test sMAPE.
-E1 is about 15.5, and its skill score is negative.
-On this 12-month test, the energy rule has higher sMAPE than the seasonal naive.
-
-Table~\ref{tab:monthly} continues the list to eight models.
-TimesFM and the score sampler are both worse than the seasonal naive on this grain.
+Table~\ref{tab:best} is the lowest test sMAPE on each series and grain.
+The skill score uses the seasonal naive of that grain.
+The HLN column is the two-sided p-value of the best model against that naive.
+A p-value below 0.05 is marked in the text below, not in the table.
+The model confidence set uses level 0.10.
 
 \begin{table}[t]
-  \caption{Monthly grain: eight lowest test sMAPE values.}
-  \label{tab:monthly}
+  \caption{Lowest test sMAPE.
+  Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\).
+  HLN \(p\) compares the best model with the seasonal naive.}
+  \label{tab:best}
   \centering
-  \small
-  \input{tables/tab_monthly_top8}
+  \scriptsize
+  \begin{tabular}{llrrrr}
+    \toprule
+    Series & Grain & Best & sMAPE & Skill & HLN \(p\) \\
+    \midrule
+    Total & Month & M3 boosting & 12.94 & 0.513 & 0.023 \\
+    Total & Week & M1 ridge & 41.00 & 0.135 & 0.638 \\
+    Total & Daily B & M9 TimesFM & 65.05 & 0.393 & \(<0.001\) \\
+    Total & Daily A & M6 forest & 90.52 & 0.149 & 0.717 \\
+    Declarado & Month & M2 SARIMAX & 6.79 & 0.602 & 0.040 \\
+    Declarado & Week & M1 ridge & 27.48 & 0.180 & 0.246 \\
+    Declarado & Daily B & M9 TimesFM & 61.35 & 0.401 & \(<0.001\) \\
+    Declarado & Daily A & M6 forest & 78.43 & 0.221 & 0.069 \\
+    Autuado & Month & M3 boosting & 20.91 & 0.523 & 0.077 \\
+    Autuado & Week & M1 least squares & 52.50 & 0.139 & 0.590 \\
+    Autuado & Daily B & M9 TimesFM & 90.32 & 0.255 & \(<0.001\) \\
+    Autuado & Daily A & M9 TimesFM & 112.99 & 0.101 & 0.437 \\
+    \bottomrule
+  \end{tabular}
 \end{table}
 
-\subsection{Grain A and grain B}
-\label{sec:ablation}
+The best model changes with the series on three grains.
+On the month, boosting leads the total and Autuado, and SARIMAX leads Declarado.
+On the week, ridge leads the total and Declarado, and least squares leads Autuado.
+On daily A, the forest leads the total and Declarado, and TimesFM leads Autuado.
+On daily B, TimesFM leads all three series.
 
-TimesFM has the lowest test sMAPE on calendar-daily A.
-The value is about 59.8, and the skill score is about 0.20.
-The lag-7 seasonal naive is second.
-Most other models have higher sMAPE than that naive, so their skill scores are negative.
-Weekend and empty-slip zeros are in this score.
+The HLN test rejects equal accuracy versus the seasonal naive on every daily B series, on the total month, and on the Declarado month.
+It does not reject on any weekly series, on total daily A, or on Autuado daily A.
+The Declarado daily A p-value is 0.069.
+The Autuado month p-value is 0.077.
 
-TimesFM has the lowest test sMAPE on business-daily B.
-The value is about 52.4, and the skill score is about 0.28.
-Boosting and ordinary least squares are next (Table~\ref{tab:ablation}).
-Dropping weekends lowers the sMAPE level and changes the order.
-The seasonal naive is inside the top three on A and outside the top three on B.
-The contribution of the A/B construction is the rank change in Table~\ref{tab:ablation}; the matching family bars are in Appendix~\ref{app:bars}.
+The 90 percent model confidence set is wide on the month and on the week, where the test block has 12 or 13 points.
+On total daily A the set is the forest and two seasonal naives (lag 7 and lag 365).
+On Declarado daily A the set contains only the forest.
+On daily B the lag-5 naive is outside the set for the total and for Declarado.
+TimesFM remains in a set with other models on daily B.
+E1 has no row.
+The TEM vendor tree is not in this worktree.
 
-\begin{table}[ht]
-  \caption{Three lowest test sMAPE values on grain A and on grain B.}
-  \label{tab:ablation}
-  \centering
-  \small
-  \input{tables/tab_ablation_A_vs_B}
-\end{table}
-
-The positive-day score on A is not the official rank.
-On days with $y \gt 0$, TimesFM has sMAPE about 29.9 and skill about 0.58.
-Boosting has sMAPE about 34.6 and skill about 0.51.
-The gap versus the all-day scores shows how much Ranking A is raised by zeros.
-It is not a reason to remove those zeros from the target.
-
-\subsection{Weekly series}
-\label{sec:weekly}
-
-TimesFM has the lowest test sMAPE on the weekly series.
-The value is about 17.2, and the skill score against the lag-52 naive is about 0.41.
-Ridge and ordinary least squares are next.
-Most other models have negative skill against that naive.
-The test block has 13 weeks.
-The gap describes this window.
-It is not a standard error for a long-run difference.
+[DISCUTIR E ESCREVER]

@@ -58,7 +58,7 @@ def _layout(fig: go.Figure, title: str) -> None:
         font={"family": FONT, "size": TICK_SIZE, "color": INK},
         title={"text": title, "font": {"size": TITLE_SIZE}},
         legend={"font": {"size": TICK_SIZE}, "orientation": "h", "y": -0.18},
-        margin={"l": 90, "r": 40, "t": 120, "b": 80},
+        margin={"l": 110, "r": 80, "t": 140, "b": 100},
         paper_bgcolor="white",
         plot_bgcolor="white",
     )
@@ -149,7 +149,7 @@ def plot_grain(series: str, grain: str, fig_dir: Path) -> list[Path]:
     )
     time_fig.update_yaxes(title_text=unit, row=1, col=1)
     time_fig.update_yaxes(title_text=unit, row=2, col=1)
-    _layout(time_fig, f"{label}: actual and best test forecast")
+    _layout(time_fig, f"{label}<br>Actual and best test forecast")
     time_stem = fig_dir / f"{series}_{grain}_forecast"
     write_publication_figure(time_fig, time_stem, width=1600, height=1100, scale=2)
 
@@ -185,7 +185,7 @@ def plot_grain(series: str, grain: str, fig_dir: Path) -> list[Path]:
         scaleanchor="x",
         scaleratio=1,
     )
-    _layout(scatter, f"{label}: test forecast versus actual")
+    _layout(scatter, f"{label}<br>Test forecast versus actual")
     scatter_stem = fig_dir / f"{series}_{grain}_scatter"
     write_publication_figure(scatter, scatter_stem, width=1200, height=1200, scale=2)
     return [time_stem.with_suffix(".png"), scatter_stem.with_suffix(".png")]

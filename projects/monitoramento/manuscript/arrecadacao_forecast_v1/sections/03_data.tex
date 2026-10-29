@@ -1,49 +1,67 @@
 \section{Data}
 \label{sec:data}
 
-All series come from one saved extract, \texttt{extracao=2026-03}.
-The extract is not updated during the study.
-If a source file is missing, we skip that grain.
-We do not fill in a series that was not in the extract.
+All series stop on 31 December 2025.
+A later payment or a later stock snapshot is not in the sample.
+The weekly grain keeps a week only when its Sunday label is on or before that date.
+The last weekly label is 28 December 2025.
+The three days after that Sunday stay in the daily series.
+They do not form a week with a later label.
 
-\paragraph{Monthly panel.}
-The monthly file pairs enrolled-debt stock with collection.
-It has $n = 119$ months and 14 columns.
-The target is total collection, \texttt{valor\_total}.
-The stock field used as a covariate is \texttt{valor\_sem\_honorarios}.
-Tabular models on this grain use lags 1, 3, and 12 of collection and the same lags of stock.
-The test block is 12 months.
-That is a short sample for a large model.
+The target is the sum of \texttt{VALOR\_TOTAL\_GARE}.
+That field is the cash amount on the state payment slip.
+v1 uses the same field and does not apply a price index.
+This paper does not apply one either.
+Principal, interest, and fine sum to about 83 percent of the slip total in this extract.
+The extract does not store the remaining component.
+The ratio is similar for each ICMS type.
+The gap is a missing component, not a deflator.
+A second price adjustment is not used.
 
-\paragraph{Grain A: calendar-daily GARE.}
-The daily file is an aggregate of GARE payment slips.
-Each civil day has the sum of slip values, \texttt{valor\_sum}, and the number of slips, \texttt{n\_guias}.
-We place the file on a continuous daily calendar.
-Missing days become zeros in both fields.
-The target is \texttt{valor\_sum}.
-Zeros stay in the target.
-They are weekends and days with no slip.
-Ranking A is test sMAPE on every calendar day, zeros included.
-A side score, sMAPE on days with $y \gt 0$, describes days that had a slip.
-That side score does not replace Ranking A.
+The monthly covariate is the enrolled balance \texttt{VALOR\_SEM\_HONORARIOS} in the snapshot of that month.
+That balance is not restated to a base-year price.
 
-\paragraph{Grain B: business days.}
-Grain B keeps Monday--Friday rows of the same slip aggregate.
-This extract has $n = 2672$ such days.
-Brazilian national holidays stay in the series.
-No model receives a holiday indicator.
-Grain B has its own train, validation, and test blocks.
-It is not the grain A test block with weekends removed after the fact.
+The universe is legal-entity ICMS.
+In the December snapshot, debts with no CNPJ are 0.48 percent of ICMS stock value.
+The forecast series do not add those debts.
 
-\paragraph{Weekly grain.}
-We sum daily \texttt{valor\_sum} and \texttt{n\_guias} by week ending Sunday.
-The seasonal naive on this grain copies the value 52 weeks earlier.
-We do not use weeks that start on Monday.
+\paragraph{Shares.}
+Table~\ref{tab:shares} uses the December snapshot for stock and the full sample for collection.
+Autuado is \texttt{ICMS Autua\c{c}\~ao}.
+Declarado is \texttt{ICMS Declarado}.
+The other three ICMS types are each below 0.04 percent of stock and of collection.
+Declarado plus Autuado is 99.95 percent of legal-entity ICMS stock and 99.87 percent of collection.
+Autuado is most of the stock (72.74 percent).
+Declarado is most of the collection (64.63 percent).
 
-\paragraph{Which models see which columns.}
-Ordinary least squares, ridge, gradient boosting, the random forest, the Gaussian process, and kernel ridge use the tabular columns below.
-The seasonal naive, SARIMAX, Prophet, the perceptron, TimesFM, and the two samplers E3 and E4 see the history of the target.
-Prophet also uses the date index to build its seasonal terms.
-Calendar-daily tabular columns are lags 1, 7, 14, and 28 of \texttt{valor\_sum} and of \texttt{n\_guias}, plus day of week and month.
-Business-day tabular columns are lags 1, 5, 10, and 20, counted in business days, of the same two series, plus day of week and month.
-Weekly tabular columns are lags 1, 4, 13, and 52 of the weekly sum and of the weekly slip count, plus week of year and month.
+\begin{table}[t]
+  \caption{Share of legal-entity ICMS value.
+  Stock is the December snapshot.
+  Collection is \texttt{VALOR\_TOTAL\_GARE} from 4 January 2016 through 31 December 2025.}
+  \label{tab:shares}
+  \centering
+  \small
+  \begin{tabular}{lrr}
+    \toprule
+    Type & Stock (\%) & Collection (\%) \\
+    \midrule
+    ICMS Autua\c{c}\~ao & 72.74 & 35.24 \\
+    ICMS Declarado & 27.21 & 64.63 \\
+    ICMS Autua\c{c}\~ao Simples Nacional & 0.03 & 0.09 \\
+    ICMS Fecoep & 0.01 & 0.04 \\
+    ICMS Altera\c{c}\~ao de GIA & 0.00 & 0.00 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Grains.}
+The monthly panel has 120 months, from January 2016 through December 2025.
+Tabular models use lags 1, 3, and 12 of collection and the same lags of stock.
+The test block is the 12 months of the last year in the sample.
+Grain A places the daily slip sum on a calendar and fills missing days with zeros.
+The test block is the last 90 days, 3 October through 31 December.
+Grain B keeps Monday--Friday and keeps holidays.
+The test block is 90 business days, 28 August through 31 December.
+The weekly series sums grain A by week ending Sunday.
+The test block is 13 weeks, 5 October through 28 December.
+The seasonal naive lags are 12, 7, 5, and 52, as in v1.

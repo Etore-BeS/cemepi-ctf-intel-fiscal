@@ -1,21 +1,11 @@
-We forecast how much cash will be collected on enrolled tax debt (Portuguese: dívida inscrita), meaning tax debt formally registered for collection.
-The data are one static extract from March 2026.
-A grain is the time step of a series.
-We use four grains: a monthly panel of debt stock and collection, calendar-daily totals of GARE payment slips (grain A), the same daily slips restricted to Monday--Friday (grain B), and a weekly sum.
-GARE denotes the payment-slip aggregate in this extract.
-Grain A keeps weekend and empty-slip zeros.
-Grain B drops weekends and keeps Brazilian national holidays.
-We fit fourteen model families.
-Hyperparameters minimize validation sMAPE, the symmetric mean absolute percentage error.
-The official rank is test sMAPE.
-Lower is better.
-A skill score compares each model with the seasonal naive forecast of the same grain.
-It equals one minus the ratio of the two sMAPE values.
-The best model depends on the grain.
-On the monthly panel, the disagreement proxy E2 has the lowest test sMAPE, about 10.9.
-E2 switches between gradient boosting and the seasonal naive.
-It is not the Time-Energy Model (TEM).
-On grains A and B, and on the weekly series, TimesFM 3.0 has the lowest test sMAPE.
-Selective TEM (E1) can abstain.
-Abstention means returning the seasonal naive when the energy of every candidate is above a validation threshold.
-E1 does not have the lowest monthly test sMAPE in this extract.
+VAT (ICMS) is the value-added tax in this study.
+We forecast three collection series from one legal-entity book: the total, Declarado, and Autuado.
+The series end on 31 December 2025.
+Each series has four grains: month, calendar day, Monday--Friday, and week.
+The protocol is the closed v1 benchmark.
+The cut is one train block, one validation block, and one test block.
+The rank is test sMAPE.
+The best model is not the same on every series.
+On the monthly grain, boosting leads the total and Autuado, and SARIMAX leads Declarado.
+On Monday--Friday, TimesFM leads all three series.
+[DISCUTIR E ESCREVER]
