@@ -425,8 +425,6 @@ toc-depth: 4
 toc-expand: true
 toc-location: left
 toc-title: "Contents"
-include-after-body:
-  - _toc_colapsavel.html   # sumário fixo na rolagem, setinha para abrir/fechar cada tópico, figuras na largura do corpo
 format:
   html:
     grid:                  # só nesta página: corpo largo em telas grandes (o grid do Quarto encolhe em telas menores)
@@ -439,6 +437,7 @@ code-summary: "Code"
 resources:
   - paper_eda_figs/*.html
 include-in-header:
+  - _toc_colapsavel.html
   - text: |
 {inc_yaml}
 ---

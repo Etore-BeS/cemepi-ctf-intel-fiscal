@@ -10,11 +10,24 @@
 #quarto-header { display: none !important; }
 body, body.nav-fixed { padding-top: 0 !important; }
 #quarto-content { margin-top: 0 !important; }
+/* O Quarto marca a coluna como sticky, mas deixa top: auto até o quarto-nav.js rodar no fim do
+   carregamento. Com top: auto o sticky não gruda e o sumário sobe junto com a página. Este valor
+   vale assim que o <head> é lido, antes dos scripts do Plotly. */
+@media (min-width: 992px) {
+  #quarto-sidebar {
+    position: sticky !important;
+    top: 0 !important;
+    align-self: flex-start !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+}
 #lab-toc-fixo {
   position: fixed !important; z-index: 1020; overflow-y: auto; overscroll-behavior: contain;
   background: var(--bs-body-bg, #fff); padding: .25rem .5rem .75rem 0; margin: 0; box-sizing: border-box;
-  height: auto !important; visibility: visible !important;
-  /* o quarto-nav.js mexe no top/max-height de todo .sidebar ao esconder a navbar; aqui manda o valor do lab */
+  height: var(--lab-maxh, 100vh) !important; visibility: visible !important;
   top: var(--lab-top, 0px) !important; max-height: var(--lab-maxh, 100vh) !important;
 }
 #lab-toc-botao {
@@ -50,9 +63,11 @@ main .cell-output-display .plotly-graph-div { width: 100% !important; }
 main iframe { width: 100%; }
 </style>
 <script>
-document.addEventListener("DOMContentLoaded", function () {
+function labTocInit() {
+  if (window.__labTocInit) return;
   var toc = document.querySelector("#TOC");
   if (!toc) return;
+  window.__labTocInit = true;
   var col = document.querySelector("#quarto-sidebar") || toc.parentElement;   // coluna do Quarto (fica vazia, reserva o espaço)
   var nav = document.querySelector("#quarto-header");
   // o sumário vai para um contêiner próprio, filho direto do <body> (fora de qualquer ancestral com overflow ou
@@ -109,6 +124,30 @@ document.addEventListener("DOMContentLoaded", function () {
     li.querySelector(":scope > .lab-toc-toggle").setAttribute("aria-expanded", String(open));
   }
   var last = null;
+  var heads = [];
+  function refreshHeads() {
+    heads = [];
+    toc.querySelectorAll("a[href^='#']").forEach(function (a) {
+      var id = a.getAttribute("href").slice(1);
+      try { id = decodeURIComponent(id); } catch (e) {}
+      var el = document.getElementById(id);
+      if (el) heads.push({ a: a, el: el });
+    });
+  }
+  function spy() {
+    var n = toc.querySelectorAll("a[href^='#']").length;
+    if (heads.length < n) refreshHeads();
+    if (!heads.length) return;
+    var cur = heads[0];
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].el.getBoundingClientRect().top <= 96) cur = heads[i];
+    }
+    toc.querySelectorAll("a.active").forEach(function (a) {
+      if (a !== cur.a) a.classList.remove("active");
+    });
+    cur.a.classList.add("active");
+    sync();
+  }
   function sync() {
     var act = toc.querySelector("a.active");
     subs.forEach(function (li) {
@@ -121,7 +160,8 @@ document.addEventListener("DOMContentLoaded", function () {
     }
     last = act;
   }
-  sync();
+  spy();
+  window.addEventListener("scroll", function () { requestAnimationFrame(spy); }, { passive: true });
   // plotly: redimensiona as figuras para a largura do corpo (e de novo quando a janela muda)
   function fitPlots() {
     if (!window.Plotly) return;
@@ -132,5 +172,15 @@ document.addEventListener("DOMContentLoaded", function () {
   window.addEventListener("load", function () { setTimeout(fitPlots, 300); });
   var rt; window.addEventListener("resize", function () { clearTimeout(rt); rt = setTimeout(fitPlots, 200); });
   new MutationObserver(sync).observe(toc, { subtree: true, attributes: true, attributeFilter: ["class"] });
-});
+}
+if (document.querySelector("#TOC")) labTocInit();
+else {
+  var labTocObs = new MutationObserver(function () {
+    if (document.querySelector("#TOC")) {
+      labTocObs.disconnect();
+      labTocInit();
+    }
+  });
+  labTocObs.observe(document.documentElement, { childList: true, subtree: true });
+}
 </script>
