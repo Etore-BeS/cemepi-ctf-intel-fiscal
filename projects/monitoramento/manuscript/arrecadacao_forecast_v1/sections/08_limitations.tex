@@ -2,31 +2,27 @@
 \label{sec:limitations}
 
 \begin{itemize}
-  \item The extract is the snapshot \texttt{extracao=2026-03}.
-        We do not score a later snapshot or a live update.
-  \item The monthly panel has 119 rows, and the monthly test block has 12 points.
-        A large model can overfit that sample.
-        Daily and weekly runs use shorter training budgets and row caps, stated in Section~\ref{sec:method}.
-        E1, E3, and E4 are therefore not unrestricted training runs.
-  \item Ranking A includes zeros.
-        MAPE drops near-zero outcomes.
-        sMAPE on $y \gt 0$ scores only positive days.
-        Neither of those scores is the official rank.
-  \item Grain B drops weekends only.
-        Brazilian national holidays remain, and no model receives a holiday feature.
-        Grain B has its own split.
-        It is not grain A rescored after dropping weekends.
-  \item The skill score uses Murphy's ratio on sMAPE, not on squared error~\citep{murphy1988skill}.
+  \item The monthly test block has 12 points.
+        The weekly test block has 13 points.
+        A model confidence set on those blocks is wide.
+  \item Each grain has one test window.
+        The study does not use a rolling origin.
+  \item Grain B keeps holidays and has no holiday indicator.
+  \item E1 did not run.
+        The TEM vendor tree is absent.
+        The tables do not contain an E1 score.
+  \item sMAPE on a series with many zero days is hard to read as an operational error.
+        The rank still uses every day in grain A, including zeros.
+  \item The skill score uses the Murphy ratio on sMAPE~\citep{murphy1988skill}.
         It compares a model only with the seasonal naive of the same grain.
-        On grain B that naive is weak, so a positive skill score is a weak claim.
-  \item E1 is selective TEM, including the MLP energy model if the TimesNet run does not finish.
-        E2 is the disagreement proxy.
-        The rank tables do not report TEM coverage.
-  \item TimesFM, Prophet, and SARIMAX depend on outside code.
-        TimesFM also depends on downloaded weights.
-        If a fit does not finish, that model is omitted for the grain.
-        It is not replaced by another forecast.
-        The fit status is stored with the files in Section~\ref{sec:repro}.
-  \item Each grain has one final test window.
-        We do not estimate the sampling variability of the reported sMAPE.
+  \item A low sMAPE can still miss the peaks.
+        On the monthly total, boosting leads and the month-to-month order is weak.
+        Read the scatter next to the rank.
+  \item The HLN test compares the leader with the seasonal naive only.
+        It does not compare the leader with the second-best model.
+  \item The HLN test in this paper uses horizon 1.
+        Some models forecast the whole test block from one origin.
+        Their errors are dependent.
+        The p-value is a paired comparison of the stored losses, not a multi-step correction with \(h\) equal to the test length.
+        That correction is not positive when \(h\) equals the test length.
 \end{itemize}
