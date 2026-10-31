@@ -1,0 +1,7 @@
+attribute,n_firms,n_levels,chi2,dof,p_value,cramers_v,note
+CNAE section,195759,20,2067.550753326762,19,0.0,0.10277020449411307,Dominant section inside the dominant segment.
+cadastral status,195759,6,12345.388185922213,5,0.0,0.25112590002865426,Code of the establishment that holds the stock.
+firm size,195759,4,6344.428712513385,3,0.0,0.1800260663409845,Receita Federal size code.
+UF,195759,20,4125.50245530518,19,0.0,0.1451702270393468,State of the establishment that holds the stock.
+repeated enrollment,207687,2,13822.955223214893,1,0.0,0.25798579512435776,"Two or more CDAs versus one, inside the segment."
+legal nature,195759,9,2719.1828998236015,8,0.0,0.1178578030523288,"Top 8 natures by firm count, plus other."
