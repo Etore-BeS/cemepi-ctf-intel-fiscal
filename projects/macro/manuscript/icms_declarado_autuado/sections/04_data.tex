@@ -1,0 +1,101 @@
+\section{Data and Methodology}\label{sec:data}
+
+\subsection{Sources and population}\label{sec:sources}
+
+The data are a frozen extract of two PGE-SP tables.
+\texttt{DEBITO} holds monthly snapshots of enrolled certificates.
+\texttt{ARRECADACAO} holds GARE payments linked to the certificate.
+The cross-section is the December 2025 snapshot.
+Payments are those dated before 1~January 2026.
+No 2026 debt and no 2026 payment enter the results.
+The unit of the portfolio is the certificate.
+The firm is the eight-digit root of the CNPJ.
+No name, no individual tax number and no certificate identifier leaves the computation.
+Cells with one to four firms are left blank in the detailed activity files that sit behind the paper.
+
+The December 2025 extract of legal-entity \vat{} debt contains 2,325,277 certificates and \brl{}427.880 billion.
+The project's published laboratory page reports 2,325,280 certificates and the same stock at the published precision.
+The gap is three certificates and about \brl{}68,000.
+We use the extract.
+Inside it, declared debt is 2,257,189 certificates and \brl{}116.42 billion.
+Assessed debt is 59,542 certificates and \brl{}311.40 billion, of which the Simples Nacional assessments are 818 certificates and \brl{}0.145 billion, or 0.05~percent of assessed stock.
+Fecoep is 8,510 certificates and \brl{}0.048 billion.
+The GIA amendment is 36 certificates and \brl{}0.009 billion.
+Those two types stay out of every declared-versus-assessed comparison below.
+
+We do not use changes between monthly snapshots.
+Some months in the source archive are missing or partial, including December 2018 and October to December 2020, and the December 2024 snapshot is partial.
+A panel of stocks would need a separate construction.
+December 2025 in the extract is one row per certificate.
+The results use that snapshot and the dates of payments.
+
+Firm attributes come from the Receita Federal CNPJ registry already linked to these debtors, matched on the 14-character CNPJ of the establishment.
+More than 99~percent of certificates in each segment match an establishment.
+Activity is the principal CNAE of that establishment, placed on the official CNAE-Subclasses 2.3 hierarchy of section, division, group, class and subclass \citep{ibge2019cnae}.
+The hierarchy file contains 1,331 subclasses.
+Every debtor subclass is in that file except the placeholder code 8888888, which covers 808 certificates and is not an activity.
+Section labels in the figures are short English renderings.
+Division names in the table follow the official Portuguese titles, shortened in English only where the column must fit.
+IBGE does not publish an official English list of the divisions.
+Size, legal form, registry status, state and municipality are taken from the same register.
+Opening date is the establishment's start of activity.
+
+The register is observed after the debts and after the payments.
+Status, activity, size and age describe the firm as the register stands.
+They are not traits measured before the outcome, and a firm may be closed or unfit because of the debt.
+We report them as descriptors and we do not give them a causal reading.
+
+\subsection{Measures}\label{sec:measures}
+
+Stock is the certificate's value net of legal fees in the December 2025 snapshot.
+The payment rate is the share of certificates with any GARE payment dated before 1~January 2026.
+Recovery is the sum of those payments divided by the December 2025 stock.
+It is reais collected per real of stock still enrolled.
+It is not an annual hazard, and it is not payments divided by the sum of past stocks.
+A large assessed balance can show some payment and still a very small recovery.
+Debt age is the number of years from the enrolment date to 31~December 2025.
+Enrolment dates before 1960 are treated as missing.
+In this snapshot the age comparison does not lose certificates to that rule.
+Firm age is the number of years from the opening date to the same day, for establishment matches, with opening dates before 1900 treated as missing.
+Where we report a firm-level age, it is the stock-weighted mean of the firm's certificates in that segment.
+
+Concentration is computed on certificates with a positive value.
+The Lorenz curve orders certificates from the smallest value to the largest and plots the cumulative share of stock against the cumulative share of certificates \citep{lorenz1905}.
+The Gini coefficient is one minus twice the area under that curve.
+The top 1~percent is the largest $\lceil 0.01 \times N \rceil$ positive-value certificates.
+We use that round cut for two reasons, which Section~\ref{sec:conc} reports rather than assumes.
+Statistically, the pooled Lorenz curve is flat over most of the distribution and rises in the extreme tail, so 1~percent is a visible break and not an interior point on a smooth curve.
+Administratively, the resulting list is a set of certificates the attorney office can review as a specialised book, and it is the set in which the stock sits.
+The same percentage is not equally informative inside each segment.
+We therefore report the cut for the pooled book and again inside declared debt and inside assessed debt.
+Nothing in the cutoff is a claim that working those certificates would recover the stock.
+
+A firm has repeated enrolments when it holds two or more certificates in the segment.
+We also record firms that hold at least one certificate in each segment.
+The two counts answer different questions.
+The first is about the book inside one door.
+The second is about overlap.
+
+\subsection{Comparisons}\label{sec:comparisons}
+
+For a continuous outcome we use the Mann--Whitney test and the rank-biserial correlation \citep{mann1947,kerby2014}.
+The correlation is $2U/(n_1 n_2) - 1$, where $U$ is the Mann--Whitney statistic for the assessed sample.
+A positive value means that a random assessed unit tends to exceed a random declared unit.
+We compute it for the certificate and for the firm.
+The certificate-level statistic describes the portfolio.
+Certificates of the same firm are not independent, so the firm-level correlation is the one we use when the claim is about debtors.
+The samples are large.
+Every $p$-value from these tests is zero at floating-point precision.
+We report the effect size.
+
+For a categorical attribute we use a chi-square test on firm counts and Cram\'er's $V$ \citep{cramer1946},
+\begin{equation}
+V = \sqrt{\chi^2 / \big(n \cdot (\min(r, c) - 1)\big)},
+\label{eq:v}
+\end{equation}
+with $r$ and $c$ the dimensions of the table.
+Each firm is placed in the segment that holds more of its stock, so a firm is one row.
+The repeated-enrolment test is the exception: a firm is counted once in each segment in which it has a certificate, because the question is the shape of each book.
+Levels that would leave a cell below five firms are pooled before the test.
+$V$ near 0.1 is a small association and $V$ near 0.3 is a moderate one.
+We use those conventional markers only as a reading aid.

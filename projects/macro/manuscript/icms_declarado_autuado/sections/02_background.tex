@@ -1,0 +1,34 @@
+\section{Institutional Background}\label{sec:background}
+
+ICMS (\emph{Imposto sobre Circula\c{c}\~ao de Mercadorias e Servi\c{c}os}) is levied by each Brazilian state on the circulation of goods and on electricity, interstate and intermunicipal transport, and communication.
+Tax paid on inputs generates a credit against tax due on later transactions.
+The OECD classification places general taxes on value added under heading 5111, whatever the stage at which they are charged \citep{oecd2026guide}.
+An OECD working paper describes ICMS as a state-level VAT \citep{arnold2025}, and published studies treat it as Brazil's state value-added tax \citep{gomes2024,cabello2020}.
+We use \vat{} for that object.
+Labels that come from the administrative file keep their Portuguese names, because those names are the values in the data.
+
+The European VAT is the usual international benchmark for this kind of tax.
+It is an invoice-credit tax, and the chain of invoices is a source of third-party information \citep{keen2006}.
+ICMS shares that logic and is classified with VAT.
+It is not an EU tax, and the states set important parts of the base and the rates.
+Those differences are context.
+They are not the result we report.
+The evidence below is the enrolled stock in one state.
+
+The path from the tax to the enrolled certificate has two doors and then a common collection stage.
+In the ordinary door, the firm reports the tax and does not pay it.
+In the assessment door, the administration fixes the tax in an infringement notice after a review of the firm's records.
+If the amount is not settled in the administrative phase, the state enrols it in the \emph{d\'ivida ativa}.
+Each enrolled debt receives a certificate, the \emph{certid\~ao de d\'ivida ativa} (CDA).
+The state attorney office, PGE-SP, collects the certificate, in court or out of it.
+Payment is recorded on the state payment slip (GARE) linked to the certificate.
+The state can also allow an enrolled debt to be paid in instalments.
+We do not study those arrangements.
+The file we use records payments on the certificate, not the terms of a programme.
+
+In the source file, and in the classification used by the attorney office, the two doors have stable names.
+Declared debt is the type \texttt{ICMS Declarado}: tax the taxpayer reported and did not pay.
+Assessed debt is \texttt{ICMS Autua\c{c}\~ao} together with \texttt{ICMS Autua\c{c}\~ao Simples Nacional}: tax established by an assessment, including assessments of firms in the simplified federal regime.
+Two further ICMS types, Fecoep and a GIA amendment, are enrolled as well.
+They are small, and we leave them out of the segment comparisons.
+The comparison is between declared debt and assessed debt.
