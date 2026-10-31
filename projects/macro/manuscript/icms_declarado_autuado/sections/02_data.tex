@@ -6,7 +6,7 @@ The unit of analysis is the CDA; at debtor level, the root of the firm's tax num
 No name, individual tax number or individual CDA appears in the text, tables or figures.
 
 \paragraph{Sources.}
-A frozen extraction (March 2026) of two PGE-SP tables: \texttt{DEBITO}, monthly snapshots of the enrolled portfolio, and \texttt{ARRECADACAO}, payments through the state payment slip (GARE) linked to the CDA.
+A frozen extraction of two PGE-SP tables: \texttt{DEBITO}, monthly snapshots of the enrolled portfolio, and \texttt{ARRECADACAO}, payments through the state payment slip (GARE) linked to the CDA.
 No 2026 debt or payment enters: the cross-section is the December 2025 snapshot and payments stop on 31 December 2025.
 The panel is CDA $\times$ year, 2016--2025, legal entities only; a year's stock is the CDA's value in the last snapshot of that year in which it appears.
 
@@ -26,7 +26,7 @@ Appendix~\ref{app:quality} lists every flagged snapshot.
 Missing and partial snapshots change which snapshot defines a year's stock, which matters for the annual series in Section~\ref{sec:res-series}.
 
 \paragraph{Debtor firm register.}
-Registration status and main economic activity (CNAE 2.0) come from the CEMEPI enrichment of the Federal Revenue (RFB) open CNPJ register, March 2026 release.
+Registration status and main economic activity (CNAE 2.0) come from the CEMEPI enrichment of the Receita Federal CNPJ registry.
 The join is on the 14-character CNPJ of the debtor establishment; \firmCovCdaDec\% of the December 2025 legal-entity CDAs and \firmCovStockDec\% of their stock match at establishment level (\firmNCnpjDec{} distinct CNPJs).
 The register is dated after the outcomes, so status and activity describe the debtor and are never read as causes.
 Activity is reported at CNAE division level (2 digits), with English names translated literally from the official Portuguese names \citep{ibge2015cnae}; IBGE publishes no official English table of the divisions.
