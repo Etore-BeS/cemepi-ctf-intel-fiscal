@@ -119,10 +119,9 @@ Inside Declared alone, the largest 1% (22,544 CDAs) hold 39.5% of declared stock
 Inside Assessed alone, the largest 1% (593 CDAs) hold 39.9% of assessed stock. The Gini is 0.863.
 The pooled 75% appears because assessed values are much larger and assessed is 72.8% of the two-segment stock in 2.6% of the CDAs.
 
-## Repeated enrollments
+## Repeated enrolments
 
-The December 2025 book does not show a group of about 2,800 debtors with repeated enrollments.
-A firm with two or more CDAs in a segment is the repeated case used here.
+A firm with two or more CDAs in a segment is the repeated case.
 
 Assessed has 9,565 such firms. They are 31.9% of assessed firms and hold 82.3% of assessed stock.
 Declared has 119,833 such firms. They are 67.4% of declared firms and hold 99.2% of declared stock.

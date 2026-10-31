@@ -47,6 +47,9 @@ LAB_PAGES = [
      "05_parte_b3", "GEO-01"),
     ("dados/2026-10-27_cnpj_firmas", "3.14", "Registration status and economic activity (CNAE) of debtor firms × origin and recovery",
      "lab-cnpj-firmas", "firm", "05_parte_b3", "LAB-CNPJ"),
+    ("eda/2026-10-31_cnae_declared_assessed", "3.15",
+     "Declared versus assessed VAT debt by CNAE, age, status and concentration",
+     "lab-cnae-seg", "cseg", "05_parte_b3", "CNAE-SEG"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
     ("eda/2026-10-23_eda_completo", "8", "Appendix: the full EDA notebook (faithful conversion, window ending in 2025)",
@@ -466,7 +469,7 @@ GUIDE_MERMAID = """```{=html}
 <a class="cg-box" href="#s-0">0 · Computational environment</a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-1">1 · Data<small>1.8 Lab window · 1.9 Firm registry enrichment (RFB)</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-a">2 · The portfolio across tax types<small>2.8 Concentration by tax type and by debtor</small></a><div class="cg-arrow"></div>
-<a class="cg-box" href="#s-part-b">3 · The VAT (ICMS) portfolio<small>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-b">3 · The VAT (ICMS) portfolio<small>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE · 3.15 Declared vs assessed by CNAE</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-c">4 · Statistical properties</a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-d">5 · Macroeconomic conditions<small>5.8 Overnight Selic and correlation check</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-e">6 · Discussion</a><div class="cg-arrow"></div>
@@ -487,7 +490,7 @@ def guide(state: dict) -> str:
                               "by tax type and by debtor."),
             ("3", "s-part-b", "VAT (ICMS): evolution, debt types, declared × assessed, concentration, top CDAs, age, "
                               "recovery, payments, judicial filing, seasonality, programmes; **3.12** K-means, **3.13** "
-                              "municipalities, **3.14** firm status and CNAE."),
+                              "municipalities, **3.14** firm status and CNAE, **3.15** declared versus assessed by CNAE."),
             ("4", "s-part-c", "Distribution, correlation choice, stationarity, persistence."),
             ("5", "s-part-d", "Monthly, quarterly, annual and panel correlations, models; **5.8** overnight Selic and the "
                               "correlation check."),
@@ -504,7 +507,7 @@ classification of taxes records it under value added taxes (heading 5111). It is
 names of the raw debt types in the data (e.g. *ICMS Declarado*, *ICMS Autuação*) are kept as they appear in the database.
 
 **How the page is organised.** One numbering scheme for the whole page (1, 1.1, 1.1.1, …). Sections 0 to 7 follow the
-paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 2.8, 3.12–3.14, 5.8), each opened by a
+paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 2.8, 3.12–3.15, 5.8), each opened by a
 **New in the lab** box; section 8 is an appendix. The diagram shows the reading order; click a box to jump to its section (dashed = appendix).
 
 {GUIDE_MERMAID}
@@ -560,6 +563,7 @@ that section.
 12. **All lab analyses on this page, inside their sections (CTF-03; 28 Oct 2026).** The entries of `lab/eda/` and
     `lab/dados/` are complete here: [1.9 Firm registry enrichment](#lab-cnpj-rfb) · [2.8 Concentration](#lab-conc) ·
     [3.12 K-means](#lab-km) · [3.13 Municipalities](#lab-cnpj-geo) · [3.14 Firm status and CNAE](#lab-cnpj-firmas) ·
+    [3.15 Declared versus assessed by CNAE](#lab-cnae-seg) ·
     [5.8 Overnight Selic and correlation check](#lab-macro) · [8 Full EDA notebook](#lab-edac).
 13. **Charts aggregated before publication (DADOS-14).** No figure carries one value per CDA or per debtor: histograms
     become bars with the count per bin (3.5.4, 3.5.5, 3.5.16, 3.8.5 in BRL, 3.9.3), the boxes of 3.2.3 are drawn from
@@ -575,6 +579,10 @@ that section.
     than 5 CNPJs are pooled whole. [3.14](#lab-cnpj-firmas).
 16. **The whole lab in English, one numbering scheme (28 Oct 2026).** Paper sections A to E are now 2 to 6; the lab
     analyses moved into their sections; VAT (ICMS) naming as in the papers. [Reading guide](#guia).
+17. **Declared versus assessed debt by CNAE 2.3 (CNAE-SEG, 31 Oct 2026).** Size, concentration, payment and recovery
+    of the two segments, with CNAE section and division, debt age, firm age, registry status, size, state and
+    repeated enrolment. The largest 1 percent of certificates holds 75.8 percent of the pooled stock.
+    [3.15](#lab-cnae-seg).
 :::
 
 ::: {{.callout-warning title="DEBITO quality (flagged only, nothing corrected)"}}
