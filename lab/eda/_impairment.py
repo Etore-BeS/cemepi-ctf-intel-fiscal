@@ -3842,9 +3842,7 @@ def _merge_sparse_payers(
                 {
                     "variable": column,
                     "category": str(name),
-                    "n": int(counts.loc[name, "n"]),
-                    "n_payers": int(counts.loc[name, "n_payers"]),
-                    "left_out": False,
+                    "reason": "<10 payers in sample",
                 }
             )
         if sparse:
@@ -3853,19 +3851,20 @@ def _merge_sparse_payers(
         n_pool = int(pool.sum())
         n_pay = int(out.loc[pool, "paid_flag"].sum()) if n_pool else 0
         if n_pool and n_pay < MIN_PAYERS:
-            merged.append(
-                {
-                    "variable": column,
-                    "category": PAYER_OTHER,
-                    "n": n_pool,
-                    "n_payers": n_pay,
-                    "left_out": True,
-                }
-            )
             out.loc[pool, column] = None
     keep = [column for column in PAYER_COLUMNS if column in out.columns]
     out = out.dropna(subset=keep).reset_index(drop=True)
     return out, merged
+
+
+def payer_merge_table(merges: list[dict[str, Any]]) -> pl.DataFrame:
+    """Categories merged before the logit. Names and the reason only. No counts."""
+    columns = ("variable", "category", "reason")
+    if not merges:
+        return pl.DataFrame(schema={name: pl.Utf8 for name in columns})
+    return pl.DataFrame(
+        [{name: str(item[name]) for name in columns} for item in merges]
+    ).select(list(columns))
 
 
 def nested_formulas(frame: pd.DataFrame) -> list[tuple[str, str]]:
@@ -4150,10 +4149,8 @@ def fit_payment_models(
     started = time.perf_counter()
     frame, notes = estimation_frame(panel, firms, instalments, protests, params)
     # The micro frame stays inside this function. Only the coefficient tables leave.
-    before = len(frame)
     frame, merges = _merge_sparse_payers(frame)
     notes["payer_merges"] = merges
-    notes["n_dropped_sparse_payers"] = before - len(frame)
     notes["n_estimated"] = len(frame)
     if frame.empty:
         raise RuntimeError(

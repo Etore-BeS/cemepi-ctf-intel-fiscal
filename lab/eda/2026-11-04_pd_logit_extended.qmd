@@ -74,23 +74,13 @@ print(f"Rows dropped because a pooled category stayed under the floor: {notes['n
 print(f"Rows in every nested model: {notes['n_estimated']}.")
 print(f"CNAE values longer than the division, truncated: {notes['n_cnae_truncated']}.")
 print(f"Categories pooled before the fit: {notes['n_cells_suppressed']}.")
-print(f"Rows left out because a merged 'other' still had fewer than 10 payers: {notes['n_dropped_sparse_payers']}.")
-merges = notes["payer_merges"]
-if merges:
-    print("Categories with fewer than 10 payers:")
-    for item in merges:
-        if item["left_out"]:
-            print(
-                f"  {item['variable']} 'other' still had {item['n_payers']} payers "
-                f"in {item['n']} rows, so those rows were left out of the fit."
-            )
-        else:
-            print(
-                f"  {item['variable']} {item['category']}: {item['n']} rows, "
-                f"{item['n_payers']} payers, merged into other."
-            )
-else:
+merged_categories = I.payer_merge_table(notes["payer_merges"])
+if merged_categories.height == 0:
     print("No origin, status or CNAE category had fewer than 10 payers.")
+else:
+    print("Categories merged into other before the fit:")
+    from IPython.display import display
+    display(I.publish(merged_categories))
 for _, fit_row in fit.iterrows():
     print(f"{fit_row['model']}: mean score norm {fit_row['score_norm']:.3e}.")
 print("The protest status is not a regressor. The protest variable is the date relative to the year.")

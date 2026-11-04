@@ -473,10 +473,18 @@ def test_a_zero_payer_category_is_merged_and_does_not_separate():
         if item["variable"] == "cnae_division" and item["category"] == "99"
     ]
     assert len(nowhere) == 1
-    assert nowhere[0]["n_payers"] == 0
-    assert nowhere[0]["n"] == 40
+    assert nowhere[0]["reason"] == "<10 payers in sample"
     assert len(cnae) == 1
-    assert cnae[0]["n_payers"] == 4
+    assert cnae[0]["reason"] == "<10 payers in sample"
+    shown = I.payer_merge_table(merges)
+    for column in shown.columns:
+        lowered = column.lower()
+        assert lowered not in {"n", "rows", "size"}
+        assert "count" not in lowered
+        assert "payer" not in lowered
+        assert not lowered.startswith("n_")
+    assert set(shown.columns) == {"variable", "category", "reason"}
+    assert set(shown["reason"].to_list()) == {"<10 payers in sample"}
     assert (merged["origin"] == "nowhere").sum() == 0
     assert (merged["cnae_division"] == "99").sum() == 0
     coef, fit, solver = I.fit_nested(merged, I.PgeParams(cluster=False))
