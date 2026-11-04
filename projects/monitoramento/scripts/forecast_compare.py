@@ -4,7 +4,7 @@ Loss is the summand of sMAPE, so the tests use the same score as the rank.
 The HLN factor follows Harvey, Leybourne and Newbold (1997) for horizon h=1:
 the statistic is compared with a Student-t distribution on n-1 degrees of freedom.
 The Wilcoxon procedure is specified in
-lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd. This module follows that page.
+lab/eda/2026-11-04_benchmark_wilcoxon.qmd (laboratory section 4.5, anchor lab-ben-wsr).
 The model confidence set follows Hansen, Lunde and Nason (2011): a range
 statistic, circular block bootstrap, and elimination until the set is not rejected.
 """

@@ -6,8 +6,7 @@ The rank is test sMAPE.
 Lower is better.
 The skill score is higher when the model beats the seasonal naive of that grain.
 The HLN column is the two-sided p-value of the leader against that naive.
-The Wilcoxon column is the two-sided signed-rank p-value of that same pair.
-Its reading is not filled in this draft.
+The signed-rank comparison of that pair is in laboratory Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
 The model confidence set uses level 0.10.
 
 \subsection{The lowest sMAPE is not the same model}
@@ -28,8 +27,7 @@ E1 has no row.
   \caption{Lowest test sMAPE on each series and grain.
   Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\) against the seasonal naive of that grain.
   HLN \(p\) is the two-sided Diebold-Mariano test of that leader against the same naive, with the small-sample correction.
-  Wilcoxon \(p\) is the two-sided signed-rank test of that same pair.
-  The specification is the lab page cited in Section~\ref{sec:tests}.
+  The signed-rank test of that same pair, and the pairs among the other models, are in laboratory Section 4.5.
   A p-value below 0.05 is discussed in the text.
   It is not a second rank.}
   \label{tab:best}
@@ -110,7 +108,7 @@ Prophet and the perceptron sit near the top of Declared and not at the top of th
   \input{tables/tab_monthly_top8}
 \end{table}
 
-\subsection{Grain A and grain B}
+\subsection{Daily grains and the week}
 \label{sec:ablation}
 
 Table~\ref{tab:ablation} puts the two daily targets side by side.
@@ -146,9 +144,7 @@ The positive-day score on A is not the official rank.
 Scoring only days with a slip answers a different question.
 Ranking A is the error on the calendar, zeros included.
 
-\subsection{Weekly series}
 \label{sec:weekly}
-
 Ridge leads the weekly total at sMAPE 41.00, and least squares is 41.41.
 Ridge leads weekly Declared at 27.48, and least squares is 27.89.
 Least squares leads weekly Assessed at 52.50, with kernel ridge at 53.80 and boosting at 54.01.
@@ -265,6 +261,7 @@ Appendix~\ref{app:bars} draws the skill of every model.
 The zero line in those figures is the seasonal naive.
 
 The HLN column tests one pair: the sMAPE leader against the seasonal naive.
+Pairwise results are in the project laboratory, Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
 The loss is the summand inside sMAPE, so the test uses the same score as the rank.
 A small p-value means the paired losses are not compatible with equal accuracy.
 Five cells reject at the 5 percent level: the monthly total (0.022), monthly Declared (0.040), and all three Monday to Friday series (each below 0.001).
@@ -326,4 +323,4 @@ The set says which other models are still in the race.
 On these twelve cells, only Monday to Friday puts the seasonal naive out of the set and also rejects it in the paired test.
 Even there, the set still contains more than TimesFM.
 
-\discutir{Wilcoxon signed-rank on the same leader-versus-naive losses, from comparison.csv column wsr_p after the local render. State how many of the 12 cells agree with the Diebold-Mariano call at 5 percent. On Monday to Friday, where TimesFM has the largest skill, state whether the rank test agrees. Where the two tests disagree, including monthly cells with 12 points, state what that does and does not say about relative gains and absolute limits. Do not fill this paragraph before the column exists.}
+\discutir{Wilcoxon signed-rank on the same leader-versus-naive losses, from comparison.csv column wsr\_p after the local render. State how many of the 12 cells agree with the Diebold-Mariano call at 5 percent. On Monday to Friday, where TimesFM has the largest skill, state whether the rank test agrees. Where the two tests disagree, including monthly cells with 12 points, state what that does and does not say about relative gains and absolute limits. Do not fill this paragraph before the column exists.}

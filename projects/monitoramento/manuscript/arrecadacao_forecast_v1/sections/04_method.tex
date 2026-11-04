@@ -11,6 +11,8 @@ The same steps apply to every grain.
   \item Cut the series into three contiguous blocks: train, validation, and test (Table~\ref{tab:protocol}).
         The cut is a single final window.
         It is not a rolling origin.
+        One window keeps the comparison the same across models, series, and grains.
+        A rolling origin would measure stability, which is a different question (Section~\ref{sec:limitations}).
   \item Fit each candidate on the train block.
         Choose hyperparameters and thresholds by sMAPE on the validation block.
   \item When the model can be refit, refit the chosen setting on train and validation together.
@@ -221,7 +223,7 @@ They also do not mean the model beat a lag-1 forecast.
 \label{sec:m0m9}
 
 Table~\ref{tab:ladder} names the fourteen forecasts.
-The paragraphs below state what each one predicts, which inputs it uses, and how its settings are chosen.
+Appendix~\ref{app:models} states what each one predicts, which inputs it uses, and how its settings are chosen.
 
 \begin{table}[t]
   \caption{Models in the comparison.
@@ -251,258 +253,16 @@ The paragraphs below state what each one predicts, which inputs it uses, and how
   \end{tabular}
 \end{table}
 
-\paragraph{M0: copy a past value.}
-M0 predicts by copying one past observation~\citep{hyndman2021fpp3},
-\begin{equation}
-  \hat y_t = y_{t-k}.
-  \label{eq:m0}
-\end{equation}
-No coefficient is estimated.
-We report $k = 1$ and the seasonal lag in Table~\ref{tab:protocol}: $k \in \{1,12\}$ monthly, $\{1,7,365\}$ on grain A, $\{1,5\}$ on grain B, and $\{1,52\}$ weekly.
-The seasonal copy is $A_{\mathrm{ref}}$ in~\eqref{eq:ss}.
-
-\paragraph{M1: least squares and ridge.}
-Let $x_t$ be the tabular lags in Section~\ref{sec:data}.
-The point forecast is
-\begin{equation}
-  \hat y_t = x_t^{\top}\beta.
-  \label{eq:m1}
-\end{equation}
-Least squares sets $\alpha = 0$ in the ridge objective~\citep{hoerl1970ridge}
-\begin{equation}
-  \hat\beta_{\alpha}
-  = \arg\min_{\beta}
-    \|y - X\beta\|_2^2 + \alpha\|\beta\|_2^2,
-  \qquad
-  \alpha \in \{0.1, 1, 10\}.
-  \label{eq:ridge}
-\end{equation}
-Validation sMAPE chooses $\alpha$.
-Both models then forecast the test block one step at a time.
-
-\paragraph{M2: SARIMAX.}
-M2 is a seasonal ARIMA on the target alone.
-No extra regressor is passed in~\citep{box1970tsa,hyndman2021fpp3}.
-With lag operator $L$ and seasonal period $s$,
-\begin{equation}
-  \phi_p(L)\,\Phi_P(L^{s})\,(1-L)^{d}\,(1-L^{s})^{D}\, y_t
-  = \theta_q(L)\,\Theta_Q(L^{s})\,\varepsilon_t.
-  \label{eq:sarimax}
-\end{equation}
-The period is $s = 12$ monthly, $s = 7$ on grain A, $s = 5$ on grain B, and $s = 4$ weekly.
-The weekly skill reference remains lag 52, not this period of 4.
-A short grid of orders $(p,d,q)\times(P,D,Q)_s$ is scored by AIC on the train block.
-AIC is the Akaike information criterion.
-The chosen order is refit on train plus validation and forecasts the whole test horizon.
-
-\paragraph{M3: histogram gradient boosting.}
-M3 uses the same $x_t$ as M1.
-The prediction is an additive expansion of trees~\citep{friedman2001greedy},
-\begin{equation}
-  F_M(x) = \sum_{m=1}^{M} \nu\, h_m(x),
-  \label{eq:gbm}
-\end{equation}
-where $h_m$ is a tree fit to the negative gradient of squared error and $\nu$ is the learning rate.
-Splits are made on histogram bins.
-Each fit may stop early, using 15\% of its current training rows as an internal check.
-Validation sMAPE chooses $M$, $\nu$, and the tree depth.
-The chosen booster then walks one step at a time through the test block.
-
-\paragraph{M4: Prophet.}
-Prophet adds a piecewise linear trend $g(t)$ to a Fourier seasonality $s(t)$~\citep{taylor2018prophet},
-\begin{equation}
-  y(t) = g(t) + s(t) + \varepsilon_t.
-  \label{eq:prophet}
-\end{equation}
-The published holiday term is omitted.
-No holiday calendar is passed in, including on grain B.
-Monthly and weekly fits use a yearly cycle.
-Daily fits use a weekly cycle and a yearly cycle.
-On the monthly panel, validation sMAPE chooses among changepoint prior scales $\{0.05, 0.5\}$ and seasonality prior scales $\{1, 10\}$.
-Daily and weekly fits use the single pair $(0.5, 10)$.
-The chosen model is refit on train plus validation and forecasts the whole test horizon.
-
-\paragraph{M5: multilayer perceptron.}
-M5 maps a window of past target values to the next value~\citep{goodfellow2016dl}.
-Let $z_t = (y_{t-L},\ldots,y_{t-1})$ and let $\tilde z_t$ be $z_t$ after a scaler fit on the train block only.
-With ReLU $\sigma$ and two hidden layers,
-\begin{equation}
-  \hat y_t
-  = w_3^{\top}\sigma\!\left(W_2\,\sigma(W_1\tilde z_t + b_1) + b_2\right) + b_3.
-  \label{eq:mlp}
-\end{equation}
-Training minimizes squared error and stops if validation squared error stops falling.
-We search widths $(32,16)$ and $(64,32)$, step sizes $10^{-3}$ and $3\times 10^{-4}$, and lags $L \in \{6,12\}$ monthly, $\{8,12\}$ weekly, or $\{14,28\}$ daily.
-Validation sMAPE, after undoing the scaling, chooses the setting.
-We refit on train plus validation and forecast the test block one step at a time with observed lags.
-This is a lag-window MLP.
-It is not the N-BEATS basis-expansion model.
-
-\paragraph{M6: adaptive random forest.}
-M6 predicts the tabular row $x_t$ by an average of regression trees,
-\begin{equation}
-  \hat y_t = \frac{1}{M}\sum_{m=1}^{M} h_m(x_t).
-  \label{eq:arf}
-\end{equation}
-Trees can be replaced when their error changes~\citep{gomes2017arf}.
-The cited paper is about classification.
-We use the regression form of that ensemble.
-The forest first learns the history before the forecast origin.
-It then predicts the next row and updates on the revealed outcome.
-Validation sMAPE chooses the number of trees and the feature subsample.
-
-\paragraph{M7: Gaussian process.}
-M7 places a Gaussian process prior on a latent function of the tabular covariates~\citep{rasmussen2006gp},
-\begin{equation}
-  f \sim \mathcal{GP}(0, k),
-  \qquad
-  y_i = f(x_i) + \varepsilon_i,
-  \qquad
-  \varepsilon_i \sim \mathcal{N}(0, \alpha).
-  \label{eq:gp}
-\end{equation}
-The forecast we rank is the posterior mean at a new row $x_{\star}$,
-\begin{equation}
-  \hat y_{\star}
-  = k(x_{\star}, X)\,
-    \bigl(K(X,X) + \alpha I\bigr)^{-1} y.
-  \label{eq:gp-mean}
-\end{equation}
-On the monthly panel, validation sMAPE chooses among a radial-basis kernel, a Mat\'ern kernel, and a rational-quadratic kernel, each with $\alpha \in \{10^{-2}, 10^{-1}\}$.
-Daily fits use a radial-basis kernel and at most 200 training rows, because this inverse grows with the cube of the sample size.
-A fit with no finite forecast is omitted.
-
-\paragraph{M8: kernel ridge.}
-M8 solves the ridge problem in the feature space of a kernel $k$, on the same columns as M1, after scaling on the train block~\citep{murphy2012ml}.
-The dual forecast is
-\begin{equation}
-  \hat y(x) = \sum_{i=1}^{n} a_i\, k(x, x_i),
-  \qquad
-  (K + \lambda I)\, a = y.
-  \label{eq:krr}
-\end{equation}
-The kernel is radial basis or Laplacian.
-Validation sMAPE chooses that kernel, the penalty $\lambda$, and the kernel width.
-A test sMAPE of at least 180 removes that fit from the rank.
-
-\paragraph{M9: TimesFM 3.0.}
-TimesFM is a pretrained forecasting model~\citep{das2024timesfm}.
-We load the public TimesFM weights and do not update them~\citep{das2024timesfm}.
-If $T$ is the last time in the validation block and $H$ is the test length,
-\begin{equation}
-  (\hat y_{T+1},\ldots,\hat y_{T+H})
-  = f_{\theta}(y_1,\ldots,y_T),
-  \label{eq:timesfm}
-\end{equation}
-with $\theta$ held fixed.
-We rank the model's mean forecast.
-If the weights cannot be loaded, that grain has no M9 row.
-We do not substitute another model.
-
-\subsection{Stage 2 models}
+\subsection{Stage 2 rules}
 \label{sec:energy}
 
-Stage~2 comes after Stage~1.
-It asks two further questions.
-Does an energy threshold lower test sMAPE relative to the seasonal naive?
-Does a simpler switch, with no energy, do so?
-E2 reuses Stage~1 boosting and seasonal-naive forecasts.
-Only E1 is TEM.
-
-\paragraph{E1: selective TEM.}
-E1 assigns an energy $E_{\theta}(x, y)$ to a context $x$ and a candidate value $y$~\citep{brusokas2025tem}.
-The implied weight on that candidate is
-\begin{equation}
-  p_{\theta}(y \mid x) \propto \exp\bigl(-E_{\theta}(x, y)\bigr).
-  \label{eq:ebm}
-\end{equation}
-A lower energy means a higher weight.
-The backbone is TimesNet~\citep{wu2023timesnet}, trained with the published TEM code on the splits in Table~\ref{tab:protocol}.
-It sees 12 past months, with a 6-month decoder overlap, or 28 past days, with a 14-day overlap, and it predicts one step.
-The monthly run uses about 15 forecast epochs and 10 energy epochs.
-Daily runs are capped at about 3 epochs of each.
-If TimesNet does not finish, we use the published MLP energy model.
-That fallback is still TEM.
-Candidates are the seasonal naive, the boosting forecast, and the TimesNet forecast when it exists.
-$\tau$ is the validation threshold with the lowest validation sMAPE.
-With $\mathcal{C}_t$ the candidate set and $k$ the seasonal lag,
-\begin{equation}
-  \hat y_t =
-  \begin{cases}
-    \arg\min_{c \in \mathcal{C}_t} E_{\theta}(x_t, \hat y_t^{(c)})
-      & \text{if }\min_{c} E_{\theta}(x_t, \hat y_t^{(c)}) \lt \tau, \\[4pt]
-    y_{t-k}
-      & \text{otherwise.}
-  \end{cases}
-  \label{eq:tem}
-\end{equation}
-The second line is abstention.
-Coverage is the share of test times that take the first line.
-The sMAPE tables do not report coverage.
-
-\paragraph{E2: disagreement proxy.}
-E2 predicts either the Stage~1 boosting forecast or the Stage~1 seasonal naive.
-It does not compute~\eqref{eq:ebm}.
-Those two Stage~1 forecasts must exist before E2 is evaluated.
-At each time let
-\begin{equation}
-  E_t = \bigl|\hat y_t^{\mathrm{boost}} - \hat y_t^{\mathrm{seas}}\bigr|.
-  \label{eq:proxy}
-\end{equation}
-$E_t$ is large when the two forecasts disagree.
-On the validation block we set $\tau$ to a quantile of $E_t$.
-We try the quantile levels $0.5, 0.6, 0.7, 0.8, 0.9$ and keep the level with the lowest validation sMAPE.
-The test rule is
-\begin{equation}
-  \hat y_t =
-  \begin{cases}
-    \hat y_t^{\mathrm{seas}} & \text{if } E_t \gt \tau, \\
-    \hat y_t^{\mathrm{boost}} & \text{otherwise.}
-  \end{cases}
-  \label{eq:proxy-rule}
-\end{equation}
-Disagreement above $\tau$ returns the seasonal naive.
-Disagreement at or below $\tau$ returns the boosting forecast.
-The name TEM is reserved for E1.
-
-\paragraph{E3: a small diffusion sampler.}
-E3 predicts the next scaled value by averaging reverse-diffusion samples~\citep{rasul2021timegrad}.
-A three-layer network $\epsilon_{\theta}$ reads a lag window, a noisy target, and a diffusion-time index.
-The training corruption at step $k$, and the loss, are
-\begin{equation}
-  y^{(k)} = \sqrt{\bar\alpha_k}\, y + \sqrt{1 - \bar\alpha_k}\,\epsilon,
-  \qquad
-  \mathcal{L}
-  = \bigl\|\epsilon_{\theta}(x, y^{(k)}, k) - \epsilon\bigr\|_2^2,
-  \label{eq:ddpm}
-\end{equation}
-with $\epsilon \sim \mathcal{N}(0,1)$.
-The point forecast is the mean of $S$ reverse trajectories, mapped back to the original scale.
-Monthly fits use lag 12, 20 steps, and $S = 8$.
-Daily fits use lag 28, 15 steps, $S = 4$, and a subset of the training windows.
-Weekly fits use lag 12, 15 steps, and $S = 4$.
-This is the denoising step of TimeGrad on one series.
-It is not the published multivariate TimeGrad model.
-
-\paragraph{E4: a small score sampler.}
-E4 predicts the next scaled value by averaging Langevin chains~\citep{song2019score}.
-At noise scale $\sigma = 0.5$, the network $s_{\theta}$ is trained so that, at a point corrupted by $\sigma\epsilon$,
-\begin{equation}
-  s_{\theta}(x, y + \sigma\epsilon) \approx -\epsilon / \sigma^{2}.
-  \label{eq:score-target}
-\end{equation}
-Sampling repeats
-\begin{equation}
-  y \leftarrow y + \eta\, s_{\theta}(x, y) + \sqrt{2\eta}\,\xi,
-  \qquad
-  \xi \sim \mathcal{N}(0,1),
-  \label{eq:langevin}
-\end{equation}
-with step $\eta = 0.05$.
-The point forecast is the mean of the chains, after undoing the scaling.
-Monthly fits use lag 12, 30 steps, and 6 chains.
-Daily and weekly fits use 20 steps and 4 chains, with the same lags as E3.
-The network is small and is trained only on this series.
+E1 is selective TEM.
+It scores a candidate forecast with an energy and can return the seasonal naive instead~\citep{brusokas2025tem}.
+E2 is not TEM.
+It returns boosting, or the seasonal naive, when those two forecasts disagree.
+This run has no E1 score.
+The vendor tree is not in this worktree.
+The energies and the thresholds are in Appendix~\ref{app:models}.
 
 \subsection{Tests after the rank}
 \label{sec:tests}
@@ -518,27 +278,17 @@ The corrected statistic is compared with a Student-$t$ distribution on $n-1$ deg
 The test is two-sided.
 A negative statistic means the best model has lower loss than the seasonal naive.
 
-The Wilcoxon signed-rank test uses those same per-period loss differentials~\citep{wilcoxon1945individual}.
-The specification is the lab page
-\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
-That page fixes the tie rule, the exact and normal nulls, and the multiple-test correction.
-This section cites that page.
-It does not redefine the procedure.
-
-The first signed-rank comparison is the best model against the seasonal naive of the same grain.
-That comparison is one test per cell.
-It is not adjusted for the number of cells.
-The second comparison tests every pair of models in the cell.
-The $p$-values of those pairs are adjusted inside the cell with the Benjamini--Hochberg procedure~\citep{benjamini1995controlling}.
-The lab uses the same procedure for its other screens (\path{lab/paper_eda/_prelude.py}, method \texttt{fdr\_bh}).
+As a rank-based complement to the Diebold-Mariano test, we apply the Wilcoxon signed-rank test~\citep{wilcoxon1945individual} to the same per-period sMAPE loss differentials on the test block.
+First, the best model is compared with the seasonal naive of the same grain, as in the Diebold-Mariano test.
+Second, every pair of models in a cell is compared, and the $p$-values within each cell are adjusted with the Benjamini--Hochberg procedure~\citep{benjamini1995fdr}.
+The same adjustment is the one in \path{lab/paper_eda/_prelude.py} (\texttt{fdr\_bh}).
 The test is two-sided.
-A negative median differential favours the series named first.
-The signed-rank test assumes independent differentials that are symmetric about the median.
-Forecast errors can be autocorrelated.
-The one-step Diebold-Mariano factor does not remove that dependence from the rank test.
-With 12 monthly points or 13 weekly points the rank test has low power.
-The rank test is a robustness check.
+It uses the exact null distribution when there are no ties and the normal approximation otherwise.
+It assumes that the differentials are independent and symmetric around their median.
+Forecast errors can be autocorrelated, and with 12 or 13 test points the rank test has low power.
+It is a robustness check.
 It does not replace the Diebold-Mariano test or the model confidence set.
+Pairwise results are in the project laboratory, Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
 
 The model confidence set uses level 0.10~\citep{hansen2011mcs}.
 The statistic is the largest $t$ of a model against the average loss of the other models.
@@ -559,10 +309,8 @@ The saved forecasts are under
 E1 calls the published TEM code.
 That vendor tree is not in this worktree, so E1 has no score.
 M9 uses the public weights \texttt{google/timesfm-3.0-pytorch}.
-The Wilcoxon procedure is specified in
-\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
-\path{projects/monitoramento/scripts/score_benchmark_tests.py} writes the Wilcoxon columns of \path{comparison.csv} and the pair rows in \path{pairwise_wilcoxon.csv}.
-\path{projects/monitoramento/scripts/make_segment_figures.py} writes the Wilcoxon column of \path{tables/tab_best.tex} and \path{tables/tab_wilcoxon_pairs.tex}.
-Those files are rebuilt from the saved forecasts.
-This draft does not contain a Wilcoxon $p$-value until that rebuild.
-Every other number in Section~\ref{sec:results} is read from the saved tables.
+The Wilcoxon display is laboratory Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+That page reads the committed comparison tables.
+It does not refit a model.
+The repository paths for the notebooks and the saved forecasts are above.
+Every number in Section~\ref{sec:results} that does not depend on the signed-rank test is read from those saved tables.

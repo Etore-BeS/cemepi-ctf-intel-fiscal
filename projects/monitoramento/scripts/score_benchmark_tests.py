@@ -3,7 +3,7 @@
 Reads ``results/<series>/<grain>/state.json``. Does not refit models.
 The loss is the sMAPE summand. The DM horizon is h=1.
 The Wilcoxon procedure is the lab page
-``lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd``.
+``lab/eda/2026-11-04_benchmark_wilcoxon.qmd`` (section 4.5, anchor ``lab-ben-wsr``).
 The leader-versus-naive signed-rank p-value is not adjusted.
 Every pair inside the cell is adjusted with Benjamini-Hochberg.
 The model confidence set uses alpha=0.10 and a circular block bootstrap.

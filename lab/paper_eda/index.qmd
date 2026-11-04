@@ -21658,6 +21658,211 @@ if (outputEl) {{
 :::
 
 
+<!-- lab: eda/2026-11-04_benchmark_wilcoxon -->
+
+### 4.5 Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN {#lab-ben-wsr}
+
+::: {.callout-tip appearance="simple" title="New in the lab (BEN-W): Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN"}
+The twelve forecast cells and, when the committed tables contain them, the Wilcoxon signed-rank p-values and the Benjamini-Hochberg pairwise screen. This page reads only those tables. Full content of the lab entry `lab/eda/2026-11-04_benchmark_wilcoxon.qmd`, assembled from its _freeze (nothing is executed here).
+:::
+
+**Status:** display for the VAT collection forecast manuscript. This page reads the committed comparison tables. It does not read saved forecasts, and it does not refit a model.
+
+**Anchor:** `#lab-ben-wsr` (section 4.5 of the single lab page).
+
+The manuscript cites this section. The rank stays test sMAPE. The signed-rank test is a robustness check beside the Diebold-Mariano test with the Harvey-Leybourne-Newbold correction. It does not replace that test or the model confidence set.
+
+#### 4.5.1 What is compared {#bw-what-is-compared}
+
+The loss is the per-period sMAPE summand. The differential is the loss of the first series minus the loss of the second. A negative median favours the first series.
+
+Two reports use that differential.
+
+1. **Leader against the seasonal naive.** One two-sided Wilcoxon signed-rank test per cell, on the same finite pairs as the Diebold-Mariano test. This p-value is not adjusted for the number of cells. In `comparison.csv` it is `wsr_p`, beside `dm_p`.
+2. **Every unordered pair in the cell.** The family is the cell. Adjusted p-values use `statsmodels.stats.multitest.multipletests(..., method="fdr_bh")`, the same call as `lab/paper_eda/_prelude.py`. The rows are in `pairwise_wilcoxon.csv` (`p_raw`, `p_bh`).
+
+The signed-rank call is `scipy.stats.wilcoxon(diff, zero_method="wilcox", alternative="two-sided", method="auto")`. All-zero differentials are a tie and do not raise. The code is `wilcoxon_paired` and `pairwise_wilcoxon` in `projects/monitoramento/scripts/forecast_compare.py`.
+
+The references are Wilcoxon (1945), DOI `10.2307/3001968`, and Benjamini and Hochberg (1995), DOI `10.1111/j.2517-6161.1995.tb02031.x`.
+
+#### 4.5.2 What the test assumes {#bw-what-the-test-assumes}
+
+The signed-rank test assumes independent differentials, symmetric about the median. Forecast errors can be autocorrelated. The Diebold-Mariano correction in this project is the one-step factor. That factor does not remove the dependence from the rank test. A month has 12 test points and a week has 13. Power is low on those grains.
+
+Two calls agree at 5 percent when both p-values are below 0.05 or both are not. Agreement is a call on the seasonal naive. It is not a claim that the leader beats every rival.
+
+#### 4.5.3 The twelve cells {#bw-the-twelve-cells}
+
+
+
+::: {#tbl-bw-cells .cell tbl-cap='Twelve cells from the committed comparison table. Wilcoxon columns appear when comparison.csv contains them. Agree at 5 percent means the Diebold-Mariano and Wilcoxon calls are on the same side of 0.05.' execution_count=2}
+
+::: {.cell-output .cell-output-display execution_count=2}
+```{=html}
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>Best</th>
+      <th>sMAPE</th>
+      <th>Seasonal naive sMAPE</th>
+      <th>Skill</th>
+      <th>HLN p</th>
+      <th>Wilcoxon p</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>M3_HGB_tuned</td>
+      <td>12.937331</td>
+      <td>26.546261</td>
+      <td>0.512650</td>
+      <td>2.246852e-02</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>W_M1_Ridge_a0.1</td>
+      <td>40.998135</td>
+      <td>47.378532</td>
+      <td>0.134669</td>
+      <td>6.384481e-01</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>BD_M9_TimesFM3</td>
+      <td>65.053599</td>
+      <td>107.209797</td>
+      <td>0.393212</td>
+      <td>1.209877e-09</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>D_M6_ARF_regressor</td>
+      <td>90.520926</td>
+      <td>106.414348</td>
+      <td>0.149354</td>
+      <td>7.169728e-01</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>M2_SARIMAX(0, 1, 2)x(0, 1, 1, 12)</td>
+      <td>6.791417</td>
+      <td>17.072029</td>
+      <td>0.602190</td>
+      <td>4.025017e-02</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td>W_M1_Ridge_a0.1</td>
+      <td>27.477845</td>
+      <td>33.500019</td>
+      <td>0.179766</td>
+      <td>2.463074e-01</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>6</th>
+      <td>BD_M9_TimesFM3</td>
+      <td>61.352148</td>
+      <td>102.458050</td>
+      <td>0.401197</td>
+      <td>2.146479e-08</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>7</th>
+      <td>D_M6_ARF_regressor</td>
+      <td>78.428920</td>
+      <td>100.726084</td>
+      <td>0.221364</td>
+      <td>6.876615e-02</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>8</th>
+      <td>M3_HGB_tuned</td>
+      <td>20.905146</td>
+      <td>43.787494</td>
+      <td>0.522577</td>
+      <td>7.709484e-02</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>9</th>
+      <td>W_M1_OLS</td>
+      <td>52.499464</td>
+      <td>60.989026</td>
+      <td>0.139198</td>
+      <td>5.895655e-01</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>10</th>
+      <td>BD_M9_TimesFM3</td>
+      <td>90.322339</td>
+      <td>121.226611</td>
+      <td>0.254930</td>
+      <td>1.321291e-05</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+    <tr>
+      <th>11</th>
+      <td>D_M9_TimesFM3</td>
+      <td>112.988330</td>
+      <td>125.721839</td>
+      <td>0.101283</td>
+      <td>4.366250e-01</td>
+      <td>not in the committed comparison.csv</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+```
+:::
+:::
+
+
+`comparison.csv` on this commit has the Diebold-Mariano columns. The columns `wsr_stat`, `wsr_p`, and `wsr_better` are written by `score_benchmark_tests.py` from the saved forecasts. This page does not create them. When they are absent, the Wilcoxon column above says so. It does not fill a p-value.
+
+#### 4.5.4 Pairs inside each cell {#bw-pairs-inside-each-cell}
+
+A pair counts as significant when `p_bh` is below 0.05. The heatmap is one cell at a time. The mark is the adjusted p-value. Darker is smaller. Read a cell against its own scale. Do not treat a dark cell as a new rank, and do not compare shades across cells.
+
+::: {#fig-bw-pairs .cell execution_count=3}
+
+::: {.cell-output .cell-output-stdout}
+```
+pairwise_wilcoxon.csv is not in the committed results. No pairwise count and no heatmap are shown.
+```
+:::
+:::
+
+
+#### 4.5.5 What this page does not conclude {#bw-what-this-page-does-not-conclude}
+
+A dark cell is not a published winner. A disagreement between the two tests on a month or a week is expected when the test block is short. The reading of those disagreements for the manuscript is left to the authors. This page does not state how many of the twelve cells agree, because that count is taken from `wsr_p` only after that column is in the committed table.
+
+
 <!-- parte: 07_parte_d -->
 
 ## 5. Macroeconomic conditions {#s-part-d}

@@ -52,17 +52,11 @@ Assessed is most of the enrolled balance and a smaller, more irregular part of t
 
 The seasonal naive is the reference forecast on every grain.
 Its skill score is zero by construction.
-On several grains it is inside the top three by test sMAPE.
-A replacement has to beat it on the series and the grain being published.
 
-E1 would return the lowest-energy candidate, or the seasonal naive if that energy is at least the validation threshold.
+E1 would return the lowest-energy candidate, or the seasonal naive when the energy is high.
 This run has no E1 score.
-The tables cannot say how often E1 would have abstained.
-
-E2 returns boosting, or the seasonal naive when those two forecasts disagree by more than a validation threshold.
-E2 does not have the lowest test sMAPE on any cell in Table~\ref{tab:best}.
-On the monthly total it is behind boosting used alone.
-The disagreement switch does not improve on boosting for these VAT series.
+E2 returns boosting, or the seasonal naive when the two forecasts disagree.
+E2 is not the lowest test sMAPE on any cell in Table~\ref{tab:best}.
 A sentence about E2 is not a sentence about E1.
 
 Figures~\ref{fig:pred-m}, \ref{fig:pred-b}, and \ref{fig:pred-w} plot the test block.

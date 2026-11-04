@@ -1,0 +1,154 @@
+---
+title: "Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN"
+description: "The twelve forecast cells and, when the committed tables contain them, the Wilcoxon signed-rank p-values and the Benjamini-Hochberg pairwise screen. This page reads only those tables."
+date: 2026-11-04
+date-format: "DD/MM/YYYY"
+jupyter: python3
+---
+
+**Status:** display for the VAT collection forecast manuscript. This page reads the committed comparison tables. It does not read saved forecasts, and it does not refit a model.
+
+**Anchor:** `#lab-ben-wsr` (section 4.5 of the single lab page).
+
+The manuscript cites this section. The rank stays test sMAPE. The signed-rank test is a robustness check beside the Diebold-Mariano test with the Harvey-Leybourne-Newbold correction. It does not replace that test or the model confidence set.
+
+## What is compared
+
+The loss is the per-period sMAPE summand. The differential is the loss of the first series minus the loss of the second. A negative median favours the first series.
+
+Two reports use that differential.
+
+1. **Leader against the seasonal naive.** One two-sided Wilcoxon signed-rank test per cell, on the same finite pairs as the Diebold-Mariano test. This p-value is not adjusted for the number of cells. In `comparison.csv` it is `wsr_p`, beside `dm_p`.
+2. **Every unordered pair in the cell.** The family is the cell. Adjusted p-values use `statsmodels.stats.multitest.multipletests(..., method="fdr_bh")`, the same call as `lab/paper_eda/_prelude.py`. The rows are in `pairwise_wilcoxon.csv` (`p_raw`, `p_bh`).
+
+The signed-rank call is `scipy.stats.wilcoxon(diff, zero_method="wilcox", alternative="two-sided", method="auto")`. All-zero differentials are a tie and do not raise. The code is `wilcoxon_paired` and `pairwise_wilcoxon` in `projects/monitoramento/scripts/forecast_compare.py`.
+
+The references are Wilcoxon (1945), DOI `10.2307/3001968`, and Benjamini and Hochberg (1995), DOI `10.1111/j.2517-6161.1995.tb02031.x`.
+
+## What the test assumes
+
+The signed-rank test assumes independent differentials, symmetric about the median. Forecast errors can be autocorrelated. The Diebold-Mariano correction in this project is the one-step factor. That factor does not remove the dependence from the rank test. A month has 12 test points and a week has 13. Power is low on those grains.
+
+Two calls agree at 5 percent when both p-values are below 0.05 or both are not. Agreement is a call on the seasonal naive. It is not a claim that the leader beats every rival.
+
+## The twelve cells
+
+```{python}
+#| label: setup
+from pathlib import Path
+
+import pandas as pd
+import plotly.graph_objects as go
+
+
+def repo_root() -> Path:
+    here = Path.cwd().resolve()
+    for candidate in (here, *here.parents):
+        if (candidate / "pyproject.toml").is_file() and (candidate / "lab").is_dir():
+            return candidate
+    raise FileNotFoundError("repository root not found from the working directory")
+
+
+ROOT = repo_root()
+RESULTS = (
+    ROOT
+    / "projects/monitoramento/notebooks/articles"
+    / "arrecadacao_forecast_v1_segmentado/results"
+)
+SERIES = {"total": "Total", "declarado": "Declared", "autuado": "Assessed"}
+GRAIN = {
+    "monthly": "Month",
+    "weekly": "Week",
+    "business_daily": "Mon to Fri",
+    "daily": "Calendar day",
+}
+comparison = pd.read_csv(RESULTS / "comparison.csv")
+pairs_path = RESULTS / "pairwise_wilcoxon.csv"
+pairs = pd.read_csv(pairs_path) if pairs_path.is_file() else None
+```
+
+```{python}
+#| label: tbl-cells
+#| tbl-cap: "Twelve cells from the committed comparison table. Wilcoxon columns appear when comparison.csv contains them. Agree at 5 percent means the Diebold-Mariano and Wilcoxon calls are on the same side of 0.05."
+order = (
+    pd.DataFrame(
+        [(s, g) for s in SERIES for g in GRAIN],
+        columns=["series", "grain"],
+    )
+)
+show = order.merge(comparison, on=["series", "grain"], how="left")
+show["Series"] = show["series"].map(SERIES)
+show["Grain"] = show["grain"].map(GRAIN)
+columns = {
+    "best": "Best",
+    "smape": "sMAPE",
+    "seasonal_smape": "Seasonal naive sMAPE",
+    "skill": "Skill",
+    "dm_p": "HLN p",
+}
+if "wsr_p" in show.columns:
+    show["Agree at 5%"] = (show["dm_p"] < 0.05) == (show["wsr_p"] < 0.05)
+    columns["wsr_p"] = "Wilcoxon p"
+    columns["Agree at 5%"] = "Agree at 5%"
+else:
+    show["Wilcoxon p"] = "not in the committed comparison.csv"
+    columns["Wilcoxon p"] = "Wilcoxon p"
+show[list(columns)].rename(columns=columns)
+```
+
+`comparison.csv` on this commit has the Diebold-Mariano columns. The columns `wsr_stat`, `wsr_p`, and `wsr_better` are written by `score_benchmark_tests.py` from the saved forecasts. This page does not create them. When they are absent, the Wilcoxon column above says so. It does not fill a p-value.
+
+## Pairs inside each cell
+
+A pair counts as significant when `p_bh` is below 0.05. The heatmap is one cell at a time. The mark is the adjusted p-value. Darker is smaller. Read a cell against its own scale. Do not treat a dark cell as a new rank, and do not compare shades across cells.
+
+```{python}
+#| label: fig-pairs
+#| fig-cap: "Benjamini-Hochberg adjusted Wilcoxon p-values for every unordered pair in a cell. Drawn only when pairwise_wilcoxon.csv is in the committed results."
+if pairs is None:
+    print(
+        "pairwise_wilcoxon.csv is not in the committed results. "
+        "No pairwise count and no heatmap are shown."
+    )
+else:
+    rows = []
+    for (series, grain), block in pairs.groupby(["series", "grain"], sort=False):
+        n_sig = int((block["p_bh"] < 0.05).sum())
+        rows.append(
+            {
+                "Series": SERIES.get(series, series),
+                "Grain": GRAIN.get(grain, grain),
+                "Pairs": int(len(block)),
+                "Significant at 5%": n_sig,
+            }
+        )
+        names = sorted(set(block["model_a"]).union(block["model_b"]))
+        matrix = pd.DataFrame(1.0, index=names, columns=names)
+        for row in block.itertuples(index=False):
+            matrix.loc[row.model_a, row.model_b] = row.p_bh
+            matrix.loc[row.model_b, row.model_a] = row.p_bh
+        figure = go.Figure(
+            data=[
+                go.Heatmap(
+                    z=matrix.to_numpy(),
+                    x=list(matrix.columns),
+                    y=list(matrix.index),
+                    coloraxis="coloraxis",
+                    hovertemplate="%{y} vs %{x}<br>p_bh=%{z:.4g}<extra></extra>",
+                )
+            ]
+        )
+        figure.update_layout(
+            title=f"{SERIES.get(series, series)}, {GRAIN.get(grain, grain)}",
+            coloraxis={"colorscale": "Teal", "reversescale": True, "cmin": 0, "cmax": 1},
+            xaxis={"tickangle": -45},
+            height=520,
+            margin={"l": 120, "b": 120},
+        )
+        figure.show()
+    pd.DataFrame(rows)
+```
+
+## What this page does not conclude
+
+A dark cell is not a published winner. A disagreement between the two tests on a month or a week is expected when the test block is short. The reading of those disagreements for the manuscript is left to the authors. This page does not state how many of the twelve cells agree, because that count is taken from `wsr_p` only after that column is in the committed table.

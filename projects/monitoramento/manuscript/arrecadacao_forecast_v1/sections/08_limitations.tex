@@ -7,6 +7,8 @@
         A model confidence set on those blocks is wide.
   \item Each grain has one test window.
         The study does not use a rolling origin.
+        One window keeps the protocol the same for every model and every series.
+        A rolling origin would answer a question about stability, not the question in this draft.
   \item Grain B keeps holidays and has no holiday indicator.
   \item E1 did not run.
         The TEM vendor tree is absent.
@@ -18,8 +20,9 @@
   \item A low sMAPE can still miss the peaks.
         On the monthly total, boosting leads and the month-to-month order is weak.
         Read the scatter next to the rank.
-  \item The HLN test compares the leader with the seasonal naive only.
-        It does not compare the leader with the second-best model.
+  \item The Diebold-Mariano column compares the leader with the seasonal naive only.
+        Pairwise comparisons of the other models are the Wilcoxon signed-rank tests in laboratory Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}), with a Benjamini--Hochberg adjustment inside the cell~\citep{benjamini1995fdr}.
+        Those pairs are not a second rank.
   \item The HLN test in this paper uses horizon 1.
         Some models forecast the whole test block from one origin.
         Their errors are dependent.
@@ -31,5 +34,4 @@
         With 12 or 13 test points the rank test has low power.
         The rank test is a robustness check.
         It does not replace the Diebold-Mariano test or the model confidence set.
-        The procedure is the lab page \path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
 \end{itemize}

@@ -1,18 +1,11 @@
-VAT (ICMS) is the state value-added tax in this study.
-We forecast three collection series from one legal-entity book: the total, Declared (Declarado), and Assessed (Autuado).
-Declared is self-reported VAT.
-Assessed is VAT from a tax assessment.
-In the December stock, Assessed is 72.74 percent and Declared is 27.21 percent.
-In collection from 2016 through 2025, Declared is 64.63 percent and Assessed is 35.24 percent.
-Each series has four grains: month, calendar day (grain A), Monday to Friday (grain B), and week.
-The protocol is the closed v1 benchmark.
-One series has one train block, one validation block, and one test block.
-The rank is test sMAPE.
-The best model is not the same on every series or every grain.
-On the month, boosting leads the total and Assessed, and SARIMAX leads Declared.
-On Monday to Friday, TimesFM leads all three series.
-A skill score, a Diebold-Mariano test with a small-sample correction, and a model confidence set sit beside that rank.
-A Wilcoxon signed-rank test on the same losses is specified in the lab and is placed beside the Diebold-Mariano test.
-They do not replace the rank.
-The Monday to Friday lead over the seasonal naive is the comparison those tests agree on.
-The monthly and weekly test blocks do not support one winner.
+Declared VAT and assessed VAT are different forecasting problems.
+In the December stock, assessed VAT is 72.74 percent.
+In collection from 2016 through 2025, declared VAT is 64.63 percent (Table~\ref{tab:shares}).
+One closed protocol ranks the models on three series and four grains: one train, validation, and test cut, selection by validation sMAPE, and rank by test sMAPE.
+On Monday to Friday, TimesFM leads all three series and the corrected Diebold-Mariano test rejects the seasonal naive.
+Skill on that grain is about 0.26 to 0.40.
+On the month and the week the leader changes with the series, and the model confidence set keeps the seasonal naive.
+No model is consistent across grains, as in the M4 competition.
+\discutir{whether the pairwise Wilcoxon signed-rank test in laboratory Section 4.5 shows that the leader separates from its rivals and not only from the seasonal naive}
+The forecast-versus-actual scatters show that a low sMAPE can still miss the April peak.
+\discutir{the recommendation for the office: one model per grain, the seasonal naive as a floor, and caution before publishing a single winner}

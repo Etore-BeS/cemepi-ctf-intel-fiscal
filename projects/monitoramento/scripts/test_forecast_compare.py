@@ -225,10 +225,12 @@ def test_manuscript_cites_the_lab_page() -> None:
         root
         / "projects/monitoramento/manuscript/arrecadacao_forecast_v1/sections/04_method.tex"
     ).read_text()
-    lab = root / "lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd"
+    lab = root / "lab/eda/2026-11-04_benchmark_wilcoxon.qmd"
     page = lab.read_text()
-    cite = "lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd"
-    assert cite in method
+    assert "lab-ben-wsr" in method
+    assert "benjamini1995fdr" in method
+    assert "comparison.csv" in page
+    assert "state.json" not in page
     assert "fdr_bh" in page
     assert "zero_method" in page and "wilcox" in page
     assert "10.1111/j.2517-6161.1995.tb02031.x" in page
