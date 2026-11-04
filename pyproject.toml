@@ -109,4 +109,5 @@ testpaths = [
     "pipelines/cnpj_enrich/tests",
     "lab/eda/tests",
     "lab/eda/2026-11-04_diagnostico_linearidade",
+    "lab/eda/2026-11-04_inferencia_avd",
 ]
