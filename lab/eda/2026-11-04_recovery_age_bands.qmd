@@ -28,9 +28,11 @@ def _boot() -> None:
 _boot()
 import _impairment as I
 
-bundle, params = I.page_setup()
+bundle, params = I.page_setup(include=("panel", "firms"))
 print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
 panel, firms = bundle["panel"], bundle["firms"]
+# One narrow pass over the panel, then every age-band table.
+age = I.recovery_age_page(panel, firms)
 ```
 
 ## Question
@@ -66,7 +68,7 @@ The status chart uses the register date printed above. Read it as a description 
 ```{python}
 #| label: tbl-annual
 #| tbl-cap: "Annual paid divided by stock, by year, age band and origin."
-annual, n_sup = I.annual_recovery(panel, firms)
+annual, n_sup = age["annual"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 print(f"Years in the table run from {int(annual['year'].drop_nulls().min())} to {int(annual['year'].drop_nulls().max())}.")
 I.publish(annual)
@@ -86,7 +88,7 @@ fig
 ```{python}
 #| label: tbl-mean
 #| tbl-cap: "Stock-weighted mean of the annual rate over the window, by age band and origin."
-mean, n_sup = I.mean_recovery(panel, firms)
+mean, n_sup = age["mean"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(mean)
 ```
@@ -102,7 +104,7 @@ fig
 ```{python}
 #| label: tbl-cumulative
 #| tbl-cap: "Cumulative paid divided by enrolled value, by cohort and age band. The oldest band is not observable for these cohorts."
-cum, n_sup = I.cumulative_by_band(panel)
+cum, n_sup = age["cumulative"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(cum)
 ```
@@ -120,7 +122,7 @@ fig
 ```{python}
 #| label: tbl-status
 #| tbl-cap: "Stock-weighted recovery by age band, origin and registration status. Status is the later register."
-status, n_sup = I.recovery_by_status(panel, firms)
+status, n_sup = age["status"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(status)
 ```

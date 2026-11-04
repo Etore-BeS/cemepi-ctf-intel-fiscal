@@ -29,10 +29,12 @@ _boot()
 import polars as pl
 import _impairment as I
 
-bundle, params = I.page_setup()
+bundle, params = I.page_setup(include=("panel", "instalments", "protests", "payments", "cohort"))
 print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
-panel, firms = bundle["panel"], bundle["firms"]
+panel = bundle["panel"]
 instalments, protests, payments = bundle["instalments"], bundle["protests"], bundle["payments"]
+# One certificate index for every table on this page.
+report = I.instalment_page(panel, instalments, protests, payments, cdas=bundle.get("cohort"))
 ```
 
 ## Question
@@ -77,7 +79,7 @@ I.publish(quality)
 ```{python}
 #| label: tbl-request-share
 #| tbl-cap: "Share of certificates with an instalment request, by enrolment year and origin."
-share, n_sup = I.request_share(panel, instalments)
+share, n_sup = report["request_share"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(share)
 ```
@@ -96,7 +98,7 @@ fig
 ```{python}
 #| label: tbl-status
 #| tbl-cap: "Instalment status at extraction, by origin. Rare statuses are pooled."
-status, n_sup = I.status_distribution(panel, instalments)
+status, n_sup = report["status"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(status)
 ```
@@ -104,7 +106,7 @@ I.publish(status)
 ```{python}
 #| label: fig-km-request
 #| fig-cap: "Share of certificates with a first request, by months since enrolment. Kaplan–Meier."
-curve, n_sup, extra = I.km_enrol_to_request(panel, instalments)
+curve, n_sup, extra = report["km_request"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 print(f"Negative durations excluded: {extra['n_negative_duration']}")
 fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since enrolment", y_title="Share with a first request")
@@ -114,7 +116,7 @@ fig
 ```{python}
 #| label: fig-km-break
 #| fig-cap: "Share of requests with a valid break, by months since the request. Kaplan–Meier."
-curve, n_sup = I.km_request_to_break(instalments, panel)
+curve, n_sup = report["km_break"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since the request", y_title="Share with a valid break")
 fig
@@ -123,7 +125,7 @@ fig
 ```{python}
 #| label: tbl-break
 #| tbl-cap: "Share of requests with a valid break date, by origin and by the number of instalments on the request."
-by_origin, by_band, n_sup = I.break_rates(panel, instalments)
+by_origin, by_band, n_sup = report["break_rates"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 print("By origin:")
 display_origin = I.publish(by_origin)
@@ -150,7 +152,7 @@ fig
 ```{python}
 #| label: tbl-recovery-request
 #| tbl-cap: "Recovery, paid divided by enrolled value, for certificates with and without a request."
-rec, n_sup = I.recovery_by_flag(panel, instalments, flag="request")
+rec, n_sup = report["recovery_request"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(rec)
 ```
@@ -158,7 +160,7 @@ I.publish(rec)
 ```{python}
 #| label: tbl-recovery-break
 #| tbl-cap: "Recovery, paid divided by enrolled value, for certificates with and without a valid break."
-rec, n_sup = I.recovery_by_flag(panel, instalments, flag="break")
+rec, n_sup = report["recovery_break"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(rec)
 ```
@@ -166,7 +168,7 @@ I.publish(rec)
 ```{python}
 #| label: tbl-protest-share
 #| tbl-cap: "Share of certificates with a protest row, by enrolment year and origin."
-pshare, n_sup = I.protest_share(panel, protests)
+pshare, n_sup = report["protest_share"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(pshare)
 ```
@@ -182,7 +184,7 @@ fig
 ```{python}
 #| label: fig-km-protest
 #| fig-cap: "Share of certificates with a valid protest date, by months since enrolment. Kaplan–Meier."
-curve, n_sup = I.km_enrol_to_protest(panel, protests)
+curve, n_sup = report["km_protest"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since enrolment", y_title="Share with a valid protest date")
 fig
@@ -191,7 +193,7 @@ fig
 ```{python}
 #| label: tbl-protest-status
 #| tbl-cap: "Protest status at extraction. Rare statuses are pooled. The status is not used as a dated regressor."
-pstatus, n_sup = I.protest_status(panel, protests)
+pstatus, n_sup = report["protest_status"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 I.publish(pstatus)
 ```
@@ -199,7 +201,7 @@ I.publish(pstatus)
 ```{python}
 #| label: tbl-protest-recovery
 #| tbl-cap: "Amount paid before the protest date and on or after it, divided by enrolled value."
-around, n_sup = I.recovery_around_protest(panel, protests, payments)
+around, n_sup = report["protest_recovery"]
 print(f"Cells pooled by the suppression rule: {n_sup}")
 print("Certificates with a protest row and no usable date are in the quality table. They are not in this split.")
 I.publish(around)

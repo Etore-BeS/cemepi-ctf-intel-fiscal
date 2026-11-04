@@ -26,10 +26,12 @@ def _boot() -> None:
     raise RuntimeError("Helper module _impairment.py is not on the working path.")
 
 _boot()
+import os
 import _impairment as I
 
-_bundle, params = I.page_setup()
-print(I.assumptions_text(params, synthetic=_bundle["synthetic"]))
+params = I.PgeParams()
+synthetic = os.environ.get("IMP23_SYNTHETIC") == "1"
+print(I.assumptions_text(params, synthetic=synthetic))
 print(I.cited_material_note())
 ```
 

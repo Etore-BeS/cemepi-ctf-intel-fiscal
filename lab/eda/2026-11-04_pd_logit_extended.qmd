@@ -28,7 +28,7 @@ def _boot() -> None:
 _boot()
 import _impairment as I
 
-bundle, params = I.page_setup()
+bundle, params = I.page_setup(include=("panel", "firms", "instalments", "protests"))
 print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
 panel, firms = bundle["panel"], bundle["firms"]
 instalments, protests = bundle["instalments"], bundle["protests"]

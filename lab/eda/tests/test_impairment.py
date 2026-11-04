@@ -412,6 +412,51 @@ def test_backtest_covers_the_reference_years_and_stops_at_the_window():
     assert classes.filter(pl.col("class_label") == "guaranteed")["n_cda"].sum() == 0
 
 
+def test_lazy_reference_facts_match_the_in_memory_facts():
+    bundle = I.synthetic_bundle()
+    params = I.PgeParams()
+    eager = I.ref_facts(bundle["panel"], params)
+    lazy = I.ref_facts(bundle["panel"].lazy(), params)
+    year = 2020
+    cols = [
+        "id_debito",
+        f"n_snap_{year}",
+        f"paid5_{year}",
+        f"paid3_{year}",
+        f"stock_{year}",
+        f"cnpj_{year}",
+        f"situacao_{year}",
+    ]
+    left = eager.select(cols).sort("id_debito")
+    right = lazy.select(cols).sort("id_debito")
+    assert left.height == right.height
+    joined = left.join(right, on="id_debito", suffix="_l")
+    assert (joined[f"n_snap_{year}"] == joined[f"n_snap_{year}_l"]).all()
+    assert (joined[f"paid5_{year}"] - joined[f"paid5_{year}_l"]).abs().max() < 1e-4
+    assert (
+        joined[f"cnpj_{year}"].fill_null("") == joined[f"cnpj_{year}_l"].fill_null("")
+    ).all()
+
+
+def test_cda_index_is_built_once_per_page():
+    bundle = I.synthetic_bundle()
+    I.reset_build_counts()
+    I.instalment_page(
+        bundle["panel"], bundle["instalments"], bundle["protests"], bundle["payments"]
+    )
+    assert I.cda_index_builds() == 1
+    I.reset_build_counts()
+    I.recovery_age_page(bundle["panel"], bundle["firms"])
+    assert I.cda_index_builds() == 0
+    assert I._BUILDS["age_base"] == 1
+    I.reset_build_counts()
+    I.backtest_rule(
+        bundle["panel"], bundle["firms"], bundle["instalments"], I.PgeParams()
+    )
+    assert I.cda_index_builds() == 0
+    assert I._BUILDS["ref_facts"] == 1
+
+
 def test_variable_table_uses_the_four_statuses_and_names_the_material():
     table = I.variable_table()
     assert set(table["status"].unique().to_list()) <= {

@@ -494,8 +494,24 @@ def _lazy(df: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
     return df.lazy() if isinstance(df, pl.DataFrame) else df
 
 
+# Counts real builds, not cache hits. Pages must stay at one certificate index.
+_BUILDS = {"cda_index": 0, "ref_facts": 0, "age_base": 0}
+
+
+def reset_build_counts() -> None:
+    for key in _BUILDS:
+        _BUILDS[key] = 0
+
+
+def cda_index_builds() -> int:
+    return _BUILDS["cda_index"]
+
+
 def _collect(lf: pl.LazyFrame) -> pl.DataFrame:
-    return lf.collect(engine="streaming")
+    try:
+        return lf.collect(engine="streaming")
+    except pl.exceptions.InvalidOperationError:
+        return lf.collect()
 
 
 def age_band_expr(col: str = "age") -> pl.Expr:
@@ -533,19 +549,28 @@ def parcel_band_expr(col: str = "qtd_parcelas") -> pl.Expr:
     )
 
 
-def date_quality(df: pl.DataFrame, col: str) -> dict[str, Any]:
-    """Count impossible dates. Do not rewrite them."""
+def date_quality(df: pl.DataFrame | pl.LazyFrame, col: str) -> dict[str, Any]:
+    """Count impossible dates in one pass. Do not rewrite them."""
     reject_person_columns(df)
-    s = df[col]
-    known = s.drop_nulls()
-    years = known.dt.year() if known.len() else pl.Series([], dtype=pl.Int32)
+    stats = _collect(
+        _lazy(df).select(
+            pl.len().alias("n"),
+            pl.col(col).null_count().alias("n_null"),
+            (pl.col(col).is_not_null() & (pl.col(col) < WINDOW_START))
+            .sum()
+            .alias("n_before_window"),
+            (pl.col(col).is_not_null() & (pl.col(col) > WINDOW_END))
+            .sum()
+            .alias("n_after_window"),
+            (pl.col(col).is_not_null() & (pl.col(col).dt.year() < 1000))
+            .sum()
+            .alias("n_year_before_1000"),
+        )
+    )
+    row = stats.row(0, named=True)
     return {
         "column": col,
-        "n": df.height,
-        "n_null": int(s.null_count()),
-        "n_before_window": int((known < WINDOW_START).sum()) if known.len() else 0,
-        "n_after_window": int((known > WINDOW_END).sum()) if known.len() else 0,
-        "n_year_before_1000": int((years < 1000).sum()) if known.len() else 0,
+        **{key: int(row[key] or 0) for key in row if key != "column"},
     }
 
 
@@ -597,11 +622,15 @@ def suppress_aggregate(
     """
     lf = _lazy(df)
     keys = list(dict.fromkeys([*group_cols, pool]))
-    counts = _collect(
-        lf.group_by(keys).agg(pl.col(cnpj_col).n_unique().alias("n_cnpj"))
-    )
-    small = counts.filter((pl.col("n_cnpj") > 0) & (pl.col("n_cnpj") < min_n))
+    metric_aggs = [expr.alias(name) for name, expr in metrics.items()]
+    metric_aggs.append(pl.col(cnpj_col).n_unique().alias("n_cnpj"))
+    # One pass when every cell is large enough to publish. A small cell needs a
+    # second pass so pooled CNPJs are counted once.
+    first = _collect(lf.group_by(keys).agg(metric_aggs))
+    small = first.filter((pl.col("n_cnpj") > 0) & (pl.col("n_cnpj") < min_n))
     n_suppressed = small.height
+    if n_suppressed == 0:
+        return first.sort(keys), 0
     if whole:
         labels = small[pool].unique().to_list()
         marked = lf.with_columns(
@@ -620,9 +649,7 @@ def suppress_aggregate(
         )
     else:
         marked = lf
-    aggs = [expr.alias(name) for name, expr in metrics.items()]
-    aggs.append(pl.col(cnpj_col).n_unique().alias("n_cnpj"))
-    out = _collect(marked.group_by(keys).agg(aggs))
+    out = _collect(marked.group_by(keys).agg(metric_aggs))
     value_cols = [c for c in out.columns if c not in keys]
     out = out.with_columns(
         [
@@ -976,24 +1003,259 @@ def recovery_by_class(
     return assert_public(out), n_sup
 
 
+def _ref_facts_spill(
+    panel: pl.LazyFrame, years: list[int], params: PgeParams
+) -> pl.DataFrame:
+    import os
+    import tempfile
+
+    import duckdb
+
+    lf = panel.filter(
+        (pl.col("year") >= FIRST_YEAR) & (pl.col("year") <= LAST_YEAR)
+    ).select(
+        "id_debito",
+        "year",
+        "cnpj",
+        "cnpj_root",
+        "origin",
+        "enrol_date",
+        "situacao",
+        "stock",
+        "paid",
+        "present_in_december",
+        "enrolled_value",
+    )
+    fd, name = tempfile.mkstemp(prefix="imp23-ref-", suffix=".parquet")
+    os.close(fd)
+    try:
+        lf.sink_parquet(name, compression="zstd")
+        con = duckdb.connect()
+        con.execute("SET memory_limit='1200MB'")
+        con.execute("SET temp_directory='/tmp'")
+        con.execute("SET threads=2")
+        con.execute("SET preserve_insertion_order=false")
+        select = ["id_debito"]
+        for year in years:
+            snap = f"year = {year} AND present_in_december AND stock > 0"
+            y0 = year - params.history_years + 1
+            y3 = year - params.recoverable_years + 1
+            later = min(params.recovery_through, LAST_YEAR)
+            select.extend(
+                [
+                    f"SUM(CASE WHEN {snap} THEN 1 ELSE 0 END) AS n_snap_{year}",
+                    f"MAX(CASE WHEN {snap} THEN cnpj END) AS cnpj_{year}",
+                    f"MAX(CASE WHEN {snap} THEN cnpj_root END) AS root_{year}",
+                    f"MAX(CASE WHEN {snap} THEN origin END) AS origin_{year}",
+                    f"MIN(CASE WHEN {snap} THEN enrol_date END) AS enrol_{year}",
+                    f"MAX(CASE WHEN {snap} THEN situacao END) AS situacao_{year}",
+                    f"COALESCE(SUM(CASE WHEN {snap} THEN stock END), 0) AS stock_{year}",
+                    f"MAX(CASE WHEN {snap} THEN enrolled_value END) AS enrolled_{year}",
+                    f"SUM(CASE WHEN year BETWEEN {y0} AND {year} THEN COALESCE(paid, 0) ELSE 0 END) AS paid5_{year}",
+                    f"SUM(CASE WHEN year BETWEEN {y3} AND {year} THEN COALESCE(paid, 0) ELSE 0 END) AS paid3_{year}",
+                    f"SUM(CASE WHEN year = {year + 1} THEN COALESCE(paid, 0) ELSE 0 END) AS next_{year}",
+                    f"SUM(CASE WHEN year BETWEEN {year + 1} AND {later} THEN COALESCE(paid, 0) ELSE 0 END) AS after_{year}",
+                ]
+            )
+        quoted = name.replace("'", "''")
+        out = con.execute(
+            f"SELECT {', '.join(select)} FROM read_parquet('{quoted}') GROUP BY id_debito"
+        ).pl()
+        con.close()
+        return out
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def ref_facts(panel: pl.DataFrame | pl.LazyFrame, params: PgeParams) -> pl.DataFrame:
+    """One row per certificate with every reference-year stock and payment window.
+
+    Replaces one panel scan per year and per payment window.
+    """
+    _BUILDS["ref_facts"] += 1
+    years = [year for year in params.ref_years if year <= LAST_YEAR]
+    if isinstance(panel, pl.LazyFrame):
+        # Spill the narrow projection and aggregate under a memory cap, so a
+        # 20-million-row panel does not have to sit in an 8 GB machine.
+        return _ref_facts_spill(panel, years, params)
+    lf = (
+        _lazy(panel)
+        .filter((pl.col("year") >= FIRST_YEAR) & (pl.col("year") <= LAST_YEAR))
+        .select(
+            "id_debito",
+            "year",
+            "cnpj",
+            "cnpj_root",
+            "origin",
+            "enrol_date",
+            "situacao",
+            "stock",
+            "paid",
+            "present_in_december",
+            "enrolled_value",
+        )
+    )
+    aggs: list[pl.Expr] = []
+    for year in years:
+        in_snap = (
+            (pl.col("year") == year)
+            & pl.col("present_in_december").fill_null(False)
+            & (pl.col("stock") > 0)
+        )
+        y0 = year - params.history_years + 1
+        y3 = year - params.recoverable_years + 1
+        later_end = min(params.recovery_through, LAST_YEAR)
+        paid = pl.col("paid").fill_null(0)
+        aggs.extend(
+            [
+                in_snap.sum().alias(f"n_snap_{year}"),
+                pl.col("cnpj")
+                .filter(in_snap)
+                .drop_nulls()
+                .first()
+                .alias(f"cnpj_{year}"),
+                pl.col("cnpj_root")
+                .filter(in_snap)
+                .drop_nulls()
+                .first()
+                .alias(f"root_{year}"),
+                pl.col("origin")
+                .filter(in_snap)
+                .drop_nulls()
+                .first()
+                .alias(f"origin_{year}"),
+                pl.col("enrol_date").filter(in_snap).min().alias(f"enrol_{year}"),
+                pl.col("situacao")
+                .filter(in_snap)
+                .drop_nulls()
+                .first()
+                .alias(f"situacao_{year}"),
+                pl.col("stock")
+                .filter(in_snap)
+                .sum()
+                .fill_null(0)
+                .alias(f"stock_{year}"),
+                pl.col("enrolled_value")
+                .filter(in_snap)
+                .max()
+                .alias(f"enrolled_{year}"),
+                paid.filter((pl.col("year") >= y0) & (pl.col("year") <= year))
+                .sum()
+                .fill_null(0)
+                .alias(f"paid5_{year}"),
+                paid.filter((pl.col("year") >= y3) & (pl.col("year") <= year))
+                .sum()
+                .fill_null(0)
+                .alias(f"paid3_{year}"),
+                paid.filter(pl.col("year") == year + 1)
+                .sum()
+                .fill_null(0)
+                .alias(f"next_{year}"),
+                paid.filter(
+                    (pl.col("year") >= year + 1) & (pl.col("year") <= later_end)
+                )
+                .sum()
+                .fill_null(0)
+                .alias(f"after_{year}"),
+            ]
+        )
+    if not aggs:
+        return pl.DataFrame({"id_debito": pl.Series([], dtype=pl.Int64)})
+    return _collect(lf.group_by("id_debito").agg(aggs))
+
+
+def _open_flags(
+    instalments: pl.DataFrame | pl.LazyFrame, years: list[int]
+) -> pl.DataFrame:
+    """Open-instalment flag at each reference date, in one pass over the requests."""
+    aggs = []
+    for year in years:
+        ref = pl.lit(date(year, 12, 31))
+        requested = _plausible("data_solicitacao") & (pl.col("data_solicitacao") <= ref)
+        broken = _plausible("data_rompimento") & (pl.col("data_rompimento") <= ref)
+        aggs.append((requested & ~broken).any().fill_null(False).alias(f"open_{year}"))
+    if not aggs:
+        return pl.DataFrame({"id_debito": pl.Series([], dtype=pl.Int64)})
+    return _collect(_lazy(instalments).group_by("id_debito").agg(aggs))
+
+
+def _recovery_prepared(
+    classified: pl.DataFrame, ref_year: int
+) -> tuple[pl.DataFrame, int]:
+    frame = classified.select(
+        "id_debito",
+        "cnpj",
+        "origin",
+        "binary_class",
+        "stock",
+        "paid_next",
+        "paid_after",
+    )
+    out, n_sup = suppress_aggregate(
+        frame,
+        ["origin"],
+        {
+            "n_cda": pl.col("id_debito").n_unique(),
+            "stock": pl.col("stock").sum(),
+            "paid_next": pl.col("paid_next").sum(),
+            "paid_after": pl.col("paid_after").sum(),
+        },
+        pool="binary_class",
+    )
+    out = out.with_columns(
+        (pl.col("paid_next") / pl.col("stock")).alias("recovery_next"),
+        (pl.col("paid_after") / pl.col("stock")).alias("recovery_to_end"),
+        pl.lit(ref_year).alias("ref_year"),
+    )
+    return assert_public(out), n_sup
+
+
 def backtest_rule(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
-    instalments: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
     params: PgeParams,
 ) -> tuple[pl.DataFrame, pl.DataFrame, dict[str, int]]:
+    years = [year for year in params.ref_years if year <= LAST_YEAR]
+    facts = ref_facts(panel, params)
+    opens = _open_flags(instalments, years)
+    firm = firms.select(
+        "cnpj",
+        "match_nivel",
+        pl.col("situacao_cadastral").alias("registry_code"),
+    )
     classes: list[pl.DataFrame] = []
     recovered: list[pl.DataFrame] = []
     n_sup = 0
-    for year in params.ref_years:
-        if year > LAST_YEAR:
-            continue
-        snap = cda_at_ref(panel, firms, instalments, year, params)
+    for year in years:
+        snap = facts.filter(pl.col(f"n_snap_{year}") > 0).select(
+            "id_debito",
+            pl.col(f"cnpj_{year}").alias("cnpj"),
+            pl.col(f"root_{year}").alias("cnpj_root"),
+            pl.col(f"origin_{year}").alias("origin"),
+            pl.col(f"enrol_{year}").alias("enrol_date"),
+            pl.col(f"situacao_{year}").alias("situacao"),
+            pl.col(f"stock_{year}").fill_null(0).alias("stock"),
+            pl.col(f"enrolled_{year}").alias("enrolled_value"),
+            pl.col(f"paid5_{year}").fill_null(0).alias("paid_5y"),
+            pl.col(f"paid3_{year}").fill_null(0).alias("paid_3y"),
+            pl.col(f"next_{year}").fill_null(0).alias("paid_next"),
+            pl.col(f"after_{year}").fill_null(0).alias("paid_after"),
+            pl.lit(True).alias("in_stock"),
+            pl.lit(False).alias("guaranteed"),
+        )
+        snap = (
+            snap.join(firm, on="cnpj", how="left")
+            .join(opens.select("id_debito", f"open_{year}"), on="id_debito", how="left")
+            .with_columns(
+                pl.col("match_nivel").fill_null("nao_encontrado"),
+                pl.col(f"open_{year}").fill_null(False).alias("instalment_open"),
+            )
+        )
         classified = classify_pge(snap, date(year, 12, 31), params)
         summary, n1 = summarise_pge(classified, year)
-        rec, n2 = recovery_by_class(
-            panel, classified, year, through=params.recovery_through
-        )
+        rec, n2 = _recovery_prepared(classified, year)
         classes.append(summary)
         recovered.append(rec)
         n_sup += n1 + n2
@@ -1007,10 +1269,21 @@ def backtest_rule(
 
 
 def cda_index(panel: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
-    """One row per CDA, analysis window only."""
+    """One row per CDA in the analysis window. One streaming pass."""
+    _BUILDS["cda_index"] += 1
     return _collect(
         _lazy(panel)
         .filter((pl.col("year") >= FIRST_YEAR) & (pl.col("year") <= LAST_YEAR))
+        .select(
+            "id_debito",
+            "cnpj",
+            "cnpj_root",
+            "origin",
+            "enrol_date",
+            "enrol_year",
+            "enrolled_value",
+            "paid",
+        )
         .group_by("id_debito")
         .agg(
             pl.col("cnpj").drop_nulls().first(),
@@ -1024,24 +1297,54 @@ def cda_index(panel: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
     )
 
 
-def _cohort_cdas(panel: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
-    cdas = cda_index(panel)
+def _cohort_cdas(
+    panel: pl.DataFrame | pl.LazyFrame, cdas: pl.DataFrame | None = None
+) -> pl.DataFrame:
+    """Certificate index for enrolments inside the window. Reuse ``cdas`` when given."""
+    if cdas is None:
+        cdas = cda_index(panel)
     return cdas.filter(
         pl.col("enrol_year").is_between(FIRST_YEAR, LAST_YEAR)
         & pl.col("enrol_date").is_not_null()
     )
 
 
-def request_share(
-    panel: pl.DataFrame | pl.LazyFrame, instalments: pl.DataFrame
-) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel)
-    asked = (
-        instalments.filter(_plausible("data_solicitacao"))["id_debito"]
+def _semi_flag(
+    events: pl.DataFrame | pl.LazyFrame, mask: pl.Expr, name: str
+) -> pl.LazyFrame:
+    """Distinct debt ids matching ``mask``, as a one-column flag. Not a Python list."""
+    return (
+        _lazy(events)
+        .filter(mask)
+        .select(pl.col("id_debito").drop_nulls())
         .unique()
-        .to_list()
+        .with_columns(pl.lit(True).alias(name))
     )
-    frame = cdas.with_columns(pl.col("id_debito").is_in(asked).alias("has_request"))
+
+
+def _with_semi_flag(
+    cdas: pl.DataFrame,
+    events: pl.DataFrame | pl.LazyFrame,
+    mask: pl.Expr,
+    name: str,
+) -> pl.DataFrame:
+    return _collect(
+        cdas.lazy()
+        .join(_semi_flag(events, mask, name), on="id_debito", how="left")
+        .with_columns(pl.col(name).fill_null(False))
+    )
+
+
+def request_share(
+    panel: pl.DataFrame | pl.LazyFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
+) -> tuple[pl.DataFrame, int]:
+    cdas = _cohort_cdas(panel, cdas)
+    frame = _with_semi_flag(
+        cdas, instalments, _plausible("data_solicitacao"), "has_request"
+    )
     out, n_sup = suppress_aggregate(
         frame,
         ["enrol_year"],
@@ -1059,16 +1362,26 @@ def request_share(
 
 
 def status_distribution(
-    panel: pl.DataFrame | pl.LazyFrame, instalments: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel).select("id_debito", "cnpj", "origin")
-    req = instalments.join(cdas, on="id_debito", how="inner").with_columns(
-        pl.col("status_parcelamento").fill_null("missing status").alias("status")
+    cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    # Collapse to debt × status before the firm join, so the raw request table is not held.
+    compact = (
+        _lazy(instalments)
+        .group_by(
+            "id_debito",
+            pl.col("status_parcelamento").fill_null("missing status").alias("status"),
+        )
+        .agg(pl.len().alias("n_rows"))
     )
+    req = compact.join(cdas.lazy(), on="id_debito", how="inner")
     out, n_sup = suppress_aggregate(
         req,
         ["origin"],
-        {"n_requests": pl.len()},
+        {"n_requests": pl.col("n_rows").sum()},
         pool="status",
     )
     return assert_public(out), n_sup
@@ -1141,11 +1454,15 @@ def _duration_km(
 
 
 def km_enrol_to_request(
-    panel: pl.DataFrame | pl.LazyFrame, instalments: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int, dict[str, int]]:
-    cdas = _cohort_cdas(panel)
-    first = (
-        instalments.filter(_plausible("data_solicitacao"))
+    cdas = _cohort_cdas(panel, cdas)
+    first = _collect(
+        _lazy(instalments)
+        .filter(_plausible("data_solicitacao"))
         .group_by("id_debito")
         .agg(pl.col("data_solicitacao").min().alias("event"))
     )
@@ -1167,11 +1484,16 @@ def km_enrol_to_request(
 
 
 def km_request_to_break(
-    instalments: pl.DataFrame, panel: pl.DataFrame | pl.LazyFrame
+    instalments: pl.DataFrame | pl.LazyFrame,
+    panel: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel).select("id_debito", "cnpj", "origin")
-    req = instalments.join(cdas, on="id_debito", how="inner").filter(
-        _plausible("data_solicitacao")
+    cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    req = _collect(
+        _lazy(instalments)
+        .filter(_plausible("data_solicitacao"))
+        .join(cdas.lazy(), on="id_debito", how="inner")
     )
     if req.height == 0:
         return req.clear(), 0
@@ -1197,11 +1519,16 @@ def km_request_to_break(
 
 
 def break_rates(
-    panel: pl.DataFrame | pl.LazyFrame, instalments: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel).select("id_debito", "cnpj", "origin")
-    req = instalments.join(cdas, on="id_debito", how="inner").filter(
-        _plausible("data_solicitacao")
+    cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    req = _collect(
+        _lazy(instalments)
+        .filter(_plausible("data_solicitacao"))
+        .join(cdas.lazy(), on="id_debito", how="inner")
     )
     req = req.with_columns(
         _plausible("data_rompimento").alias("broken"),
@@ -1230,30 +1557,24 @@ def break_rates(
 
 def recovery_by_flag(
     panel: pl.DataFrame | pl.LazyFrame,
-    instalments: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
     *,
     flag: str,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Recovery (paid / enrolled value) by origin and by a yes/no flag."""
-    cdas = _cohort_cdas(panel)
+    cdas = _cohort_cdas(panel, cdas)
     if flag == "request":
-        ids = (
-            instalments.filter(_plausible("data_solicitacao"))["id_debito"]
-            .unique()
-            .to_list()
-        )
+        mask = _plausible("data_solicitacao")
         label_yes, label_no = "with a request", "without a request"
     elif flag == "break":
-        ids = (
-            instalments.filter(_plausible("data_rompimento"))["id_debito"]
-            .unique()
-            .to_list()
-        )
+        mask = _plausible("data_rompimento")
         label_yes, label_no = "with a break", "without a break"
     else:
         raise ValueError(flag)
-    frame = cdas.with_columns(
-        pl.when(pl.col("id_debito").is_in(ids))
+    flagged = _with_semi_flag(cdas, instalments, mask, "_hit")
+    frame = flagged.with_columns(
+        pl.when(pl.col("_hit"))
         .then(pl.lit(label_yes))
         .otherwise(pl.lit(label_no))
         .alias("group")
@@ -1273,11 +1594,15 @@ def recovery_by_flag(
 
 
 def protest_share(
-    panel: pl.DataFrame | pl.LazyFrame, protests: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel)
-    ids = protests["id_debito"].unique().to_list()
-    frame = cdas.with_columns(pl.col("id_debito").is_in(ids).alias("protested"))
+    cdas = _cohort_cdas(panel, cdas)
+    frame = _with_semi_flag(
+        cdas, protests, pl.col("id_debito").is_not_null(), "protested"
+    )
     out, n_sup = suppress_aggregate(
         frame,
         ["enrol_year"],
@@ -1298,11 +1623,15 @@ def protest_share(
 
 
 def km_enrol_to_protest(
-    panel: pl.DataFrame | pl.LazyFrame, protests: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel)
-    first = (
-        protests.filter(_plausible("data_protesto"))
+    cdas = _cohort_cdas(panel, cdas)
+    first = _collect(
+        _lazy(protests)
+        .filter(_plausible("data_protesto"))
         .group_by("id_debito")
         .agg(pl.col("data_protesto").min().alias("event"))
     )
@@ -1323,16 +1652,25 @@ def km_enrol_to_protest(
 
 
 def protest_status(
-    panel: pl.DataFrame | pl.LazyFrame, protests: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
-    cdas = _cohort_cdas(panel).select("id_debito", "cnpj", "origin")
-    rows = protests.join(cdas, on="id_debito", how="inner").with_columns(
-        pl.col("status_protesto").fill_null("missing status").alias("status")
+    cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    compact = (
+        _lazy(protests)
+        .group_by(
+            "id_debito",
+            pl.col("status_protesto").fill_null("missing status").alias("status"),
+        )
+        .agg(pl.len().alias("n_rows"))
     )
+    rows = compact.join(cdas.lazy(), on="id_debito", how="inner")
     out, n_sup = suppress_aggregate(
         rows,
         ["origin"],
-        {"n_rows": pl.len()},
+        {"n_rows": pl.col("n_rows").sum()},
         pool="status",
     )
     return assert_public(out), n_sup
@@ -1340,13 +1678,16 @@ def protest_status(
 
 def recovery_around_protest(
     panel: pl.DataFrame | pl.LazyFrame,
-    protests: pl.DataFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
     payments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Paid before the protest date and paid on or after it, over enrolled value."""
-    cdas = _cohort_cdas(panel)
-    dated = (
-        protests.filter(_plausible("data_protesto"))
+    cdas = _cohort_cdas(panel, cdas)
+    dated = _collect(
+        _lazy(protests)
+        .filter(_plausible("data_protesto"))
         .group_by("id_debito")
         .agg(pl.col("data_protesto").min().alias("protest_date"))
     )
@@ -1394,6 +1735,38 @@ def recovery_around_protest(
     return assert_public(out), n_sup
 
 
+def instalment_page(
+    panel: pl.DataFrame | pl.LazyFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    payments: pl.DataFrame | pl.LazyFrame,
+    *,
+    cdas: pl.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Every instalment and protest table from one certificate index."""
+    cohort = _cohort_cdas(panel, cdas)
+    return {
+        "cohort": cohort,
+        "request_share": request_share(panel, instalments, cdas=cohort),
+        "status": status_distribution(panel, instalments, cdas=cohort),
+        "km_request": km_enrol_to_request(panel, instalments, cdas=cohort),
+        "km_break": km_request_to_break(instalments, panel, cdas=cohort),
+        "break_rates": break_rates(panel, instalments, cdas=cohort),
+        "recovery_request": recovery_by_flag(
+            panel, instalments, flag="request", cdas=cohort
+        ),
+        "recovery_break": recovery_by_flag(
+            panel, instalments, flag="break", cdas=cohort
+        ),
+        "protest_share": protest_share(panel, protests, cdas=cohort),
+        "km_protest": km_enrol_to_protest(panel, protests, cdas=cohort),
+        "protest_status": protest_status(panel, protests, cdas=cohort),
+        "protest_recovery": recovery_around_protest(
+            panel, protests, payments, cdas=cohort
+        ),
+    }
+
+
 def _with_firm(panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame) -> pl.LazyFrame:
     reject_person_columns(firms)
     firm = firms.select(
@@ -1415,11 +1788,37 @@ def _with_firm(panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame) -> pl.La
     )
 
 
+def _age_frame(
+    panel: pl.DataFrame | pl.LazyFrame,
+    firms: pl.DataFrame,
+    base: pl.DataFrame | None = None,
+) -> pl.DataFrame | pl.LazyFrame:
+    """Narrow certificate-year frame. ``base`` is reused so the panel is scanned once."""
+    if base is not None:
+        return base
+    return _with_firm(panel, firms).select(
+        "id_debito",
+        "year",
+        "cnpj",
+        "origin",
+        "stock",
+        "paid",
+        "age",
+        "age_band",
+        "enrol_year",
+        "enrolled_value",
+        "status",
+    )
+
+
 def annual_recovery(
-    panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    firms: pl.DataFrame,
+    *,
+    base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Non-cumulative paid/stock by year, age band and origin."""
-    lf = _with_firm(panel, firms).filter(
+    lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
     out, n_sup = suppress_aggregate(
@@ -1440,10 +1839,13 @@ def annual_recovery(
 
 
 def mean_recovery(
-    panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    firms: pl.DataFrame,
+    *,
+    base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Stock-weighted mean of the annual rate, by age band and origin."""
-    lf = _with_firm(panel, firms).filter(
+    lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
     out, n_sup = suppress_aggregate(
@@ -1461,10 +1863,13 @@ def mean_recovery(
 
 
 def recovery_by_status(
-    panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame
+    panel: pl.DataFrame | pl.LazyFrame,
+    firms: pl.DataFrame,
+    *,
+    base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Stock-weighted recovery by age band, origin and registration status."""
-    lf = _with_firm(panel, firms).filter(
+    lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
     out, n_sup = suppress_aggregate(
@@ -1483,22 +1888,21 @@ def recovery_by_status(
 
 def cumulative_by_band(
     panel: pl.DataFrame | pl.LazyFrame,
+    *,
+    base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Cumulative paid / enrolled value at the last observed age inside each band.
 
     Cohorts are enrolments inside the window. The band above ten years is emitted
     empty: those cohorts do not reach it.
     """
-    lf = (
-        _lazy(panel)
-        .filter(
-            pl.col("enrol_year").is_between(FIRST_YEAR, LAST_YEAR)
-            & (pl.col("year") >= FIRST_YEAR)
-            & (pl.col("year") <= LAST_YEAR)
-            & (pl.col("year") >= pl.col("enrol_year"))
-        )
-        .with_columns(age_band_expr())
-    )
+    source = _lazy(panel) if base is None else _lazy(base)
+    lf = source.filter(
+        pl.col("enrol_year").is_between(FIRST_YEAR, LAST_YEAR)
+        & (pl.col("year") >= FIRST_YEAR)
+        & (pl.col("year") <= LAST_YEAR)
+        & (pl.col("year") >= pl.col("enrol_year"))
+    ).with_columns(age_band_expr())
     lf = lf.filter(
         pl.col("age_band").is_not_null() & (pl.col("age_band") != AGE_LABELS[-1])
     )
@@ -1549,6 +1953,22 @@ def cumulative_by_band(
     return assert_public(out), n_sup
 
 
+def recovery_age_page(
+    panel: pl.DataFrame | pl.LazyFrame, firms: pl.DataFrame
+) -> dict[str, Any]:
+    """Age-band tables. The panel stays lazy; each table is a streaming aggregate."""
+    _BUILDS["age_base"] += 1
+    base = _age_frame(panel, firms)
+    if isinstance(base, pl.DataFrame):
+        base = base.lazy()
+    return {
+        "annual": annual_recovery(panel, firms, base=base),
+        "mean": mean_recovery(panel, firms, base=base),
+        "cumulative": cumulative_by_band(panel, base=base),
+        "status": recovery_by_status(panel, firms, base=base),
+    }
+
+
 def _cnae_division(expr: pl.Expr) -> pl.Expr:
     digits = expr.cast(pl.Utf8).str.replace_all(r"\D", "")
     return (
@@ -1567,105 +1987,135 @@ def estimation_frame(
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Design of the nested logits. The frame is an input to the fit, not a page table."""
     reject_person_columns(firms)
-    base = _with_firm(panel, firms).filter(
-        (pl.col("stock") > 0)
+    eligible = _lazy(panel).filter(
+        (pl.col("year") >= FIRST_YEAR)
+        & (pl.col("year") <= LAST_YEAR)
+        & (pl.col("stock") > 0)
         & pl.col("rate_l1").is_not_null()
         & pl.col("age").is_not_null()
     )
+    # One row per debt for the dated flags, then join. The raw tables stay on disk.
     first_req = (
-        instalments.filter(_plausible("data_solicitacao"))
+        _lazy(instalments)
+        .filter(_plausible("data_solicitacao"))
         .group_by("id_debito")
         .agg(pl.col("data_solicitacao").min().alias("first_request"))
     )
     first_break = (
-        instalments.filter(_plausible("data_rompimento"))
+        _lazy(instalments)
+        .filter(_plausible("data_rompimento"))
         .group_by("id_debito")
         .agg(pl.col("data_rompimento").min().alias("first_break"))
     )
-    protest_ok = (
-        protests.filter(_plausible("data_protesto"))
+    protest_facts = (
+        _lazy(protests)
         .group_by("id_debito")
-        .agg(pl.col("data_protesto").min().alias("first_protest"))
-    )
-    protest_null = protests.group_by("id_debito").agg(
-        pl.col("data_protesto").null_count().alias("n_null_protest")
-    )
-    lf = (
-        base.join(first_req.lazy(), on="id_debito", how="left")
-        .join(first_break.lazy(), on="id_debito", how="left")
-        .join(protest_ok.lazy(), on="id_debito", how="left")
-        .join(protest_null.lazy(), on="id_debito", how="left")
-        .with_columns(
-            pl.col("stock").log().alias("log_stock"),
-            pl.col("year").cast(pl.Utf8),
-            (
-                pl.col("first_request").is_not_null()
-                & (pl.col("first_request").dt.year() < pl.col("year"))
-            )
-            .cast(pl.Int8)
-            .alias("instalment_requested_before"),
-            (
-                pl.col("first_break").is_not_null()
-                & (pl.col("first_break").dt.year() < pl.col("year"))
-            )
-            .cast(pl.Int8)
-            .alias("instalment_broken_before"),
-            pl.when(
-                pl.col("first_protest").is_not_null()
-                & (pl.col("first_protest").dt.year() < pl.col("year"))
-            )
-            .then(pl.lit("protested before the year"))
-            .when(
-                pl.col("first_protest").is_null()
-                & (pl.col("n_null_protest").fill_null(0) > 0)
-            )
-            .then(pl.lit("date missing"))
-            .otherwise(pl.lit("not protested"))
-            .alias("protest_before"),
-            _cnae_division(pl.col("cnae_divisao")).alias("cnae_division"),
-            pl.col("porte")
-            .cast(pl.Utf8)
-            .replace_strict(PORTE_LABEL, default="other code")
-            .fill_null("unknown")
-            .alias("porte_label"),
+        .agg(
+            pl.col("data_protesto")
+            .filter(_plausible("data_protesto"))
+            .min()
+            .alias("first_protest"),
+            pl.col("data_protesto").null_count().alias("n_null_protest"),
         )
     )
-    raw_cnae = _collect(
-        base.select(
-            (
-                pl.col("cnae_divisao")
+    firm = firms.lazy().select(
+        "cnpj",
+        "match_nivel",
+        pl.col("situacao_cadastral").alias("registry_code"),
+        "cnae_divisao",
+        "porte",
+    )
+
+    def _features(rows: pl.LazyFrame) -> pl.LazyFrame:
+        return (
+            rows.join(firm, on="cnpj", how="left")
+            .with_columns(
+                pl.col("match_nivel").fill_null("nao_encontrado"), _status_expr()
+            )
+            .join(first_req, on="id_debito", how="left")
+            .join(first_break, on="id_debito", how="left")
+            .join(protest_facts, on="id_debito", how="left")
+            .with_columns(
+                pl.col("stock").log().alias("log_stock"),
+                pl.col("year").cast(pl.Utf8),
+                (
+                    pl.col("first_request").is_not_null()
+                    & (pl.col("first_request").dt.year() < pl.col("year"))
+                )
+                .cast(pl.Int8)
+                .alias("instalment_requested_before"),
+                (
+                    pl.col("first_break").is_not_null()
+                    & (pl.col("first_break").dt.year() < pl.col("year"))
+                )
+                .cast(pl.Int8)
+                .alias("instalment_broken_before"),
+                pl.when(
+                    pl.col("first_protest").is_not_null()
+                    & (pl.col("first_protest").dt.year() < pl.col("year"))
+                )
+                .then(pl.lit("protested before the year"))
+                .when(
+                    pl.col("first_protest").is_null()
+                    & (pl.col("n_null_protest").fill_null(0) > 0)
+                )
+                .then(pl.lit("date missing"))
+                .otherwise(pl.lit("not protested"))
+                .alias("protest_before"),
+                _cnae_division(pl.col("cnae_divisao")).alias("cnae_division"),
+                pl.col("porte")
                 .cast(pl.Utf8)
-                .str.replace_all(r"\D", "")
-                .str.len_chars()
-                > 2
+                .replace_strict(PORTE_LABEL, default="other code")
+                .fill_null("unknown")
+                .alias("porte_label"),
             )
-            .fill_null(False)
-            .sum()
-            .alias("n_cnae_truncated")
+            .select(
+                "id_debito",
+                "year",
+                "cnpj",
+                "cnpj_root",
+                "paid_flag",
+                "log_stock",
+                "age",
+                "rate_l1",
+                "origin",
+                "status",
+                "cnae_division",
+                "porte_label",
+                "instalment_requested_before",
+                "instalment_broken_before",
+                "protest_before",
+            )
+        )
+
+    trunc_expr = (
+        pl.col("cnae_divisao").cast(pl.Utf8).str.replace_all(r"\D", "").str.len_chars()
+        > 2
+    ).fill_null(False)
+    counted = _collect(
+        eligible.join(
+            firm.select("cnpj", "cnae_divisao"), on="cnpj", how="left"
+        ).select(
+            pl.len().alias("n"),
+            trunc_expr.sum().alias("n_cnae_truncated"),
         )
     )
-    collected = _collect(
-        lf.select(
-            "id_debito",
-            "year",
-            "cnpj",
-            "cnpj_root",
-            "paid_flag",
-            "log_stock",
-            "age",
-            "rate_l1",
-            "origin",
-            "status",
-            "cnae_division",
-            "porte_label",
-            "instalment_requested_before",
-            "instalment_broken_before",
-            "protest_before",
+    n_before = int(counted["n"][0])
+    n_trunc = int(counted["n_cnae_truncated"][0] or 0)
+    rows = eligible
+    if n_before > params.sample_n:
+        # Hash sample keeps about sample_n rows. The exact draw is trimmed below.
+        # A full collect of every eligible certificate-year does not fit in 8 GB.
+        span = 2**32
+        keep = max(1, int(span * min(1.0, params.sample_n * 1.25 / n_before)))
+        digest = pl.col("id_debito").hash(seed=params.seed) ^ pl.col("year").hash(
+            seed=params.seed
         )
-    )
+        rows = eligible.filter((digest % span) < keep)
+    collected = _collect(_features(rows))
     notes: dict[str, Any] = {
-        "n_before_sample": collected.height,
-        "n_cnae_truncated": int(raw_cnae["n_cnae_truncated"][0] or 0),
+        "n_before_sample": n_before,
+        "n_cnae_truncated": n_trunc,
         "sample_n": params.sample_n,
         "seed": params.seed,
         "formula_m1": M1_FORMULA,
@@ -1797,12 +2247,16 @@ def fit_nested(
     fit_rows: list[dict[str, Any]] = []
 
     def _fit(formula: str, **kwargs):
-        try:
-            return smf.logit(formula, data=frame).fit(disp=False, maxiter=200, **kwargs)
-        except np.linalg.LinAlgError:
-            return smf.logit(formula, data=frame).fit(
-                disp=False, method="bfgs", maxiter=200, **kwargs
-            )
+        last = None
+        for method in (None, "bfgs", "lbfgs"):
+            kw = dict(kwargs)
+            if method is not None:
+                kw["method"] = method
+            try:
+                return smf.logit(formula, data=frame).fit(disp=False, maxiter=200, **kw)
+            except (np.linalg.LinAlgError, ValueError) as exc:
+                last = exc
+        raise last
 
     for name, formula in formulas:
         res = _fit(formula, cov_type="HC1")
@@ -2489,54 +2943,106 @@ def synthetic_bundle(seed: int = SEED) -> dict[str, Any]:
     }
 
 
-def page_setup() -> tuple[dict[str, Any], PgeParams]:
-    """Synthetic bundle when IMP23_SYNTHETIC=1. Otherwise the read-only extract."""
+def page_setup(
+    include: tuple[str, ...] | None = None,
+) -> tuple[dict[str, Any], PgeParams]:
+    """Synthetic bundle when IMP23_SYNTHETIC=1. Otherwise the read-only extract.
+
+    ``include`` names the pieces a page actually uses, so a page does not read the
+    protest table when it only needs the panel.
+    """
     params = PgeParams()
     if os.environ.get("IMP23_SYNTHETIC") == "1":
         bundle = synthetic_bundle(params.seed)
         bundle["synthetic"] = True
         return bundle, params
-    bundle = load_observed_bundle()
+    bundle = load_observed_bundle(include)
     bundle["synthetic"] = False
     return bundle, params
 
 
-def load_observed_bundle() -> dict[str, Any]:
+def _scan_sql(sql: str, normalise, step: str) -> pl.LazyFrame:
+    """Stream a read-only query to parquet. The raw table is not collected into memory."""
+    import hashlib
+
+    import _lab_base as B
+
+    digest = hashlib.sha256(sql.encode()).hexdigest()[:16]
+    path = B.CACHE_DIR / f"{step}_{digest}.parquet"
+    if not path.exists():
+        tmp = path.with_suffix(".tmp.parquet")
+        con = B.duck()
+        try:
+            con.execute(
+                "COPY ("
+                + sql
+                + f") TO '{tmp.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        finally:
+            con.close()
+        tmp.replace(path)
+    return normalise(pl.scan_parquet(path))
+
+
+def load_observed_bundle(include: tuple[str, ...] | None = None) -> dict[str, Any]:
     """Read-only load. New cache keys are prefixed IMP23. Existing keys are not rewritten.
 
     Called only outside synthetic mode. The pure functions above do not call it.
     """
     import _lab_base as B
 
-    instal = _normalise_instalments(
-        B.query("IMP23:instalments", SQL_INSTALMENTS, version="1").collect()
+    wanted = include or (
+        "panel",
+        "firms",
+        "instalments",
+        "protests",
+        "payments",
+        "cohort",
     )
-    protests = _normalise_protests(
-        B.query("IMP23:protests", SQL_PROTEST, version="1").collect()
-    )
-    panel = _normalise_panel(B.panel, B.attributes)
-    firms = B.cached(
-        "IMP23:firms",
-        _read_firms,
-        params={"ref": REF_RFB, "commit": MANIFEST_COMMIT, "cols": list(FIRM_COLUMNS)},
-        version="1",
-    ).collect()
-    payments = (
-        B.scan_gare()
-        .filter(pl.col("DATA_ARRECADACAO_GARE") <= pl.date(LAST_YEAR, 12, 31))
-        .select(
-            pl.col("ID_DEBITO").alias("id_debito"),
-            pl.col("DATA_ARRECADACAO_GARE").alias("pay_date"),
-            pl.col("VALOR_RECEITA").alias("amount"),
+    bundle: dict[str, Any] = {}
+    if "panel" in wanted or "cohort" in wanted:
+        bundle["panel"] = _normalise_panel(B.panel, B.attributes)
+    if "firms" in wanted:
+        bundle["firms"] = B.cached(
+            "IMP23:firms",
+            _read_firms,
+            params={
+                "ref": REF_RFB,
+                "commit": MANIFEST_COMMIT,
+                "cols": list(FIRM_COLUMNS),
+            },
+            version="1",
+        ).collect()
+    if "instalments" in wanted:
+        bundle["instalments"] = _scan_sql(
+            SQL_INSTALMENTS, _normalise_instalments, "IMP23-instalments"
         )
-    )
-    return {
-        "panel": panel,
-        "firms": firms,
-        "instalments": instal,
-        "protests": protests,
-        "payments": payments,
-    }
+    if "protests" in wanted:
+        bundle["protests"] = _scan_sql(
+            SQL_PROTEST, _normalise_protests, "IMP23-protests"
+        )
+    if "payments" in wanted:
+        bundle["payments"] = (
+            B.scan_gare()
+            .filter(pl.col("DATA_ARRECADACAO_GARE") <= pl.date(LAST_YEAR, 12, 31))
+            .select(
+                pl.col("ID_DEBITO").alias("id_debito"),
+                pl.col("DATA_ARRECADACAO_GARE").alias("pay_date"),
+                pl.col("VALOR_RECEITA").alias("amount"),
+            )
+        )
+    if "cohort" in wanted:
+
+        def _build_cohort() -> pl.DataFrame:
+            return _cohort_cdas(bundle["panel"])
+
+        bundle["cohort"] = B.cached(
+            "IMP23:cohort",
+            _build_cohort,
+            params={"first": FIRST_YEAR, "last": LAST_YEAR},
+            version="1",
+        ).collect()
+    return bundle
 
 
 def _normalise_panel(panel: pl.LazyFrame, attributes: pl.LazyFrame) -> pl.LazyFrame:
