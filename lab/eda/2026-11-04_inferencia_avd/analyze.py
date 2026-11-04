@@ -31,7 +31,15 @@ infer = _load("avd_infer", HERE / "infer.py")
 LIN_LOADER = lin.load_estimation_frame
 sql_texts = lin.sql_texts
 MEMORY_LIMIT = lin.MEMORY_LIMIT
-TABLES = ("coefficients", "quantiles", "curves", "variance", "seconds")
+TABLES = (
+    "coefficients",
+    "quantiles",
+    "curves",
+    "variance",
+    "status",
+    "sample_account",
+    "seconds",
+)
 
 
 def load_estimation_frame():

@@ -86,11 +86,11 @@ def test_specification_is_the_section_4_5_decision():
     frame = infer.prepare(_frame(420, seed=3))
     declared = infer.payment_formula(frame.loc[frame.segment == "declared"], "declared")
     assessed = infer.payment_formula(frame.loc[frame.segment == "assessed"], "assessed")
-    assert "cr(log_stock, df=4)" in declared
-    assert "cr(debt_age, df=4)" in declared
+    assert "cr(log_stock, df=4, constraints='center')" in declared
+    assert "cr(debt_age, df=4, constraints='center')" in declared
     assert "cr(log_stock" not in assessed
     assert "log_stock" in assessed
-    assert "cr(debt_age, df=4)" in assessed
+    assert "cr(debt_age, df=4, constraints='center')" in assessed
     assert "municipality" not in declared
     assert "municipality" not in assessed
 
@@ -131,7 +131,7 @@ def test_samples_use_the_cluster_cap_and_the_spline_cap():
             "stock": rng.uniform(1, 10, n),
         }
     )
-    drawn = infer.payment_rows(declared, "declared", seed=4)
+    drawn = infer.mixed_rows(declared, "declared", seed=4)
     counts = drawn.groupby("municipality").size()
     assert len(drawn) <= diag.MIXED_CAP
     assert counts.max() <= diag.CLUSTER_PER_GROUP
@@ -144,8 +144,10 @@ def test_samples_use_the_cluster_cap_and_the_spline_cap():
             "municipality": "A",
         }
     )
-    assessed_rows = infer.payment_rows(assessed, "assessed", seed=4)
+    assessed_rows = infer.logit_rows(assessed, "assessed", seed=4)
     assert len(assessed_rows) == diag.SPLINE_CAP
+    declared_logit = infer.logit_rows(declared, "declared", seed=4)
+    assert len(declared_logit) == len(declared)
     quantile_rows = infer.quantile_rows(
         pd.concat(
             [
@@ -156,7 +158,16 @@ def test_samples_use_the_cluster_cap_and_the_spline_cap():
         ),
         seed=4,
     )
-    assert len(quantile_rows) == diag.QUANTILE_CAP
+    assert int((quantile_rows.segment == "declared").sum()) == len(declared)
+    assert int((quantile_rows.segment == "assessed").sum()) == diag.QUANTILE_CAP
+    tiny = assessed.iloc[:300].assign(section="G")
+    wide = pd.concat([declared.assign(section="G")] * 3, ignore_index=True)
+    per_segment = infer.quantile_rows(
+        pd.concat([wide, tiny], ignore_index=True),
+        seed=4,
+    )
+    assert int((per_segment.segment == "assessed").sum()) == 300
+    assert int((per_segment.segment == "declared").sum()) == diag.QUANTILE_CAP
 
 
 def test_sparse_levels_do_not_become_coefficients():
@@ -194,17 +205,38 @@ def test_fit_omits_stock_ols_and_covers_both_segments(fitted):
     assert set(recovery.se_type) >= {"HC3", "cluster"}
     declared = coef.loc[(coef.segment == "declared") & (coef.outcome == "paid_flag")]
     assessed = coef.loc[(coef.segment == "assessed") & (coef.outcome == "paid_flag")]
+    assert set(declared.loc[declared.model == "logit", "se_type"]) >= {"HC3", "cluster"}
+    assert set(assessed["se_type"]) >= {"HC3", "cluster"}
+    assert set(assessed["model"]) == {"logit"}
+    assert "constraints='center'" in declared["formula"].iloc[0]
+    assert "constraints='center'" in assessed["formula"].iloc[0]
+    logit = coef.loc[coef.model == "logit"]
+    assert np.isfinite(logit["se"]).all()
+    assert np.isfinite(logit["ci_low"]).all()
+    assert np.isfinite(logit["ci_high"]).all()
     assert declared["term"].str.contains(r"cr\(log_stock").any()
     assert declared["term"].str.contains(r"cr\(debt_age").any()
     assert not assessed["term"].str.contains(r"cr\(log_stock").any()
     assert assessed["term"].str.contains("log_stock").any()
     assert assessed["term"].str.contains(r"cr\(debt_age").any()
     assert not declared["term"].str.contains("municipality").any()
+    mixed = declared.loc[declared.model == "mixed_logit"]
+    assert not mixed.empty
+    assert (mixed["interval"] == "approximate posterior").all()
+    assert not mixed["interval"].str.contains("95").any()
     variance = fitted["variance"]
     assert set(variance.segment) == {"declared"}
     assert variance["grouping"].iloc[0] == "municipality"
     assert variance["tau2"].iloc[0] > 0
-    assert "ci_low" in variance.columns
+    assert (variance["interval"] == "approximate posterior").all()
+    status = fitted["status"]
+    assert set(status.segment) == {"declared", "assessed"}
+    assert (status["rank"] == status["n_columns"]).all()
+    assert bool(status["converged"].all())
+    assert status["mcfadden_r2"].notna().all()
+    account = fitted["sample_account"]
+    gap = account["n_dropped_small_pool"] + account["n_dropped_separation"]
+    assert (account["n_fit"] + gap == account["n_cap_sample"]).all()
 
 
 def test_curves_are_spline_contrasts_without_webgl_or_raw_points(fitted):
@@ -230,7 +262,9 @@ def test_partial_curve_is_zero_at_the_median():
     frame = infer.prepare(_frame(500, seed=9))
     part = infer.pool_sparse(frame.loc[frame.segment == "assessed"].copy())
     fit = infer.fit_logit(part, "assessed")
-    value = infer.contrast_at(fit, "debt_age", float(part["debt_age"].median()))
+    value = infer.contrast_at(
+        fit["curve"], "debt_age", float(part["debt_age"].median())
+    )
     assert value == pytest.approx(0.0, abs=1e-8)
 
 
@@ -277,6 +311,33 @@ def test_cache_and_written_tables_omit_identifiers(tmp_path, monkeypatch, fitted
         assert "root" not in header.split(",")
 
 
+def test_uncentered_spline_is_rank_deficient_and_the_centered_basis_is_not():
+    import patsy
+
+    frame = infer.prepare(_frame(420, seed=3))
+    part = infer.pool_sparse(frame.loc[frame.segment == "assessed"].copy())
+    formula = infer.payment_formula(part, "assessed")
+    rhs = formula.split("~", 1)[1].strip()
+    assert "constraints='center'" in rhs
+    centered = np.asarray(
+        patsy.dmatrix(rhs, part, return_type="dataframe"), dtype=float
+    )
+    infer.require_full_rank(centered)
+    bare = rhs.replace(", constraints='center'", "")
+    deficient = np.asarray(
+        patsy.dmatrix(bare, part, return_type="dataframe"), dtype=float
+    )
+    with pytest.raises(RuntimeError, match="rank"):
+        infer.require_full_rank(deficient)
+
+
+def test_logit_requires_convergence():
+    stopped = type("Stopped", (), {})()
+    stopped.mle_retvals = {"converged": False}
+    with pytest.raises(RuntimeError, match="converge"):
+        infer.require_converged(stopped, "assessed")
+
+
 def test_page_is_section_4_7_and_states_the_screen():
     page = (HERE.parent / "2026-11-04_inferencia_avd.qmd").read_text(encoding="utf-8")
     assembler = (REPO / "lab" / "paper_eda" / "_pagina_unica.py").read_text(
@@ -289,6 +350,11 @@ def test_page_is_section_4_7_and_states_the_screen():
     assert "CPF_DEVEDOR" not in page
     assert "debtor name" in page
     assert "no CNPJ" in page
+    assert "constraints='center'" in page or "centered" in page.lower()
+    assert "approximate posterior" in page.lower()
+    assert "McFadden" in page
+    assert "5,063" in page
+    assert "per segment" in page.lower()
     assert "2026-11-04_inferencia_avd" in assembler
     assert '"lab-avd-inf"' in assembler
     assert '"4.7"' in assembler

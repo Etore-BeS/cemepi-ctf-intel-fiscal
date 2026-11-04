@@ -70,7 +70,7 @@ LAB_PAGES = [
     ("eda/2026-11-04_benchmark_wilcoxon", "4.6",
      "Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN",
      "lab-ben-wsr", "bw", "06_parte_c", "BEN-W"),
-    # 4.6 is the Wilcoxon entry on another branch. This inference is the next number.
+    # Next number after the Wilcoxon entry (4.6, #lab-ben-wsr).
     ("eda/2026-11-04_inferencia_avd", "4.7",
      "Declared and assessed VAT inference from the section 4.5 specification",
      "lab-avd-inf", "avd", "06_parte_c", "AVD-14"),
@@ -785,12 +785,12 @@ def lab_blocks(state: dict) -> tuple[dict, list[str]]:
     state["lab_included"] = set()
     for src, num, short, anchor, pfx, part, codes in LAB_PAGES:
         freeze = LAB / "_freeze" / src / "execute-results" / "html.json"
-        # 4.5 e 4.7 são renderizadas no Mac. Sem _freeze a página única segue sem a seção.
-        if src in {
-            "eda/2026-11-04_diagnostico_linearidade",
-            "eda/2026-11-04_inferencia_avd",
-        } and not freeze.exists():
-            print(f"{src}: sem _freeze; a seção fica de fora até o render local.", file=sys.stderr)
+        # A 4.5 ainda não tem _freeze neste commit: o render é no Mac. As outras entradas continuam obrigatórias.
+        if src == "eda/2026-11-04_diagnostico_linearidade" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.5 fica de fora até o render local.", file=sys.stderr)
+            continue
+        if src == "eda/2026-11-04_inferencia_avd" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.7 fica de fora até o render local.", file=sys.stderr)
             continue
         b, inc = lab_section(src, num, short, anchor, pfx, codes, state)
         state["lab_included"].add(anchor)

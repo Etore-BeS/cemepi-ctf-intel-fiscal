@@ -49,7 +49,8 @@ QUANTILE_CAP = diag.QUANTILE_CAP
 QUANTILES = diag.QUANTILES
 SPLINE_DF = 4
 POOLED = "pooled"
-CACHE_VERSION = "avd47-v1"
+CACHE_VERSION = "avd47-v2"
+POSTERIOR_INTERVAL = "approximate posterior"
 Z = diag.Z_95
 
 # Moment ICCs printed in the section 4.5 decision (municipality, full sample).
@@ -97,7 +98,9 @@ def payment_formula(frame: pd.DataFrame, segment: str) -> str:
         if frame[name].nunique(dropna=True) <= 1:
             continue
         if name in spec["splines"]:
-            terms.append(f"cr({name}, df={SPLINE_DF})")
+            # Centering removes the column that sums to 1, which is collinear
+            # with the intercept. df stays 4 after the constraint.
+            terms.append(f"cr({name}, df={SPLINE_DF}, constraints='center')")
         else:
             terms.append(name)
     base = diag.rhs(frame, "paid_flag", by_segment=True)
@@ -110,24 +113,89 @@ def payment_formula(frame: pd.DataFrame, segment: str) -> str:
     return "paid_flag ~ " + " + ".join(terms)
 
 
-def payment_rows(frame: pd.DataFrame, segment: str, seed: int) -> pd.DataFrame:
-    """Declared uses the section 4.5 cluster sample. Assessed uses the spline cap."""
-    part = frame.loc[frame["segment"].astype(str) == segment].copy()
-    if SPEC[segment]["random_intercept"]:
-        return diag.cluster_sample(
-            part,
-            "municipality",
-            cap=MIXED_CAP,
-            per_group=CLUSTER_PER_GROUP,
-            seed=seed,
-        )
+def _segment_rows(frame: pd.DataFrame, segment: str) -> pd.DataFrame:
+    return frame.loc[frame["segment"].astype(str) == segment].copy()
+
+
+def logit_rows(frame: pd.DataFrame, segment: str, seed: int) -> pd.DataFrame:
+    """Fixed-effects logit sample. At most SPLINE_CAP rows in each segment."""
+    part = _segment_rows(frame, segment)
     keys = ["paid_flag"] if "paid_flag" in part.columns else ["porte"]
     return diag.stratified_sample(part, SPLINE_CAP, keys, seed)
 
 
+def mixed_rows(frame: pd.DataFrame, segment: str, seed: int) -> pd.DataFrame:
+    """Cluster sample for the municipal random intercept. Empty when the segment has none."""
+    part = _segment_rows(frame, segment)
+    group = SPEC[segment]["random_intercept"]
+    if not group:
+        return part.iloc[:0].copy()
+    return diag.cluster_sample(
+        part,
+        group,
+        cap=MIXED_CAP,
+        per_group=CLUSTER_PER_GROUP,
+        seed=seed,
+    )
+
+
 def quantile_rows(frame: pd.DataFrame, seed: int) -> pd.DataFrame:
-    keys = [key for key in ("segment", "porte", "paid_flag") if key in frame.columns]
-    return diag.stratified_sample(frame, QUANTILE_CAP, keys, seed)
+    """At most QUANTILE_CAP rows inside each segment. A smaller segment is kept whole."""
+    keys = [key for key in ("porte", "paid_flag") if key in frame.columns]
+    if "segment" not in frame.columns:
+        if not keys:
+            raise RuntimeError("The quantile sample needs porte or paid_flag.")
+        return diag.stratified_sample(frame, QUANTILE_CAP, keys, seed)
+    parts = []
+    for _, part in frame.groupby("segment", dropna=False):
+        use = keys if keys else ["segment"]
+        parts.append(diag.stratified_sample(part, QUANTILE_CAP, use, seed))
+    if not parts:
+        return frame.iloc[:0].copy()
+    return pd.concat(parts, ignore_index=True)
+
+
+def require_full_rank(exog: np.ndarray) -> int:
+    """Fail when the design is column-rank deficient."""
+    matrix = np.asarray(exog, dtype=float)
+    if matrix.ndim != 2:
+        raise RuntimeError("The design is not a matrix.")
+    n_rows, n_columns = matrix.shape
+    if n_rows < n_columns:
+        raise RuntimeError(f"The design has {n_rows} rows and {n_columns} columns.")
+    rank = int(np.linalg.matrix_rank(matrix))
+    if rank < n_columns:
+        raise RuntimeError(
+            f"The design is rank deficient: rank {rank} of {n_columns} columns."
+        )
+    return rank
+
+
+def require_converged(result, segment: str) -> None:
+    """Fail when the logit maximum did not converge."""
+    retvals = getattr(result, "mle_retvals", None) or {}
+    if not retvals.get("converged", False):
+        raise RuntimeError(f"The {segment} logit did not converge.")
+
+
+def prepare_logit_sample(
+    frame: pd.DataFrame, segment: str, seed: int
+) -> tuple[pd.DataFrame, dict]:
+    """Cap, then drop a small pool and a separated level. The dict counts each drop."""
+    n_estimation = len(_segment_rows(frame, segment))
+    capped = logit_rows(frame, segment, seed)
+    n_cap = len(capped)
+    pooled = pool_sparse(capped)
+    kept = drop_separated_levels(pooled)
+    account = {
+        "segment": segment,
+        "n_estimation": n_estimation,
+        "n_cap_sample": n_cap,
+        "n_dropped_small_pool": n_cap - len(pooled),
+        "n_dropped_separation": len(pooled) - len(kept),
+        "n_fit": len(kept),
+    }
+    return kept, account
 
 
 def _level_counts(frame: pd.DataFrame, column: str) -> pd.DataFrame:
@@ -217,6 +285,7 @@ def _fit_record(
     beta: np.ndarray,
     se: np.ndarray,
     exog: np.ndarray,
+    cov: np.ndarray | None = None,
 ) -> _Fit:
     rhs = formula.split("~", 1)[1].strip()
     design, info = _aligned_design(rhs, data, names)
@@ -232,6 +301,7 @@ def _fit_record(
         names=names,
         beta=np.asarray(beta, dtype=float),
         se=np.asarray(se, dtype=float),
+        cov=None if cov is None else np.asarray(cov, dtype=float),
         design_info=info,
         prototype=data.iloc[[0]].copy(),
         medians=medians,
@@ -261,20 +331,26 @@ def contrast_at(fit: _Fit, variable: str, value: float) -> float:
     return float(contrast @ fit.beta)
 
 
+def _curve_se(fit: _Fit, contrast: np.ndarray) -> float:
+    if fit.cov is not None:
+        quad = float(contrast @ fit.cov @ contrast)
+        return float(np.sqrt(max(quad, 0.0)))
+    return float(np.sqrt(np.sum((contrast**2) * (fit.se**2))))
+
+
 def partial_curve(fit: _Fit, variable: str) -> pd.DataFrame:
-    """Forty-point partial log-odds curve. The band treats coefficients as independent."""
+    """Forty-point partial log-odds curve. The band uses the fit covariance when it exists."""
     values = fit.values[variable]
     lo, hi = np.quantile(values, [0.05, 0.95])
     if not np.isfinite(lo) or hi <= lo:
         hi = lo + 1.0
     grid = np.linspace(float(lo), float(hi), diag.N_BINS)
     base = _exog_at(fit, variable, fit.medians[variable])
-    variance = fit.se**2
     rows = []
     for x in grid:
         contrast = _exog_at(fit, variable, float(x)) - base
         estimate = float(contrast @ fit.beta)
-        se = float(np.sqrt(np.sum((contrast**2) * variance)))
+        se = _curve_se(fit, contrast)
         rows.append(
             {
                 "variable": variable,
@@ -288,47 +364,119 @@ def partial_curve(fit: _Fit, variable: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _coef_frame(fit: _Fit, segment: str, model: str, se_type: str) -> pd.DataFrame:
-    out = pd.DataFrame(
+def _coef_frame(
+    names: list[str],
+    coef: np.ndarray,
+    se: np.ndarray,
+    low: np.ndarray,
+    high: np.ndarray,
+    segment: str,
+    model: str,
+    se_type: str,
+    n: int,
+    formula: str,
+    interval: str,
+) -> pd.DataFrame:
+    return pd.DataFrame(
         {
-            "term": fit.names,
-            "coef": fit.beta,
-            "se": fit.se,
-            "ci_low": fit.beta - Z * fit.se,
-            "ci_high": fit.beta + Z * fit.se,
+            "term": names,
+            "coef": coef,
+            "se": se,
+            "ci_low": low,
+            "ci_high": high,
+            "segment": segment,
+            "outcome": "paid_flag",
+            "model": model,
+            "se_type": se_type,
+            "interval": interval,
+            "n": n,
+            "formula": formula,
         }
     )
-    out["segment"] = segment
-    out["outcome"] = "paid_flag"
-    out["model"] = model
-    out["se_type"] = se_type
-    out["n"] = fit.n
-    out["formula"] = fit.formula
-    return out
 
 
-def fit_logit(data: pd.DataFrame, segment: str) -> _Fit:
+def _robust_table(result, segment: str, se_type: str, formula: str, interval: str):
+    names = [str(name) for name in result.model.exog_names]
+    params = np.asarray(result.params, dtype=float).ravel()
+    se = np.asarray(result.bse, dtype=float).ravel()
+    ci = np.asarray(result.conf_int(), dtype=float)
+    return _coef_frame(
+        names,
+        params,
+        se,
+        ci[:, 0],
+        ci[:, 1],
+        segment,
+        "logit",
+        se_type,
+        int(result.nobs),
+        formula,
+        interval,
+    )
+
+
+def fit_logit(data: pd.DataFrame, segment: str) -> dict:
+    """Maximum-likelihood logit. Fails if the design is short of full rank or the fit does not converge."""
     formula = payment_formula(data, segment)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        try:
-            result = smf.logit(formula, data=data).fit(disp=False, maxiter=200)
-        except (ValueError, np.linalg.LinAlgError, PerfectSeparationError) as exc:
-            raise RuntimeError(f"The {segment} logit did not fit. {exc}") from exc
-    names = [str(name) for name in result.params.index]
-    return _fit_record(
+    if "root" not in data.columns or data["root"].nunique() < 2:
+        raise RuntimeError(f"The {segment} logit needs at least two CNPJ roots.")
+    try:
+        model = smf.logit(formula, data=data)
+        result = model.fit(disp=False, maxiter=200)
+    except (ValueError, np.linalg.LinAlgError, PerfectSeparationError) as exc:
+        raise RuntimeError(f"The {segment} logit did not fit. {exc}") from exc
+    require_converged(result, segment)
+    exog = np.asarray(result.model.exog, dtype=float)
+    rank = require_full_rank(exog)
+    start = np.asarray(result.params, dtype=float)
+    try:
+        hc3 = model.fit(disp=False, maxiter=200, start_params=start, cov_type="HC3")
+        clustered = model.fit(
+            disp=False,
+            maxiter=200,
+            start_params=start,
+            cov_type="cluster",
+            cov_kwds={"groups": data["root"].to_numpy()},
+        )
+    except (ValueError, np.linalg.LinAlgError) as exc:
+        raise RuntimeError(
+            f"The {segment} logit covariance did not fit. {exc}"
+        ) from exc
+    names = [str(name) for name in result.model.exog_names]
+    curve = _fit_record(
         formula,
         data,
         names,
-        np.asarray(result.params, dtype=float),
-        np.asarray(result.bse, dtype=float),
-        np.asarray(result.model.exog, dtype=float),
+        np.asarray(hc3.params, dtype=float).ravel(),
+        np.asarray(hc3.bse, dtype=float).ravel(),
+        exog,
+        cov=np.asarray(hc3.cov_params(), dtype=float),
     )
+    status = {
+        "segment": segment,
+        "model": "logit",
+        "n": int(result.nobs),
+        "rank": rank,
+        "n_columns": int(exog.shape[1]),
+        "converged": True,
+        "mcfadden_r2": float(result.prsquared),
+    }
+    tables = pd.concat(
+        [
+            _robust_table(hc3, segment, "HC3", formula, "HC3 95 percent"),
+            _robust_table(clustered, segment, "cluster", formula, "cluster 95 percent"),
+        ],
+        ignore_index=True,
+    )
+    return {"coefficients": tables, "curve": curve, "status": status}
 
 
 def fit_mixed(data: pd.DataFrame, segment: str) -> tuple[_Fit, dict]:
     formula = payment_formula(data, segment)
     group = SPEC[segment]["random_intercept"]
+    rhs = formula.split("~", 1)[1].strip()
+    design = patsy.dmatrix(rhs, data, return_type="dataframe")
+    require_full_rank(design.to_numpy(dtype=float))
     vc = {group: f"0 + C({group})"}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -368,6 +516,7 @@ def fit_mixed(data: pd.DataFrame, segment: str) -> tuple[_Fit, dict]:
         "n_groups": int(data[group].nunique()),
         "ci_low": float(np.exp(log_sd - Z * log_se)),
         "ci_high": float(np.exp(log_sd + Z * log_se)),
+        "interval": POSTERIOR_INTERVAL,
     }
     return fit, variance
 
@@ -383,9 +532,49 @@ def _curves_for(fit: _Fit, segment: str) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
 
 
+_VARIANCE_COLUMNS = (
+    "segment",
+    "grouping",
+    "tau",
+    "tau_ci_low",
+    "tau_ci_high",
+    "tau2",
+    "icc",
+    "n",
+    "n_groups",
+    "ci_low",
+    "ci_high",
+    "interval",
+)
+
+
+def _empty_variance() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(_VARIANCE_COLUMNS))
+
+
+def _mixed_coefficients(fit: _Fit, segment: str) -> pd.DataFrame:
+    low = fit.beta - Z * fit.se
+    high = fit.beta + Z * fit.se
+    return _coef_frame(
+        fit.names,
+        fit.beta,
+        fit.se,
+        low,
+        high,
+        segment,
+        "mixed_logit",
+        "variational",
+        fit.n,
+        fit.formula,
+        POSTERIOR_INTERVAL,
+    )
+
+
 def block_payment(frame: pd.DataFrame, segment: str, seed: int = 20261104) -> dict:
+    """Fixed-effects logit on the spline cap. Declared also fits the municipal complement."""
     started = time.perf_counter()
-    rows = drop_separated_levels(pool_sparse(payment_rows(frame, segment, seed)))
+    rows, account = prepare_logit_sample(frame, segment, seed)
+    account_frame = pd.DataFrame([account])
     key = _signature(
         rows,
         ["paid_flag", "log_stock", "debt_age", "section", "porte"],
@@ -395,50 +584,61 @@ def block_payment(frame: pd.DataFrame, segment: str, seed: int = 20261104) -> di
     if cached is not None:
         cached["cache"] = "hit"
         cached["seconds"] = time.perf_counter() - started
+        cached["seconds_logit"] = cached["seconds"]
+        cached["seconds_mixed"] = 0.0
         cached["n"] = len(rows)
+        cached["sample_account"] = account_frame
         print(
             f"payment {segment}: cache hit, {cached['seconds']:.1f} s",
             flush=True,
         )
         return cached
+    logit_started = time.perf_counter()
+    fitted = fit_logit(rows, segment)
+    seconds_logit = time.perf_counter() - logit_started
+    coefficients = fitted["coefficients"]
+    curves = _curves_for(fitted["curve"], segment)
+    status = pd.DataFrame([fitted["status"]])
+    variance = _empty_variance()
+    seconds_mixed = 0.0
     if SPEC[segment]["random_intercept"]:
-        fit, variance_row = fit_mixed(rows, segment)
-        coefficients = _coef_frame(fit, segment, "mixed_logit", "variational")
-        variance = pd.DataFrame([variance_row])
-    else:
-        fit = fit_logit(rows, segment)
-        coefficients = _coef_frame(fit, segment, "logit", "wald")
-        variance = pd.DataFrame(
-            columns=[
-                "segment",
-                "grouping",
-                "tau",
-                "tau_ci_low",
-                "tau_ci_high",
-                "tau2",
-                "icc",
-                "n",
-                "n_groups",
-                "ci_low",
-                "ci_high",
-            ]
+        mixed_started = time.perf_counter()
+        mixed_sample = drop_separated_levels(
+            pool_sparse(mixed_rows(frame, segment, seed))
         )
-    curves = _curves_for(fit, segment)
+        mixed_fit, variance_row = fit_mixed(mixed_sample, segment)
+        coefficients = pd.concat(
+            [coefficients, _mixed_coefficients(mixed_fit, segment)],
+            ignore_index=True,
+        )
+        variance = pd.DataFrame([variance_row])
+        seconds_mixed = time.perf_counter() - mixed_started
     seconds = time.perf_counter() - started
     out = {
         "coefficients": coefficients,
         "curves": curves,
         "variance": variance,
+        "status": status,
+        "sample_account": account_frame,
         "cache": "miss",
         "seconds": seconds,
+        "seconds_logit": seconds_logit,
+        "seconds_mixed": seconds_mixed,
         "n": len(rows),
     }
     _write_cached(
         key,
-        {"coefficients": coefficients, "curves": curves, "variance": variance},
+        {
+            "coefficients": coefficients,
+            "curves": curves,
+            "variance": variance,
+            "status": status,
+        },
     )
     print(
-        f"payment {segment}: cache miss, {seconds:.1f} s, n = {len(rows)}", flush=True
+        f"payment {segment}: cache miss, logit {seconds_logit:.1f} s, "
+        f"mixed {seconds_mixed:.1f} s, n = {len(rows)}",
+        flush=True,
     )
     return out
 
@@ -619,6 +819,10 @@ def run_inference(frame: pd.DataFrame, seed: int = 20261104) -> dict:
     variance = pd.concat(
         [declared["variance"], assessed["variance"]], ignore_index=True
     )
+    status = pd.concat([declared["status"], assessed["status"]], ignore_index=True)
+    sample_account = pd.concat(
+        [declared["sample_account"], assessed["sample_account"]], ignore_index=True
+    )
     flags = [
         declared["cache"],
         assessed["cache"],
@@ -627,8 +831,18 @@ def run_inference(frame: pd.DataFrame, seed: int = 20261104) -> dict:
     ]
     seconds = pd.DataFrame(
         [
-            {"block": "payment_declared", "seconds": declared["seconds"]},
-            {"block": "payment_assessed", "seconds": assessed["seconds"]},
+            {
+                "block": "payment_declared_logit",
+                "seconds": declared["seconds_logit"],
+            },
+            {
+                "block": "payment_declared_mixed",
+                "seconds": declared["seconds_mixed"],
+            },
+            {
+                "block": "payment_assessed_logit",
+                "seconds": assessed["seconds_logit"],
+            },
             {"block": "quantiles", "seconds": quantiles["seconds"]},
             {"block": "recovery_comparison", "seconds": recovery["seconds"]},
         ]
@@ -638,6 +852,8 @@ def run_inference(frame: pd.DataFrame, seed: int = 20261104) -> dict:
         "quantiles": quantiles["quantiles"],
         "curves": curves,
         "variance": variance,
+        "status": status,
+        "sample_account": sample_account,
         "figures": figures_from_curves(curves),
         "seconds": seconds,
         "cache": "hit" if all(flag == "hit" for flag in flags) else "miss",
