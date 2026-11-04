@@ -485,6 +485,23 @@ def test_publish_sticks_the_header_above_25_rows():
     assert long.count("<tr>") > 25
 
 
+def test_spline_cache_hits_and_keeps_certificate_rows_out(tmp_path, monkeypatch):
+    monkeypatch.setenv("CEMEPI_CACHE", str(tmp_path))
+    frame = diag.prepare(_population(np.random.default_rng(11), n=240))
+    first = diag.block_splines(frame, seed=11)
+    assert first["cache"] == "miss"
+    second = diag.block_splines(frame, seed=11)
+    assert second["cache"] == "hit"
+    assert len(second["spline"]) == len(first["spline"])
+    cached = list(tmp_path.rglob("*.parquet"))
+    assert cached
+    for path in cached:
+        stored = pd.read_parquet(path)
+        assert "root" not in stored.columns
+        assert "stock" not in stored.columns
+        assert len(stored) < 500
+
+
 def test_written_tables_omit_identifiers(tmp_path):
     rng = np.random.default_rng(8)
     # A saturated dummy on this small draw makes one HC3 leverage equal to 1.

@@ -30,7 +30,7 @@ uv run --no-sync python lab/paper_eda/_pagina_unica.py
 Section 4.4 of the single lab page is already Persistence of recovery. This diagnostic is section 4.5. Section 4.2 remains the monthly series against macroeconomic indicators.
 
 ```{python}
-#| label: setup
+#| label: load-sample
 import sys
 from pathlib import Path
 
@@ -46,10 +46,65 @@ sys.path.insert(0, str(ENTRY))
 import analyze
 
 diag = analyze.diagnose
-result = analyze.run(ENTRY / "tables")
-pop = result["population"]
-meta = result["meta"]
 pd.set_option("display.max_colwidth", 120)
+sample, pop = analyze.load_estimation_frame()
+frame = diag.prepare(sample)
+del sample
+meta = {
+    "n_before": pop["n_eligible"],
+    "n_after": pop["n_sample"],
+    "n_trim": None,
+    "uf_sp_share": float(frame["uf"].astype(str).str.upper().eq("SP").mean()),
+    "stock_formula": diag.model_formula("log_stock", frame),
+    "recovery_formula": diag.model_formula("recovery", frame),
+}
+result = {"population": pop, "meta": meta, "figures": {}}
+```
+
+```{python}
+#| label: ols-reset
+ols = diag.block_ols_reset(frame, "full", with_quantiles=True)
+result["coefficients"] = ols["coefficients"]
+result["reset"] = ols["reset"]
+result["quantiles"] = ols["quantiles"]
+result["figures"].update(ols["figures"])
+result["_checks"] = ols["checks"]
+```
+
+```{python}
+#| label: splines
+splines = diag.block_splines(frame)
+result["spline"] = splines["spline"]
+result["bins"] = splines["bins"]
+result["categories"] = splines["categories"]
+result["porte_shape"] = splines["porte_shape"]
+result["figures"].update(splines["figures"])
+print(f"spline cache: {splines['cache']}")
+```
+
+```{python}
+#| label: icc-mixed
+groups = diag.block_groups(frame)
+result["groups"] = groups["groups"]
+result["icc"] = groups["icc"]
+result["figures"].update(groups["figures"])
+print(f"mixed cache: {groups['cache']}")
+```
+
+```{python}
+#| label: top1
+top = diag.block_ols_reset(diag.without_top_share(frame).reset_index(drop=True), "trim")
+meta["n_trim"] = top["n"]
+result["coefficients"] = pd.concat([result["coefficients"], top["coefficients"]], ignore_index=True)
+result["reset"] = pd.concat([result["reset"], top["reset"]], ignore_index=True)
+result["figures"].update(top["figures"])
+result["decision"] = diag.assemble_decision(
+    {"checks": result["_checks"], "coefficients": result["coefficients"]},
+    splines,
+    groups,
+    top,
+    meta["n_after"],
+)
 ```
 
 ## Sample
@@ -312,8 +367,9 @@ display(HTML(diag.publish(result["groups"])))
 These cuts are working assumptions. They are not estimates from the papers cited below.
 
 - ΔAIC of 10. Inside a segment, a variable moves from the linear logit to the restricted cubic spline when its ΔAIC reaches 10, or when the spline log-odds on that variable are not monotone. Declared and Assessed are decided separately. A segment below the cut keeps the linear logit.
-- Latent ICC of 0.05. A mixed logit, with a random intercept for municipality or for CNAE division, is fit only when that grouping's ICC reaches 0.05.
+- Latent ICC of 0.05. A mixed logit, with a random intercept for municipality or for CNAE division, is fit only when that grouping's ICC reaches 0.05. The variational fit uses at most 8,000 certificates, stratified by the grouping variable, so the 8 GB machine can finish the cell.
 - Funnel limits of 99.8 percent, and a 1 percent share of groups outside those limits. The share is a supporting diagnostic. It does not select the mixed logit.
+- The spline logit is fit on at most 40,000 certificates per segment. The log-odds bins use the full estimation sample. Quantile regression uses at most 20,000 certificates. A second render reads the spline and mixed-logit tables from the local cache when the sample is unchanged. That cache is not part of the page.
 - RESET partial $R^2$ of 0.01, or a rank correlation of 0.20 between the absolute residual and the fitted value. Either one sets the linear stock equation aside in favour of quantile regression.
 - A heatmap bin with fewer than 5 certificates is blank. A group cell with 1 to 4 payers, fewer than 10 certificates, or fewer than 5 firms is blank.
 

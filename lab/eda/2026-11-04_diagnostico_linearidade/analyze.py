@@ -8,6 +8,7 @@ that has the disk; the tests use synthetic rows and do not call the loader.
 from __future__ import annotations
 
 import importlib.util
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -202,10 +203,43 @@ def _check_baseline(counts: pd.DataFrame) -> None:
             )
 
 
+def _eligible_sql(texts: dict[str, str]) -> str:
+    """One scan: the filters and the join. Only the later sample is fetched into pandas."""
+    sql = f"""
+        SELECT c.segment, c.stock,
+               coalesce(p.paid, 0) AS paid,
+               c.debt_age, c.root,
+               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.porte END AS porte,
+               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.situacao_cadastral END
+                 AS situacao_cadastral,
+               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.uf END AS uf,
+               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.municipio_nome END
+                 AS municipio_nome,
+               h.section, h.division
+        FROM (
+            SELECT ID_DEBITO, ICMS_ORIGIN AS segment, VALOR_SEM_HONORARIOS AS stock,
+                   CASE
+                     WHEN DATA_INSCRICAO BETWEEN DATE '1960-01-01' AND DATE '{AS_OF}'
+                     THEN date_diff('day', DATA_INSCRICAO, DATE '{AS_OF}') / 365.25
+                   END AS debt_age,
+                   CNPJ AS cnpj, CNPJ_ROOT AS root
+            FROM ({texts["snapshot"]})
+        ) c
+        LEFT JOIN ({texts["payments"]}) p USING (ID_DEBITO)
+        LEFT JOIN ({texts["firms"]}) f ON f.cnpj = c.cnpj
+        LEFT JOIN hier h
+          ON h.subclass = CASE
+               WHEN f.match_nivel = 'estabelecimento' THEN f.cnae_principal
+             END
+    """
+    assert_safe_sql(sql)
+    return sql
+
+
 def load_estimation_frame() -> tuple[pd.DataFrame, dict]:
-    """Stratified sample of at most 200,000 complete CDAs. Population counts are checked first."""
+    """Stratified sample of at most 200,000 complete CDAs. The full join is not fetched."""
     src = source_paths()
-    icms = sorted((src["icms"]).glob("*.parquet"))
+    icms = sorted(src["icms"].glob("*.parquet"))
     if not icms:
         raise SystemExit("No December parquet files in the ICMS extract.")
     gare_files = [
@@ -218,124 +252,105 @@ def load_estimation_frame() -> tuple[pd.DataFrame, dict]:
     firm = sorted(src["firm"].glob("*.parquet"))
     if not firm:
         raise SystemExit("The CNPJ table has no parquet files.")
-    texts = sql_texts(str(icms[0]), gare_files, str(firm[0]))
     icms_glob = str(src["icms"] / "*.parquet")
     firm_glob = str(src["firm"] / "*.parquet")
-    texts["snapshot"] = sql_texts(icms_glob, gare_files, firm_glob)["snapshot"]
-    texts["firms"] = sql_texts(icms_glob, gare_files, firm_glob)["firms"]
+    texts = sql_texts(icms_glob, gare_files, firm_glob)
+    started = time.perf_counter()
     con = _connect()
-    hier = _hierarchy()
-    con.register("hier_df", hier)
-    con.execute("CREATE TABLE hier AS SELECT subclass, section, division FROM hier_df")
-    con.execute(
-        f"""
-        CREATE TABLE cda AS
-        SELECT ID_DEBITO, ICMS_ORIGIN AS segment, VALOR_SEM_HONORARIOS AS stock,
-               DATA_INSCRICAO AS enrol,
-               CASE
-                 WHEN DATA_INSCRICAO BETWEEN DATE '1960-01-01' AND DATE '{AS_OF}'
-                 THEN date_diff('day', DATA_INSCRICAO, DATE '{AS_OF}') / 365.25
-               END AS debt_age,
-               CNPJ AS cnpj, CNPJ_ROOT AS root
-        FROM ({texts["snapshot"]})
-        """
-    )
-    con.execute(f"CREATE TABLE pay AS {texts['payments']}")
-    con.execute(
-        f"""
-        CREATE TABLE firm AS
-        SELECT cnpj, match_nivel, cnae_principal, porte, situacao_cadastral, uf, municipio_nome
-        FROM ({texts["firms"]})
-        """
-    )
-    con.execute(
-        """
-        CREATE TABLE base AS
-        SELECT c.segment, c.stock, c.debt_age, c.root,
-               coalesce(p.paid, 0) AS paid,
-               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.porte END AS porte,
-               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.situacao_cadastral END
-                 AS situacao_cadastral,
-               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.uf END AS uf,
-               CASE WHEN f.match_nivel = 'estabelecimento' THEN f.municipio_nome END
-                 AS municipio_nome,
-               h.section, h.division
-        FROM cda c
-        LEFT JOIN pay p USING (ID_DEBITO)
-        LEFT JOIN firm f ON f.cnpj = c.cnpj
-        LEFT JOIN hier h
-          ON h.subclass = CASE
-               WHEN f.match_nivel = 'estabelecimento' THEN f.cnae_principal
-             END
-        """
-    )
-    counts = con.execute(
-        """
-        SELECT segment, count(*) AS n_cda, sum(stock) AS stock
-        FROM base
-        GROUP BY 1
-        ORDER BY 1
-        """
-    ).df()
-    _check_baseline(counts)
-    population = {
-        "n_declared": int(counts.loc[counts.segment == "declared", "n_cda"].iloc[0]),
-        "n_assessed": int(counts.loc[counts.segment == "assessed", "n_cda"].iloc[0]),
-        "stock_declared": float(
-            counts.loc[counts.segment == "declared", "stock"].iloc[0]
-        ),
-        "stock_assessed": float(
-            counts.loc[counts.segment == "assessed", "stock"].iloc[0]
-        ),
-    }
-    strata = con.execute(
-        """
-        SELECT segment,
-               coalesce(porte, 'unknown') AS porte,
-               CASE WHEN paid > 0 THEN 1 ELSE 0 END AS paid_flag,
-               count(*) AS n
-        FROM base
-        WHERE stock > 0 AND debt_age IS NOT NULL
-        GROUP BY 1, 2, 3
-        """
-    ).df()
-    n_before = int(strata["n"].sum())
-    allocation = (
-        diagnose.allocate_strata(
-            strata.set_index(["segment", "porte", "paid_flag"])["n"],
-            SAMPLE_CAP,
+    try:
+        hier = _hierarchy()
+        con.register("hier_df", hier)
+        con.execute(
+            "CREATE TEMP TABLE hier AS SELECT subclass, section, division FROM hier_df"
         )
-        .rename("n_take")
-        .reset_index()
-    )
-    con.register("alloc_df", allocation)
-    con.execute("CREATE TABLE alloc AS SELECT * FROM alloc_df")
-    sample = con.execute(
-        f"""
-        WITH eligible AS (
-          SELECT segment, stock, paid, debt_age,
-                 coalesce(porte, 'unknown') AS porte,
-                 coalesce(section, 'unmatched') AS section,
-                 coalesce(division, 'unmatched') AS division,
-                 situacao_cadastral,
-                 coalesce(municipio_nome, 'Unknown') AS municipality,
-                 coalesce(uf, 'NA') AS uf,
-                 root,
-                 CASE WHEN paid > 0 THEN 1 ELSE 0 END AS paid_flag,
-                 row_number() OVER (
-                   PARTITION BY segment, coalesce(porte, 'unknown'),
-                                CASE WHEN paid > 0 THEN 1 ELSE 0 END
-                   ORDER BY hash(root || CAST(stock AS VARCHAR))
-                 ) AS rk
-          FROM base
-          WHERE stock > 0 AND debt_age IS NOT NULL
+        eligible = _eligible_sql(texts)
+        counts = con.execute(
+            f"""
+            SELECT segment, count(*) AS n_cda, sum(stock) AS stock
+            FROM ({eligible})
+            GROUP BY 1
+            ORDER BY 1
+            """
+        ).df()
+        _check_baseline(counts)
+        population = {
+            "n_declared": int(
+                counts.loc[counts.segment == "declared", "n_cda"].iloc[0]
+            ),
+            "n_assessed": int(
+                counts.loc[counts.segment == "assessed", "n_cda"].iloc[0]
+            ),
+            "stock_declared": float(
+                counts.loc[counts.segment == "declared", "stock"].iloc[0]
+            ),
+            "stock_assessed": float(
+                counts.loc[counts.segment == "assessed", "stock"].iloc[0]
+            ),
+        }
+        # One narrow table of eligible certificates. It is dropped before the sample leaves DuckDB.
+        con.execute(
+            f"""
+            CREATE TEMP TABLE lin_eligible AS
+            SELECT segment, stock, paid, debt_age, root,
+                   coalesce(porte, 'unknown') AS porte,
+                   coalesce(section, 'unmatched') AS section,
+                   coalesce(division, 'unmatched') AS division,
+                   situacao_cadastral,
+                   coalesce(municipio_nome, 'Unknown') AS municipality,
+                   coalesce(uf, 'NA') AS uf,
+                   CASE WHEN paid > 0 THEN 1 ELSE 0 END AS paid_flag
+            FROM ({eligible})
+            WHERE stock > 0 AND debt_age IS NOT NULL
+            """
         )
-        {texts["sample"].replace("FROM ranked", "FROM eligible")}
-        """
-    ).df()
-    con.close()
+        strata = con.execute(
+            """
+            SELECT segment, porte, paid_flag, count(*) AS n
+            FROM lin_eligible
+            GROUP BY 1, 2, 3
+            """
+        ).df()
+        n_before = int(strata["n"].sum())
+        allocation = (
+            diagnose.allocate_strata(
+                strata.set_index(["segment", "porte", "paid_flag"])["n"],
+                SAMPLE_CAP,
+            )
+            .rename("n_take")
+            .reset_index()
+        )
+        con.register("alloc_df", allocation)
+        con.execute(
+            """
+            CREATE TEMP TABLE alloc AS
+            SELECT segment, porte, paid_flag, n_take FROM alloc_df
+            """
+        )
+        sample = con.execute(
+            """
+            WITH ranked AS (
+              SELECT segment, stock, paid, debt_age, root, porte, section, division,
+                     situacao_cadastral, municipality, uf, paid_flag,
+                     row_number() OVER (
+                       PARTITION BY segment, porte, paid_flag
+                       ORDER BY hash(root || CAST(stock AS VARCHAR))
+                     ) AS rk
+              FROM lin_eligible
+            )
+            SELECT segment, stock, paid, debt_age, porte, section, division,
+                   situacao_cadastral, municipality, uf, root, paid_flag
+            FROM ranked
+            JOIN alloc USING (segment, porte, paid_flag)
+            WHERE rk <= n_take
+            """
+        ).df()
+        con.execute("DROP TABLE lin_eligible")
+        con.execute("DROP TABLE alloc")
+    finally:
+        con.close()
     population["n_eligible"] = n_before
     population["n_sample"] = len(sample)
+    print(f"load-sample: {time.perf_counter() - started:.1f} s", flush=True)
     print(
         f"population CDAs: declared {population['n_declared']}, assessed {population['n_assessed']}",
         flush=True,

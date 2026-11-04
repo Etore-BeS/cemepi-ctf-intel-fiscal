@@ -16,9 +16,13 @@ select the mixed logit.
 from __future__ import annotations
 
 import copy
+import hashlib
 import itertools
+import os
+import time
 import warnings
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -40,8 +44,10 @@ HALDANE = 0.5
 Z_95 = 1.959963984540054
 QUANTILES = (0.25, 0.5, 0.75, 0.9)
 SAMPLE_CAP = 200_000
-QUANTILE_CAP = 80_000
-MIXED_CAP = 30_000
+QUANTILE_CAP = 20_000
+MIXED_CAP = 8_000
+SPLINE_CAP = 40_000
+CACHE_VERSION = "lin45-v3"
 MIN_CDA = 10
 MIN_FIRMS = 5
 # Section 5.9: a cell with 1 to 4 payers is not printed.
@@ -1168,32 +1174,79 @@ def _icc_record(summary: dict, **meta) -> dict:
     return row
 
 
-def run_diagnostics(
-    raw: pd.DataFrame, sample_cap: int = SAMPLE_CAP, seed: int = 20261104
+def fit_cache_dir() -> Path:
+    """Aggregate-only cache. Certificate rows are never written here."""
+    base = os.environ.get("CEMEPI_CACHE")
+    root = (
+        Path(base) / "results" / "lin45-fit"
+        if base
+        else Path(os.environ.get("TMPDIR", "/tmp")) / "lin45-fit"
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def frame_signature(frame: pd.DataFrame, columns: list[str], label: str) -> str:
+    """Hash of the columns that define a fit. The hash is not the microdata."""
+    digest = hashlib.sha256()
+    digest.update(CACHE_VERSION.encode())
+    digest.update(label.encode())
+    digest.update(str(len(frame)).encode())
+    for column in columns:
+        digest.update(column.encode())
+        hashed = pd.util.hash_pandas_object(frame[column], index=False).to_numpy()
+        digest.update(np.ascontiguousarray(hashed).tobytes())
+    return digest.hexdigest()[:32]
+
+
+def _read_cached_frames(key: str) -> dict[str, pd.DataFrame] | None:
+    root = fit_cache_dir()
+    marker = root / f"{key}.ok"
+    if not marker.exists():
+        return None
+    names = marker.read_text(encoding="utf-8").split()
+    frames = {}
+    for name in names:
+        path = root / f"{key}-{name}.parquet"
+        if not path.exists():
+            return None
+        frames[name] = pd.read_parquet(path)
+    return frames
+
+
+def _write_cached_frames(key: str, frames: dict[str, pd.DataFrame]) -> None:
+    root = fit_cache_dir()
+    for name, frame in frames.items():
+        banned = {"root", "cnpj", "stock", "paid", "municipality"}
+        if banned & {column.lower() for column in frame.columns}:
+            raise RuntimeError(
+                f"Refusing to cache certificate-level columns in {name}."
+            )
+        frame.to_parquet(root / f"{key}-{name}.parquet", index=False)
+    (root / f"{key}.ok").write_text(" ".join(frames), encoding="utf-8")
+
+
+def _clock(label: str, started: float) -> float:
+    elapsed = time.perf_counter() - started
+    print(f"{label}: {elapsed:.1f} s", flush=True)
+    return elapsed
+
+
+def block_ols_reset(
+    frame: pd.DataFrame,
+    sample_name: str = "full",
+    with_quantiles: bool = False,
+    seed: int = 20261104,
 ) -> dict:
-    """Fit the diagnostic on an in-memory CDA table and return tables plus figures."""
-    frame = prepare(raw)
-    n_before = len(frame)
-    frame = stratified_sample(
-        frame, sample_cap, ["segment", "porte", "paid_flag"], seed
-    )
-    n_after = len(frame)
-    trimmed = without_top_share(frame).reset_index(drop=True)
-    print(f"complete cases before the estimation cap: {n_before}", flush=True)
-    print(f"estimation sample: {n_after}", flush=True)
-    print(
-        f"without the top 1 percent: {len(trimmed)} (dropped {n_after - len(trimmed)})",
-        flush=True,
-    )
-    samples = {"full": frame, "trim": trimmed}
-    coef_rows = []
-    reset_rows = []
+    """OLS, HC3, cluster standard errors, RESET and binned residual figures for one sample."""
+    started = time.perf_counter()
+    coef_rows: list[pd.DataFrame] = []
+    reset_rows: list[dict] = []
     figures: dict[str, go.Figure] = {}
-    checks = {}
-    for outcome in ("log_stock", "recovery"):
-        for sample_name, data in samples.items():
-            if len(data) < 30:
-                continue
+    checks: dict = {}
+    data = frame
+    if len(data) >= 30:
+        for outcome in ("log_stock", "recovery"):
             formula = model_formula(outcome, data, by_segment=False)
             hc3 = _fit_ols(formula, data)
             coef_rows.append(
@@ -1232,10 +1285,7 @@ def run_diagnostics(
             if outcome == "recovery":
                 continuous["log_stock"] = data["log_stock"].to_numpy(dtype=float)
             panels = residual_figures(
-                hc3.model.endog,
-                hc3.fittedvalues,
-                hc3.resid,
-                continuous,
+                hc3.model.endog, hc3.fittedvalues, hc3.resid, continuous
             )
             figures.update(
                 {f"{outcome}_{sample_name}_{name}": fig for name, fig in panels.items()}
@@ -1249,66 +1299,141 @@ def run_diagnostics(
                 except (ValueError, np.linalg.LinAlgError):
                     continue
                 segment_check.update(
-                    {"outcome": outcome, "sample": sample_name, "segment": str(segment)}
+                    {
+                        "outcome": outcome,
+                        "sample": sample_name,
+                        "segment": str(segment),
+                    }
                 )
                 reset_rows.append(segment_check)
+    quantiles = pd.DataFrame()
+    if with_quantiles and len(data) >= 30:
+        q_frame = stratified_sample(
+            data, QUANTILE_CAP, ["segment", "porte", "paid_flag"], seed
+        )
+        q_formula = model_formula("log_stock", q_frame, by_segment=False)
+        quantiles = quantile_table(q_frame, q_formula, sample_name)
+        print(f"quantile regression rows: {len(q_frame)}", flush=True)
+    for fig in figures.values():
+        figure_html(fig)
+    return {
+        "coefficients": pd.concat(coef_rows, ignore_index=True)
+        if coef_rows
+        else pd.DataFrame(),
+        "reset": pd.DataFrame(reset_rows),
+        "figures": figures,
+        "checks": checks,
+        "quantiles": quantiles,
+        "n": len(data),
+        "seconds": _clock(f"ols-reset {sample_name}", started),
+    }
 
+
+def block_splines(frame: pd.DataFrame, seed: int = 20261104) -> dict:
+    """Log-odds bins on the full sample. Logit and spline fits use at most SPLINE_CAP rows."""
+    started = time.perf_counter()
+    columns = [
+        "segment",
+        "paid_flag",
+        "log_stock",
+        "debt_age",
+        "porte",
+        "status",
+        "root",
+    ]
+    key = frame_signature(frame, columns, f"splines|{SPLINE_CAP}|{seed}")
+    cached = _read_cached_frames(key)
     spline_rows = []
     curve_rows = []
-    for variable in ("log_stock", "debt_age"):
-        for segment, part in frame.groupby("segment"):
-            compared = spline_compare(part, variable)
-            spline_rows.append(
-                {
-                    "variable": variable,
-                    "segment": str(segment),
-                    "delta_aic": compared["delta_aic"],
-                    "lr": compared["lr"],
-                    "lr_df": compared["lr_df"],
-                    "lr_p": compared["lr_p"],
-                    "aic_linear": compared["aic_linear"],
-                    "aic_spline": compared["aic_spline"],
-                    "curved": compared["curved"],
-                    "n": compared["n"],
-                }
-            )
-            if compared["grid_x"].size:
-                for model, eta in (
-                    ("linear", compared["grid_eta_linear"]),
-                    ("spline", compared["grid_eta_spline"]),
-                ):
-                    curve_rows.append(
-                        pd.DataFrame(
-                            {
-                                "variable": variable,
-                                "segment": str(segment),
-                                "model": model,
-                                "x": compared["grid_x"],
-                                "eta": eta,
-                            }
+    cache = "hit" if cached is not None else "miss"
+    if cached is not None:
+        spline = cached["spline"]
+        curves = cached["curves"]
+        print("spline cache: hit", flush=True)
+    else:
+        for variable in ("log_stock", "debt_age"):
+            for segment, part in frame.groupby("segment"):
+                fit_rows = stratified_sample(part, SPLINE_CAP, ["paid_flag"], seed)
+                compared = spline_compare(fit_rows, variable)
+                spline_rows.append(
+                    {
+                        "variable": variable,
+                        "segment": str(segment),
+                        "delta_aic": compared["delta_aic"],
+                        "lr": compared["lr"],
+                        "lr_df": compared["lr_df"],
+                        "lr_p": compared["lr_p"],
+                        "aic_linear": compared["aic_linear"],
+                        "aic_spline": compared["aic_spline"],
+                        "curved": compared["curved"],
+                        "n": compared["n"],
+                    }
+                )
+                if compared["grid_x"].size:
+                    for model, eta in (
+                        ("linear", compared["grid_eta_linear"]),
+                        ("spline", compared["grid_eta_spline"]),
+                    ):
+                        curve_rows.append(
+                            pd.DataFrame(
+                                {
+                                    "variable": variable,
+                                    "segment": str(segment),
+                                    "model": model,
+                                    "x": compared["grid_x"],
+                                    "eta": eta,
+                                }
+                            )
                         )
-                    )
-    spline = pd.DataFrame(spline_rows)
-    curves = pd.concat(curve_rows, ignore_index=True) if curve_rows else pd.DataFrame()
+        spline = pd.DataFrame(spline_rows)
+        curves = (
+            pd.concat(curve_rows, ignore_index=True) if curve_rows else pd.DataFrame()
+        )
+        if not curves.empty:
+            _write_cached_frames(key, {"spline": spline, "curves": curves})
+        if curves.empty:
+            curves = pd.DataFrame(columns=["variable", "segment", "model", "x", "eta"])
+        if not spline.empty:
+            _write_cached_frames(key, {"spline": spline, "curves": curves})
+        print("spline cache: miss", flush=True)
     bins = pd.concat(
         [quantile_bins(frame, "log_stock"), quantile_bins(frame, "debt_age")],
         ignore_index=True,
     )
+    figures = {}
     for variable in ("log_stock", "debt_age"):
         figures[f"logodds_{variable}"] = logodds_figure(bins, curves, variable)
+        figure_html(figures[f"logodds_{variable}"])
     categories = pd.concat(
         [category_log_odds(frame, "porte"), category_log_odds(frame, "status")],
         ignore_index=True,
     )
+    return {
+        "spline": spline,
+        "curves": curves,
+        "bins": bins,
+        "categories": categories,
+        "porte_shape": porte_shape(frame),
+        "figures": figures,
+        "cache": cache,
+        "seconds": _clock("splines", started),
+    }
 
+
+def block_groups(frame: pd.DataFrame, seed: int = 20261104) -> dict:
+    """Group tables, funnel and latent ICC. The variational logit uses at most MIXED_CAP rows."""
+    started = time.perf_counter()
     muni_table, muni_plot = group_tables(frame, ["municipality", "uf"])
     div_table, div_plot = group_tables(frame, ["division"])
     groups = pd.concat([muni_table, div_table], ignore_index=True)
     plot_groups = pd.concat([muni_plot, div_plot], ignore_index=True)
-    figures["funnel_municipality"] = funnel_figure(plot_groups, "municipality+uf")
-    figures["funnel_division"] = funnel_figure(plot_groups, "division")
-
-    icc_rows = []
+    figures = {
+        "funnel_municipality": funnel_figure(plot_groups, "municipality+uf"),
+        "funnel_division": funnel_figure(plot_groups, "division"),
+    }
+    icc_rows: list[dict] = []
+    cache_flags = []
+    funnels: dict[str, float] = {}
     for grouping, column in (
         ("municipality", "municipality"),
         ("division", "division"),
@@ -1345,6 +1470,7 @@ def run_diagnostics(
             frame,
             ["municipality", "uf"] if grouping == "municipality" else ["division"],
         )
+        funnels[grouping] = share
         moment = next(
             row["icc"]
             for row in icc_rows
@@ -1353,59 +1479,93 @@ def run_diagnostics(
             and row["outcome"] == "paid_flag"
             and row["estimator"] == "moments"
         )
-
-        def _fit(group_column=column, moment_icc=moment, funnel_share=share):
-            capped = stratified_sample(frame, MIXED_CAP, [group_column], seed)
-            return maybe_fit_mixed(
-                moment_icc,
-                funnel_share,
-                lambda: fit_mixed_logit(capped, group_column, controls=False),
+        capped = stratified_sample(frame, MIXED_CAP, [column], seed)
+        sig_cols = [
+            "paid_flag",
+            column,
+            "log_stock",
+            "debt_age",
+            "segment",
+            "section",
+            "porte",
+        ]
+        key = frame_signature(
+            capped, sig_cols, f"mixed|{grouping}|{MIXED_CAP}|{seed}|{moment:.6f}"
+        )
+        cached = _read_cached_frames(key)
+        if cached is not None:
+            stored = cached["mixed"]
+            cache_flags.append("hit")
+            print(f"mixed cache {grouping}: hit", flush=True)
+        else:
+            rows = []
+            fitted = maybe_fit_mixed(
+                moment,
+                share,
+                lambda capped=capped, column=column: fit_mixed_logit(
+                    capped, column, controls=False
+                ),
             )
-
-        fitted = _fit()
-        if fitted is not None:
+            if fitted is not None:
+                rows.append(fitted)
+                if fitted.get("converged") and float(fitted["icc"]) >= ICC_CUT:
+                    rows.append(fit_mixed_logit(capped, column, controls=True))
+            if not rows:
+                rows.append(
+                    {
+                        "controls": "none",
+                        "tau": np.nan,
+                        "tau2": np.nan,
+                        "icc": np.nan,
+                        "n": 0,
+                        "converged": False,
+                        "skipped": True,
+                    }
+                )
+            stored = pd.DataFrame(rows)
+            if "skipped" not in stored.columns:
+                stored["skipped"] = False
+            _write_cached_frames(key, {"mixed": stored})
+            cache_flags.append("miss")
+            print(f"mixed cache {grouping}: miss", flush=True)
+        for fitted_row in stored.to_dict(orient="records"):
+            if bool(fitted_row.get("skipped", False)):
+                continue
             icc_rows.append(
                 {
                     "grouping": grouping,
                     "segment": "pooled",
                     "outcome": "paid_flag",
                     "estimator": "variational",
-                    "controls": fitted["controls"],
-                    "tau2": fitted["tau2"],
-                    "icc": fitted["icc"],
+                    "controls": fitted_row["controls"],
+                    "tau2": fitted_row["tau2"],
+                    "icc": fitted_row["icc"],
                     "n_groups": np.nan,
-                    "n": fitted["n"],
-                    "converged": fitted["converged"],
+                    "n": fitted_row["n"],
+                    "converged": fitted_row["converged"],
                 }
             )
-            if fitted["converged"] and fitted["icc"] >= ICC_CUT:
-                controlled = fit_mixed_logit(
-                    stratified_sample(frame, MIXED_CAP, [column], seed),
-                    column,
-                    controls=True,
-                )
-                icc_rows.append(
-                    {
-                        "grouping": grouping,
-                        "segment": "pooled",
-                        "outcome": "paid_flag",
-                        "estimator": "variational",
-                        "controls": controlled["controls"],
-                        "tau2": controlled["tau2"],
-                        "icc": controlled["icc"],
-                        "n_groups": np.nan,
-                        "n": controlled["n"],
-                        "converged": controlled["converged"],
-                    }
-                )
-    icc = pd.DataFrame(icc_rows)
+    for fig in figures.values():
+        figure_html(fig)
+    return {
+        "groups": groups,
+        "icc": pd.DataFrame(icc_rows),
+        "figures": figures,
+        "cache": "hit"
+        if cache_flags and all(flag == "hit" for flag in cache_flags)
+        else "miss",
+        "funnel_municipality": funnels.get("municipality", float("nan")),
+        "funnel_division": funnels.get("division", float("nan")),
+        "seconds": _clock("icc-mixed", started),
+    }
 
-    q_frame = stratified_sample(
-        frame, QUANTILE_CAP, ["segment", "porte", "paid_flag"], seed
-    )
-    q_formula = model_formula("log_stock", q_frame, by_segment=False)
-    quantiles = quantile_table(q_frame, q_formula, "full")
-    print(f"quantile regression rows: {len(q_frame)}", flush=True)
+
+def assemble_decision(
+    ols: dict, splines: dict, groups: dict, top: dict, n_estimation: int
+) -> pd.DataFrame:
+    spline = splines["spline"]
+    icc = groups["icc"]
+    checks = {**ols["checks"], **top["checks"]}
 
     def _pull(outcome: str, sample_name: str, field: str) -> float:
         found = checks.get((outcome, sample_name))
@@ -1432,7 +1592,7 @@ def run_diagnostics(
         return float(moment_rows["icc"].iloc[0])
 
     spline_rows = []
-    if not spline.empty:
+    if spline is not None and not spline.empty:
         for record in spline.itertuples(index=False):
             spline_rows.append(
                 {
@@ -1442,6 +1602,8 @@ def run_diagnostics(
                     "curved": bool(record.curved),
                 }
             )
+    funnel_muni = float(groups.get("funnel_municipality", float("nan")))
+    funnel_div = float(groups.get("funnel_division", float("nan")))
     evidence = {
         "spline_by_segment": spline_rows,
         "delta_r2_stock": _pull("log_stock", "full", "delta_r2"),
@@ -1452,38 +1614,74 @@ def run_diagnostics(
         "fan_recovery": _pull("recovery", "full", "fan"),
         "icc_municipality": _decision_icc("municipality"),
         "icc_division": _decision_icc("division"),
-        "funnel_municipality": funnel_outside_share(frame, ["municipality", "uf"]),
-        "funnel_division": funnel_outside_share(frame, ["division"]),
-        "n_estimation": n_after,
+        "funnel_municipality": funnel_muni,
+        "funnel_division": funnel_div,
+        "n_estimation": n_estimation,
     }
-    decision = inference_decision(evidence)
-    for fig in figures.values():
-        figure_html(fig)
+    return inference_decision(evidence)
+
+
+def run_diagnostics(
+    raw: pd.DataFrame, sample_cap: int = SAMPLE_CAP, seed: int = 20261104
+) -> dict:
+    """Fit the diagnostic on an in-memory CDA table and return tables plus figures.
+
+    The page calls the same blocks from separate cells. This wrapper keeps the tests on one entry point.
+    """
+    started = time.perf_counter()
+    frame = prepare(raw)
+    n_before = len(frame)
+    frame = stratified_sample(
+        frame, sample_cap, ["segment", "porte", "paid_flag"], seed
+    )
+    n_after = len(frame)
+    print(f"complete cases before the estimation cap: {n_before}", flush=True)
+    print(f"estimation sample: {n_after}", flush=True)
+    ols = block_ols_reset(frame, "full", with_quantiles=True, seed=seed)
+    splines = block_splines(frame, seed=seed)
+    groups = block_groups(frame, seed=seed)
+    top = block_ols_reset(
+        without_top_share(frame).reset_index(drop=True), "trim", seed=seed
+    )
+    print(f"without the top 1 percent: {top['n']}", flush=True)
+    decision = assemble_decision(ols, splines, groups, top, n_after)
+    figures = {}
+    for block in (ols, splines, groups, top):
+        figures.update(block["figures"])
+    coefficients = pd.concat(
+        [ols["coefficients"], top["coefficients"]], ignore_index=True
+    )
+    reset = pd.concat([ols["reset"], top["reset"]], ignore_index=True)
     uf_share = (
         float(frame["uf"].astype(str).str.upper().eq("SP").mean())
         if len(frame)
         else float("nan")
     )
+    _clock("all blocks", started)
     return {
-        "coefficients": pd.concat(coef_rows, ignore_index=True)
-        if coef_rows
-        else pd.DataFrame(),
-        "reset": pd.DataFrame(reset_rows),
-        "bins": bins,
-        "spline": spline,
-        "categories": categories,
-        "porte_shape": porte_shape(frame),
-        "groups": groups,
-        "icc": icc,
-        "quantiles": quantiles,
+        "coefficients": coefficients,
+        "reset": reset,
+        "bins": splines["bins"],
+        "spline": splines["spline"],
+        "categories": splines["categories"],
+        "porte_shape": splines["porte_shape"],
+        "groups": groups["groups"],
+        "icc": groups["icc"],
+        "quantiles": ols["quantiles"],
         "decision": decision,
         "figures": figures,
         "meta": {
             "n_before": n_before,
             "n_after": n_after,
-            "n_trim": len(trimmed),
+            "n_trim": int(top["n"]),
             "uf_sp_share": uf_share,
             "stock_formula": model_formula("log_stock", frame),
             "recovery_formula": model_formula("recovery", frame),
+            "seconds": {
+                "ols_reset": ols["seconds"],
+                "splines": splines["seconds"],
+                "icc_mixed": groups["seconds"],
+                "top1": top["seconds"],
+            },
         },
     }
