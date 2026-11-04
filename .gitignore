@@ -58,6 +58,10 @@ docs/planos/
 docs/superpowers/
 .superpowers/
 
+# Linearity diagnostic: per-certificate cache stays on the machine that has the extract.
+lab/eda/2026-11-04_diagnostico_linearidade/.cache/
+lab/eda/2026-11-04_diagnostico_linearidade/**/*.parquet
+
 # EDA Lívia — pesado (parquet/html); CSVs leves e docs/livia_eda vão no git
 projects/macro/notebooks/eda_completo_artifacts/*.parquet
 projects/macro/notebooks/eda_completo_artifacts/*.html
