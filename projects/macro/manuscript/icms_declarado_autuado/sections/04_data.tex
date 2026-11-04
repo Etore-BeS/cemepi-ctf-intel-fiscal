@@ -47,6 +47,38 @@ We report them as descriptors and we do not give them a causal reading.
 
 \subsection{Measures}\label{sec:measures}
 
+Table~\ref{tab:vars} lists the variables, how each is computed, and where it comes from.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Variables and measures.}\label{tab:vars}
+\begin{tabular}{p{0.22\textwidth}p{0.50\textwidth}p{0.20\textwidth}}
+\toprule
+Variable & Definition and calculation & Source \\
+\midrule
+Segment & Declared: \texttt{ICMS Declarado}. Assessed: \texttt{ICMS Autua\c{c}\~ao} and \texttt{ICMS Autua\c{c}\~ao Simples Nacional}. & \texttt{DEBITO} \\
+Stock & Certificate value net of legal fees, December 2025 snapshot. & \texttt{DEBITO} \\
+Any payment & One if the certificate has a GARE payment dated before 1~January 2026. & \texttt{ARRECADACAO} \\
+Recovery & Sum of those payments divided by the December 2025 stock. & \texttt{DEBITO}, \texttt{ARRECADACAO} \\
+Debt age & Years from the enrolment date to 31~December 2025; dates before 1960 are missing. & \texttt{DEBITO} \\
+Firm & Eight-digit root of the CNPJ. & \texttt{DEBITO} \\
+Firm age & Years from the establishment's opening date to 31~December 2025; dates before 1900 are missing. & CNPJ register \\
+Activity & Principal CNAE of the establishment on CNAE-Subclasses 2.3. & CNPJ register; \citet{ibge2019cnae} \\
+Size, legal form, status, state, municipality & As recorded for the establishment. & CNPJ register \\
+Repeated enrolment & Two or more certificates of the firm in the segment. & \texttt{DEBITO} \\
+Top 1 percent & Largest $\lceil 0.01 \times N \rceil$ certificates with a positive value. & \texttt{DEBITO} \\
+Gini coefficient & One minus twice the area under the Lorenz curve of positive certificate values. & \texttt{DEBITO} \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.4em}
+\begin{minipage}{0.95\textwidth}
+\footnotesize
+Notes: \texttt{DEBITO} and \texttt{ARRECADACAO} are PGE-SP tables. The CNPJ register is the Receita Federal registry linked to the debtors.
+\end{minipage}
+\end{table}
+
 Stock is the certificate's value net of legal fees in the December 2025 snapshot.
 The payment rate is the share of certificates with any GARE payment dated before 1~January 2026.
 Recovery is the sum of those payments divided by the December 2025 stock.
@@ -66,6 +98,7 @@ The top 1~percent is the largest $\lceil 0.01 \times N \rceil$ positive-value ce
 We use that round cut for two reasons, which Section~\ref{sec:conc} reports rather than assumes.
 Statistically, the pooled Lorenz curve is flat over most of the distribution and rises in the extreme tail, so 1~percent is a visible break and not an interior point on a smooth curve.
 Administratively, the resulting list is a set of certificates the attorney office can review as a specialised book, and it is the set in which the stock sits.
+\textbf{[DISCUTIR E ESCREVER: se a PGE-SP indicou o top 1\% como recorte de interesse, citar aqui a fonte dessa indica\c{c}\~ao.]}
 The same percentage is not equally informative inside each segment.
 We therefore report the cut for the pooled book and again inside declared debt and inside assessed debt.
 Nothing in the cutoff is a claim that working those certificates would recover the stock.
@@ -99,3 +132,4 @@ The repeated-enrolment test is the exception: a firm is counted once in each seg
 Levels that would leave a cell below five firms are pooled before the test.
 $V$ near 0.1 is a small association and $V$ near 0.3 is a moderate one.
 We use those conventional markers only as a reading aid.
+\textbf{[DISCUTIR E ESCREVER: modelo econom\'etrico simplificado. O escopo do paper \'e descritivo; decidir se entra um modelo (com equa\c{c}\~ao, betas e testes de pressupostos) ou se fica fora.]}
