@@ -162,7 +162,8 @@ def stratified_sample(
         k = int(k)
         if k <= 0:
             continue
-        block = grouped.get_group(key)
+        # pandas 3: groupby([one name]) wants get_group((name,)), not get_group(name).
+        block = grouped.get_group(key if isinstance(key, tuple) else (key,))
         choice = rng.choice(len(block), size=min(k, len(block)), replace=False)
         parts.append(block.iloc[np.sort(choice)])
     if not parts:

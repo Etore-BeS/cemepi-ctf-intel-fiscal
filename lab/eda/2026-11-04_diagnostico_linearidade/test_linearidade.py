@@ -260,6 +260,20 @@ def test_baseline_matches_the_committed_segment_summary():
         assert analyze.BASELINE_STOCK[row.segment] == pytest.approx(float(row.stock))
 
 
+def test_stratified_sample_accepts_one_grouping_key():
+    """pandas 3: groupby(["municipality"]).get_group needs a one-tuple, not the bare name."""
+    assert int(pd.__version__.split(".", maxsplit=1)[0]) >= 3
+    frame = pd.DataFrame(
+        {
+            "municipality": ["Abadia de Goiás"] * 30 + ["Beta"] * 30,
+            "stock": range(60),
+        }
+    )
+    out = diag.stratified_sample(frame, 20, ["municipality"], seed=1)
+    assert len(out) == 20
+    assert set(out["municipality"]) == {"Abadia de Goiás", "Beta"}
+
+
 def test_stratified_sample_respects_the_cap():
     rng = np.random.default_rng(5)
     n = 1000
