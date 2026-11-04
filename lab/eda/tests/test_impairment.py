@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import gc
+import os
 import sys
+import threading
 from datetime import date
 from pathlib import Path
 
@@ -473,3 +476,368 @@ def test_variable_table_uses_the_four_statuses_and_names_the_material():
     note = I.cited_material_note()
     assert "Proposal of variables for the recoverability model (PGE-SP, 2026)" in note
     assert "PGE-SP seminar on active debt (2026)" in note
+
+
+def _same_table(left: pl.DataFrame, right: pl.DataFrame, keys: list[str]) -> None:
+    assert set(left.columns) == set(right.columns)
+    order = [col for col in keys if col in left.columns]
+    left = left.sort(order)
+    right = right.sort(order)
+    assert left.height == right.height
+    for col in left.columns:
+        if left[col].dtype.is_float() or right[col].dtype.is_float():
+            gap = (
+                (
+                    left[col].cast(pl.Float64).fill_null(0)
+                    - right[col].cast(pl.Float64).fill_null(0)
+                )
+                .abs()
+                .max()
+            )
+            assert gap is None or gap <= 1e-4, col
+        else:
+            assert (
+                left[col].cast(pl.Utf8).fill_null("<NA>")
+                == right[col].cast(pl.Utf8).fill_null("<NA>")
+            ).all(), col
+
+
+def test_lazy_steps_match_the_in_memory_frames(tmp_path: Path):
+    """A parquet scan, including a renamed GARE scan, matches the eager tables."""
+    bundle = I.synthetic_bundle()
+    panel = bundle["panel"]
+    cohort = I.cda_index(panel)
+    panel.write_parquet(tmp_path / "panel.parquet")
+    bundle["instalments"].write_parquet(tmp_path / "instalments.parquet")
+    bundle["protests"].write_parquet(tmp_path / "protests.parquet")
+    bundle["payments"].write_parquet(tmp_path / "payments.parquet")
+    gare = tmp_path / "gare" / "year=2020"
+    gare.mkdir(parents=True)
+    paid = bundle["payments"]
+    pl.DataFrame(
+        {
+            "ID_DEBITO": paid["id_debito"],
+            "DATA_ARRECADACAO_GARE": paid["pay_date"],
+            "VALOR_RECEITA": paid["amount"],
+            "EXTRA_NOTE": ["kept out of the projection"] * paid.height,
+        }
+    ).write_parquet(gare / "part.parquet")
+    raw = tmp_path / "raw_protests.parquet"
+    pl.DataFrame(
+        {
+            "ID_DEBITO": bundle["protests"]["id_debito"],
+            "STATUS_PROTESTO": bundle["protests"]["status_protesto"],
+            "DATA_PROTESTO": bundle["protests"]["data_protesto"],
+            "VALOR_PROTESTADO": bundle["protests"]["valor_protestado"],
+        }
+    ).write_parquet(raw)
+    panel_l = pl.scan_parquet(tmp_path / "panel.parquet")
+    instalments = pl.scan_parquet(tmp_path / "instalments.parquet")
+    protests = pl.scan_parquet(tmp_path / "protests.parquet")
+    payments = pl.scan_parquet(tmp_path / "payments.parquet")
+    firms = bundle["firms"]
+    before = I.sql_runs()
+
+    def check(eager, lazy, keys):
+        _same_table(eager[0], lazy[0], keys)
+        assert eager[1] == lazy[1]
+
+    check(
+        I.request_share(panel, bundle["instalments"], cdas=cohort),
+        I.request_share(panel_l, instalments, cdas=cohort),
+        ["enrol_year", "origin"],
+    )
+    check(
+        I.protest_share(panel, bundle["protests"], cdas=cohort),
+        I.protest_share(panel_l, protests, cdas=cohort),
+        ["enrol_year", "origin"],
+    )
+    check(
+        I.status_distribution(panel, bundle["instalments"], cdas=cohort),
+        I.status_distribution(panel_l, instalments, cdas=cohort),
+        ["origin", "status"],
+    )
+    check(
+        I.protest_status(panel, bundle["protests"], cdas=cohort),
+        I.protest_status(panel_l, protests, cdas=cohort),
+        ["origin", "status"],
+    )
+    check(
+        I.recovery_by_flag(panel, bundle["instalments"], flag="request", cdas=cohort),
+        I.recovery_by_flag(panel_l, instalments, flag="request", cdas=cohort),
+        ["origin", "group"],
+    )
+    eager_break = I.break_rates(panel, bundle["instalments"], cdas=cohort)
+    lazy_break = I.break_rates(panel_l, instalments, cdas=cohort)
+    _same_table(eager_break[0], lazy_break[0], ["origin"])
+    _same_table(eager_break[1], lazy_break[1], ["origin", "parcel_band"])
+    assert eager_break[2] == lazy_break[2]
+    eager_km = I.km_enrol_to_request(panel, bundle["instalments"], cdas=cohort)
+    lazy_km = I.km_enrol_to_request(panel_l, instalments, cdas=cohort)
+    assert eager_km[2] == lazy_km[2]
+    if eager_km[0].height:
+        _same_table(eager_km[0], lazy_km[0], ["origin", "t"])
+    check(
+        I.recovery_around_protest(
+            panel, bundle["protests"], bundle["payments"], cdas=cohort
+        ),
+        I.recovery_around_protest(panel_l, protests, payments, cdas=cohort),
+        ["origin"],
+    )
+    check(
+        I.annual_recovery(panel, firms),
+        I.annual_recovery(panel_l, firms),
+        ["year", "age_band", "origin"],
+    )
+    check(
+        I.cumulative_by_band(panel),
+        I.cumulative_by_band(panel_l),
+        ["enrol_year", "age_band", "origin"],
+    )
+    eager_bt = I.backtest_rule(panel, firms, bundle["instalments"], PARAMS)
+    I.reset_build_counts()
+    lazy_bt = I.backtest_rule(panel_l, firms, instalments, PARAMS)
+    assert I._BUILDS["ref_facts"] == 1
+    _same_table(eager_bt[0], lazy_bt[0], ["ref_year", "origin", "class_label"])
+    _same_table(eager_bt[1], lazy_bt[1], ["ref_year", "origin", "binary_class"])
+    eager_fit = I.estimation_frame(
+        panel, firms, bundle["instalments"], bundle["protests"], PARAMS
+    )
+    lazy_fit = I.estimation_frame(panel_l, firms, instalments, protests, PARAMS)
+    assert eager_fit[1]["n_estimated"] == lazy_fit[1]["n_estimated"]
+    _same_table(
+        pl.from_pandas(eager_fit[0]),
+        pl.from_pandas(lazy_fit[0]),
+        ["id_debito", "year"],
+    )
+    aliased_pay = (
+        pl.scan_parquet(tmp_path / "gare" / "**" / "*.parquet", hive_partitioning=True)
+        .filter(pl.col("DATA_ARRECADACAO_GARE") <= pl.date(2025, 12, 31))
+        .select(
+            pl.col("ID_DEBITO").alias("id_debito"),
+            pl.col("DATA_ARRECADACAO_GARE").alias("pay_date"),
+            pl.col("VALOR_RECEITA").alias("amount"),
+        )
+    )
+    compiled = I._compile_relation(aliased_pay)
+    assert compiled is not None
+    assert "EXTRA_NOTE" not in compiled
+    assert "SELECT *" not in compiled
+    aliased_protest = pl.scan_parquet(raw).select(
+        pl.col("ID_DEBITO").alias("id_debito"),
+        pl.col("STATUS_PROTESTO").alias("status_protesto"),
+        pl.col("DATA_PROTESTO").alias("data_protesto"),
+        pl.col("VALOR_PROTESTADO").alias("valor_protestado"),
+    )
+    check(
+        I.recovery_around_protest(
+            panel, bundle["protests"], bundle["payments"], cdas=cohort
+        ),
+        I.recovery_around_protest(panel_l, aliased_protest, aliased_pay, cdas=cohort),
+        ["origin"],
+    )
+    assert I.date_quality(aliased_protest, "data_protesto") == I.date_quality(
+        bundle["protests"], "data_protesto"
+    )
+    after = I.sql_runs()
+    assert after["recovery"] > before["recovery"]
+    assert after["age"] > before["age"]
+    assert after["backtest"] > before["backtest"]
+    assert after["logit"] > before["logit"]
+    assert after["dates"] > before["dates"]
+    page = (EDA / "2026-11-04_instalments_protest.qmd").read_text(encoding="utf-8")
+    assert "instalment_page(" not in page
+    assert "I.recovery_around_protest(" in page
+    age_page = (EDA / "2026-11-04_recovery_age_bands.qmd").read_text(encoding="utf-8")
+    assert "recovery_age_page(" not in age_page
+    assert "I.annual_recovery(" in age_page
+
+
+def _rss_bytes() -> int:
+    for line in Path("/proc/self/status").read_text(encoding="utf-8").splitlines():
+        if line.startswith("VmRSS:"):
+            return int(line.split()[1]) * 1024
+    raise RuntimeError("VmRSS is not available")
+
+
+def _extra_mib(fn) -> float:
+    gc.collect()
+    start = _rss_bytes()
+    peak = {"rss": start}
+    stop = threading.Event()
+
+    def watch() -> None:
+        while not stop.wait(0.02):
+            peak["rss"] = max(peak["rss"], _rss_bytes())
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    try:
+        fn()
+    finally:
+        stop.set()
+        thread.join()
+        peak["rss"] = max(peak["rss"], _rss_bytes())
+    return (peak["rss"] - start) / (1024 * 1024)
+
+
+def _ensure_scale(root: Path) -> None:
+    """Synthetic parquet at the published protest and GARE volumes. Not PGE data."""
+    marker = root / "_READY"
+    if marker.exists():
+        return
+    root.mkdir(parents=True, exist_ok=True)
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute("SET memory_limit='900MB'")
+    con.execute("SET temp_directory='/tmp'")
+    con.execute("SET threads=2")
+    con.execute("SET preserve_insertion_order=false")
+    specs = {
+        "protests.parquet": """
+            SELECT (i % 2000000)::BIGINT AS id_debito,
+                   CASE WHEN i % 23 = 0 THEN NULL
+                        ELSE DATE '2016-01-01' + (i % 3000)::INTEGER
+                   END AS data_protesto,
+                   CASE WHEN i % 11 = 0 THEN 'cancelled' ELSE 'filed' END
+                       AS status_protesto,
+                   (i % 100)::DOUBLE AS valor_protestado
+            FROM range(18889381) t(i)
+        """,
+        "gare.parquet": """
+            SELECT (i % 2000000)::BIGINT AS id_debito,
+                   DATE '2016-01-01' + (i % 3500)::INTEGER AS pay_date,
+                   (10 + (i % 50))::DOUBLE AS amount
+            FROM range(8673659) t(i)
+        """,
+        "instalments.parquet": """
+            SELECT i::BIGINT AS id_solicitacao,
+                   (i % 2000000)::BIGINT AS id_debito,
+                   DATE '2017-01-01' + (i % 2500)::INTEGER AS data_solicitacao,
+                   CASE WHEN i % 7 = 0 THEN 'broken' ELSE 'open' END
+                       AS status_parcelamento,
+                   CASE WHEN i % 7 = 0
+                        THEN DATE '2018-01-01' + (i % 2000)::INTEGER
+                        ELSE NULL END AS data_rompimento,
+                   (1 + (i % 80))::INTEGER AS qtd_parcelas
+            FROM range(2715674) t(i)
+        """,
+        "firms.parquet": """
+            SELECT printf('%014d', i) AS cnpj,
+                   'estabelecimento' AS match_nivel,
+                   printf('%02d', i % 87) AS cnae_divisao,
+                   '02' AS situacao_cadastral,
+                   CASE WHEN i % 3 = 0 THEN '01'
+                        WHEN i % 3 = 1 THEN '03'
+                        ELSE '05' END AS porte
+            FROM range(968610) t(i)
+        """,
+        "cohort.parquet": """
+            SELECT i::BIGINT AS id_debito,
+                   printf('%014d', i % 968610) AS cnpj,
+                   printf('%08d', i % 968610) AS cnpj_root,
+                   CASE WHEN i % 2 = 0 THEN 'declared' ELSE 'assessed' END AS origin,
+                   DATE '2016-01-01' + CAST((i % 8) * 365 AS INTEGER) AS enrol_date,
+                   2016 + (i % 8) AS enrol_year,
+                   1000.0 AS enrolled_value,
+                   100.0 AS paid
+            FROM range(2000000) t(i)
+        """,
+        "panel.parquet": """
+            SELECT c.id_debito,
+                   y.year,
+                   printf('%014d', c.id_debito % 968610) AS cnpj,
+                   printf('%08d', c.id_debito % 968610) AS cnpj_root,
+                   CASE WHEN c.id_debito % 2 = 0 THEN 'declared' ELSE 'assessed' END
+                       AS origin,
+                   DATE '2016-01-01' + CAST((c.id_debito % 8) * 365 AS INTEGER)
+                       AS enrol_date,
+                   2016 + (c.id_debito % 8) AS enrol_year,
+                   'Inscrito' AS situacao,
+                   100.0 AS stock,
+                   10.0 AS paid,
+                   1 AS paid_flag,
+                   0.1 AS rate,
+                   0.1 AS rate_l1,
+                   (y.year - (2016 + (c.id_debito % 8)))::DOUBLE AS age,
+                   TRUE AS present_in_december,
+                   1000.0 AS enrolled_value
+            FROM range(2000000) c(id_debito)
+            CROSS JOIN (SELECT unnest(range(2016, 2026)) AS year) y
+        """,
+    }
+    try:
+        for name, query in specs.items():
+            path = (root / name).as_posix().replace("'", "''")
+            con.execute(
+                f"COPY ({query}) TO '{path}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+    finally:
+        con.close()
+    marker.write_text("protests=18889381\ngare=8673659\n", encoding="utf-8")
+
+
+def test_real_volume_steps_stay_within_two_gigabytes():
+    """Extra RSS at protest volume 18889381 and GARE volume 8673659 stays under 2 GiB."""
+    os.environ["POLARS_MAX_THREADS"] = "2"
+    root = Path("/tmp/imp23_scale")
+    _ensure_scale(root)
+    import duckdb
+
+    counted = duckdb.connect()
+    try:
+        n_protest = counted.execute(
+            f"SELECT count(*) FROM read_parquet('{(root / 'protests.parquet').as_posix()}')"
+        ).fetchone()[0]
+        n_gare = counted.execute(
+            f"SELECT count(*) FROM read_parquet('{(root / 'gare.parquet').as_posix()}')"
+        ).fetchone()[0]
+    finally:
+        counted.close()
+    assert n_protest == 18_889_381
+    assert n_gare == 8_673_659
+    cohort = pl.read_parquet(root / "cohort.parquet")
+    firms = pl.read_parquet(root / "firms.parquet")
+    panel = pl.scan_parquet(root / "panel.parquet")
+    instalments = pl.scan_parquet(root / "instalments.parquet")
+    protests = pl.scan_parquet(root / "protests.parquet")
+    payments = pl.scan_parquet(root / "gare.parquet")
+    before = I.sql_runs()
+    steps = {
+        "3.16 date quality": lambda: I.date_quality(protests, "data_protesto"),
+        "3.16 request share": lambda: I.request_share(panel, instalments, cdas=cohort),
+        "3.16 status": lambda: I.status_distribution(panel, instalments, cdas=cohort),
+        "3.16 km request": lambda: I.km_enrol_to_request(
+            panel, instalments, cdas=cohort
+        ),
+        "3.16 km break": lambda: I.km_request_to_break(instalments, panel, cdas=cohort),
+        "3.16 break rates": lambda: I.break_rates(panel, instalments, cdas=cohort),
+        "3.16 recovery request": lambda: I.recovery_by_flag(
+            panel, instalments, flag="request", cdas=cohort
+        ),
+        "3.16 protest share": lambda: I.protest_share(panel, protests, cdas=cohort),
+        "3.16 km protest": lambda: I.km_enrol_to_protest(panel, protests, cdas=cohort),
+        "3.16 protest status": lambda: I.protest_status(panel, protests, cdas=cohort),
+        "3.16 recovery around protest": lambda: I.recovery_around_protest(
+            panel, protests, payments, cdas=cohort
+        ),
+        "3.17 annual": lambda: I.annual_recovery(panel, firms),
+        "3.17 mean": lambda: I.mean_recovery(panel, firms),
+        "3.17 cumulative": lambda: I.cumulative_by_band(panel),
+        "3.17 status": lambda: I.recovery_by_status(panel, firms),
+        "3.18 backtest": lambda: I.backtest_rule(panel, firms, instalments, PARAMS),
+        "5.9 design matrix": lambda: I.estimation_frame(
+            panel, firms, instalments, protests, PARAMS
+        ),
+    }
+    peaks: dict[str, float] = {}
+    for name, fn in steps.items():
+        peaks[name] = round(_extra_mib(fn), 1)
+        print(f"{name}: {peaks[name]} MiB extra")
+        assert peaks[name] <= 2048, peaks
+    after = I.sql_runs()
+    assert after["recovery"] > before["recovery"]
+    assert after["age"] > before["age"]
+    assert after["backtest"] > before["backtest"]
+    assert after["logit"] > before["logit"]

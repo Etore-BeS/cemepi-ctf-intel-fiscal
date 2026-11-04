@@ -10,10 +10,12 @@ left blank when it still has fewer than 5 CNPJs.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import warnings
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import numpy as np
@@ -514,6 +516,406 @@ def _collect(lf: pl.LazyFrame) -> pl.DataFrame:
         return lf.collect()
 
 
+def _is_lazy(df: pl.DataFrame | pl.LazyFrame) -> bool:
+    return isinstance(df, pl.LazyFrame)
+
+
+# Counts SQL reductions. A page step that stays on the Polars plan does not increment.
+_SQL_RUNS = {
+    "recovery": 0,
+    "share": 0,
+    "status": 0,
+    "km": 0,
+    "break": 0,
+    "age": 0,
+    "backtest": 0,
+    "logit": 0,
+    "dates": 0,
+}
+
+
+def sql_runs() -> dict[str, int]:
+    """How many heavy steps ran inside DuckDB instead of a Polars collect."""
+    return dict(_SQL_RUNS)
+
+
+def _duck():
+    """A spill-to-disk connection. The cap is what keeps a page inside 2 GB extra."""
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute("SET memory_limit='900MB'")
+    con.execute("SET temp_directory='/tmp'")
+    con.execute("SET threads=2")
+    con.execute("SET preserve_insertion_order=false")
+    return con
+
+
+def _qident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _n_distinct_sql(col: str = "cnpj") -> str:
+    """Match Polars ``n_unique``, which counts a null as one extra value."""
+    quoted = _qident(col)
+    return (
+        f"(COUNT(DISTINCT {quoted}) + "
+        f"MAX(CASE WHEN {quoted} IS NULL THEN 1 ELSE 0 END))"
+    )
+
+
+def _window_sql(expr: str) -> str:
+    start = WINDOW_START.isoformat()
+    end = WINDOW_END.isoformat()
+    return f"{expr} IS NOT NULL AND {expr} >= DATE '{start}' AND {expr} <= DATE '{end}'"
+
+
+def _month_sql(start: str, end: str) -> str:
+    return f"((year({end}) - year({start})) * 12 + (month({end}) - month({start})))"
+
+
+def _parcel_case(expr: str) -> str:
+    b0, b1, b2 = PARCEL_BREAKS
+    labels = tuple(label.replace("'", "''") for label in PARCEL_LABELS)
+    return (
+        f"CASE WHEN {expr} IS NULL THEN NULL "
+        f"WHEN {expr} <= {b0} THEN '{labels[0]}' "
+        f"WHEN {expr} <= {b1} THEN '{labels[1]}' "
+        f"WHEN {expr} <= {b2} THEN '{labels[2]}' "
+        f"ELSE '{labels[3]}' END"
+    )
+
+
+def _age_case(expr: str) -> str:
+    b0, b1, b2 = IMP_AGE_BREAKS
+    labels = AGE_LABELS
+    return (
+        f"CASE WHEN {expr} IS NULL OR {expr} < 0 THEN NULL "
+        f"WHEN {expr} <= {b0} THEN '{labels[0]}' "
+        f"WHEN {expr} <= {b1} THEN '{labels[1]}' "
+        f"WHEN {expr} <= {b2} THEN '{labels[2]}' "
+        f"ELSE '{labels[3]}' END"
+    )
+
+
+def _status_case() -> str:
+    mapped = " ".join(
+        f"WHEN CAST(f.registry_code AS VARCHAR) = '{code}' THEN '{label}'"
+        for code, label in ACTIVE_LABEL.items()
+    )
+    nivel = "COALESCE(f.match_nivel, 'nao_encontrado')"
+    code = "CAST(f.registry_code AS VARCHAR)"
+    mapped_expr = f"CASE {mapped} ELSE NULL END"
+    return (
+        f"CASE WHEN {nivel} = 'raiz' THEN 'root only (status unknown)' "
+        f"WHEN {nivel} <> 'estabelecimento' THEN 'not found in the registry' "
+        f"WHEN {mapped_expr} IS NOT NULL THEN {mapped_expr} "
+        f"WHEN {code} IS NOT NULL THEN 'other code' "
+        f"ELSE 'not found in the registry' END"
+    )
+
+
+def _plan_json(df: pl.LazyFrame) -> dict:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*serialization format of LazyFrame is deprecated.*",
+        )
+        raw = df.serialize(format="json")
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode()
+    return json.loads(raw)
+
+
+def _column_names(node) -> list[str]:
+    found: list[str] = []
+
+    def walk(value) -> None:
+        if isinstance(value, dict):
+            column = value.get("Column")
+            if isinstance(column, str) and column not in found:
+                if column.upper() in {item.upper() for item in _PERSON}:
+                    raise ValueError("person columns are not read")
+                found.append(column)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(node)
+    return found
+
+
+def _literal_sql(payload) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    if "Dyn" in payload:
+        dyn = payload["Dyn"]
+        if "Int" in dyn:
+            return str(int(dyn["Int"]))
+        if "Float" in dyn:
+            return repr(float(dyn["Float"]))
+        if "Boolean" in dyn:
+            return "TRUE" if dyn["Boolean"] else "FALSE"
+        if "String" in dyn:
+            text = str(dyn["String"]).replace("'", "''")
+            return f"'{text}'"
+    scalar = payload.get("Scalar")
+    if isinstance(scalar, dict) and "Datetime" in scalar:
+        value, unit, _tz = scalar["Datetime"]
+        scale = {
+            "Seconds": 1,
+            "Milliseconds": 1_000,
+            "Microseconds": 1_000_000,
+            "Nanoseconds": 1_000_000_000,
+        }.get(unit)
+        if scale is None:
+            return None
+        stamp = datetime.fromtimestamp(int(value) / scale, UTC)
+        return f"TIMESTAMP '{stamp.strftime('%Y-%m-%d %H:%M:%S')}'"
+    return None
+
+
+def _expr_sql(node) -> str | None:
+    """A SQL expression for a filter or a projected column. None if unsupported."""
+    if not isinstance(node, dict):
+        return None
+    if isinstance(node.get("Column"), str):
+        name = node["Column"]
+        if name.upper() in {item.upper() for item in _PERSON}:
+            raise ValueError("person columns are not read")
+        return _qident(name)
+    if "Alias" in node:
+        inner = node["Alias"][0]
+        return _expr_sql(inner)
+    if "Cast" in node:
+        inner = node["Cast"].get("expr")
+        if isinstance(inner, dict) and (
+            "Literal" in inner or "Alias" in inner or "Cast" in inner
+        ):
+            return _expr_sql(inner)
+        return None
+    if "BinaryExpr" in node:
+        body = node["BinaryExpr"]
+        op = {
+            "LtEq": "<=",
+            "GtEq": ">=",
+            "Lt": "<",
+            "Gt": ">",
+            "Eq": "=",
+            "NotEq": "<>",
+            "And": "AND",
+            "Or": "OR",
+        }.get(body.get("op"))
+        if op is None:
+            return None
+        left = _expr_sql(body.get("left"))
+        right = _expr_sql(body.get("right"))
+        if left is None or right is None:
+            return None
+        return f"({left} {op} {right})"
+    if "Literal" in node:
+        return _literal_sql(node["Literal"])
+    return None
+
+
+def _projection(expr) -> tuple[str, str] | None:
+    if isinstance(expr, dict) and isinstance(expr.get("Column"), str):
+        name = expr["Column"]
+        if name.upper() in {item.upper() for item in _PERSON}:
+            raise ValueError("person columns are not read")
+        return _qident(name), name
+    if isinstance(expr, dict) and "Alias" in expr:
+        inner, name = expr["Alias"]
+        sql = _expr_sql(inner)
+        if sql is None or not isinstance(name, str):
+            return None
+        return sql, name
+    return None
+
+
+def _compile_scan(scan: dict) -> str | None:
+    paths = []
+    for item in scan.get("sources", {}).get("Paths", []):
+        path = item.get("inner") if isinstance(item, dict) else None
+        if not path:
+            return None
+        paths.append(path.replace("'", "''"))
+    if not paths:
+        return None
+    hive = bool(
+        scan.get("unified_scan_args", {}).get("hive_options", {}).get("enabled")
+    )
+    quoted = ", ".join(f"'{path}'" for path in paths)
+    if hive:
+        return f"read_parquet([{quoted}], hive_partitioning=true)"
+    return f"read_parquet([{quoted}])"
+
+
+def _compile_select(sel: dict) -> str | None:
+    projections = []
+    for expr in sel.get("expr", []):
+        projected = _projection(expr)
+        if projected is None:
+            return None
+        projections.append(projected)
+    if not projections:
+        return None
+    inner_node = sel.get("input")
+    if isinstance(inner_node, dict) and "Filter" in inner_node:
+        filt = inner_node["Filter"]
+        predicate = _expr_sql(filt.get("predicate"))
+        source = _compile_node(filt.get("input"))
+        if predicate is None or source is None:
+            return None
+        needed: list[str] = []
+        for expr in sel.get("expr", []):
+            for column in _column_names(expr):
+                if column not in needed:
+                    needed.append(column)
+        for column in _column_names(filt.get("predicate")):
+            if column not in needed:
+                needed.append(column)
+        cols = ", ".join(_qident(column) for column in needed)
+        inner = f"(SELECT {cols} FROM {source} WHERE {predicate})"
+    else:
+        inner = _compile_node(inner_node)
+        if inner is None:
+            return None
+    parts = [f"{sql} AS {_qident(name)}" for sql, name in projections]
+    return "(SELECT " + ", ".join(parts) + f" FROM {inner})"
+
+
+def _compile_node(node) -> str | None:
+    if not isinstance(node, dict):
+        return None
+    if "Select" in node:
+        return _compile_select(node["Select"])
+    if "Scan" in node:
+        return _compile_scan(node["Scan"])
+    if "Filter" in node:
+        filt = node["Filter"]
+        predicate = _expr_sql(filt.get("predicate"))
+        source = _compile_node(filt.get("input"))
+        if predicate is None or source is None:
+            return None
+        needed = _column_names(filt.get("predicate"))
+        cols = ", ".join(_qident(column) for column in needed)
+        return f"(SELECT {cols} FROM {source} WHERE {predicate})"
+    return None
+
+
+def _unwrap_plan(plan: dict) -> dict:
+    """Polars wraps some plans as ``{"IR": {"dsl": ...}}`` and leaves others bare."""
+    if "IR" in plan and isinstance(plan["IR"], dict):
+        inner = plan["IR"]
+        if "dsl" in inner and isinstance(inner["dsl"], dict):
+            return inner["dsl"]
+        return inner
+    return plan
+
+
+def _compile_relation(df: pl.LazyFrame) -> str | None:
+    """SQL for a scan, a rename, and a simple filter. None when the plan joins."""
+    try:
+        return _compile_node(_unwrap_plan(_plan_json(df)))
+    except ValueError:
+        raise
+    except (AttributeError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def _sql_relation(con, df: pl.DataFrame | pl.LazyFrame, view: str) -> str | None:
+    """A SQL relation. A DataFrame is registered. A scan stays on disk."""
+    if isinstance(df, pl.DataFrame):
+        con.register(view, df)
+        return view
+    if isinstance(df, pl.LazyFrame):
+        return _compile_relation(df)
+    return None
+
+
+def _acquire_relation(df: pl.LazyFrame) -> tuple[str, list[str]]:
+    """SQL for ``df``. A joined plan is spilled once, then read back with a cap."""
+    sql = _compile_relation(df)
+    if sql is not None:
+        return sql, []
+    import tempfile
+
+    handle, name = tempfile.mkstemp(prefix="imp23-", suffix=".parquet")
+    os.close(handle)
+    df.sink_parquet(name, compression="zstd")
+    quoted = name.replace("'", "''")
+    return f"read_parquet('{quoted}')", [name]
+
+
+def _drop_files(paths: list[str]) -> None:
+    for path in paths:
+        if path and os.path.exists(path):
+            os.unlink(path)
+
+
+def _suppress_sql(
+    con,
+    table: str,
+    group_cols: list[str],
+    metrics: dict[str, str],
+    *,
+    pool: str,
+) -> tuple[pl.DataFrame, int]:
+    """Pool 1–4 CNPJ cells from a DuckDB relation. Detail rows are not collected."""
+    keys = list(dict.fromkeys([*group_cols, pool]))
+    key_sql = ", ".join(_qident(key) for key in keys)
+    metric_sql = ", ".join(
+        f"{expr} AS {_qident(name)}" for name, expr in metrics.items()
+    )
+    nsql = _n_distinct_sql()
+    first = con.execute(
+        f"""
+        SELECT {key_sql}, {metric_sql}, {nsql} AS {_qident("n_cnpj")}
+        FROM {table}
+        GROUP BY {key_sql}
+        """
+    ).pl()
+    small = first.filter((pl.col("n_cnpj") > 0) & (pl.col("n_cnpj") < MIN_CNPJ))
+    n_sup = small.height
+    if n_sup == 0:
+        return first.sort(keys), 0
+    con.register("_small_cells", small.select(keys))
+    join_on = " AND ".join(f"b.{_qident(key)} = s.{_qident(key)}" for key in keys)
+    label = "'" + SUPPRESSED.replace("'", "''") + "'"
+    grouped = []
+    for key in keys:
+        if key == pool:
+            grouped.append(
+                f"CASE WHEN s.{_qident(key)} IS NOT NULL THEN {label} "
+                f"ELSE b.{_qident(key)} END AS {_qident(key)}"
+            )
+        else:
+            grouped.append(f"b.{_qident(key)} AS {_qident(key)}")
+    group_by = ", ".join(str(i) for i in range(1, len(keys) + 1))
+    out = con.execute(
+        f"""
+        SELECT {", ".join(grouped)}, {metric_sql}, {nsql} AS {_qident("n_cnpj")}
+        FROM {table} b
+        LEFT JOIN _small_cells s ON {join_on}
+        GROUP BY {group_by}
+        """
+    ).pl()
+    value_cols = [col for col in out.columns if col not in keys]
+    out = out.with_columns(
+        [
+            pl.when((pl.col(pool) == SUPPRESSED) & (pl.col("n_cnpj") < MIN_CNPJ))
+            .then(pl.lit(None))
+            .otherwise(pl.col(col))
+            .alias(col)
+            for col in value_cols
+        ]
+    )
+    return out.sort(keys), n_sup
+
+
 def age_band_expr(col: str = "age") -> pl.Expr:
     """Bands with the lab's left-closed-false rule. Breaks are the right edges."""
     age = pl.col(col)
@@ -552,6 +954,10 @@ def parcel_band_expr(col: str = "qtd_parcelas") -> pl.Expr:
 def date_quality(df: pl.DataFrame | pl.LazyFrame, col: str) -> dict[str, Any]:
     """Count impossible dates in one pass. Do not rewrite them."""
     reject_person_columns(df)
+    if _is_lazy(df):
+        counted = _date_quality_sql(df, col)
+        if counted is not None:
+            return counted
     stats = _collect(
         _lazy(df).select(
             pl.len().alias("n"),
@@ -1006,11 +1412,6 @@ def recovery_by_class(
 def _ref_facts_spill(
     panel: pl.LazyFrame, years: list[int], params: PgeParams
 ) -> pl.DataFrame:
-    import os
-    import tempfile
-
-    import duckdb
-
     lf = panel.filter(
         (pl.col("year") >= FIRST_YEAR) & (pl.col("year") <= LAST_YEAR)
     ).select(
@@ -1026,15 +1427,9 @@ def _ref_facts_spill(
         "present_in_december",
         "enrolled_value",
     )
-    fd, name = tempfile.mkstemp(prefix="imp23-ref-", suffix=".parquet")
-    os.close(fd)
+    relation, temps = _acquire_relation(lf)
+    con = _duck()
     try:
-        lf.sink_parquet(name, compression="zstd")
-        con = duckdb.connect()
-        con.execute("SET memory_limit='1200MB'")
-        con.execute("SET temp_directory='/tmp'")
-        con.execute("SET threads=2")
-        con.execute("SET preserve_insertion_order=false")
         select = ["id_debito"]
         for year in years:
             snap = f"year = {year} AND present_in_december AND stock > 0"
@@ -1057,15 +1452,13 @@ def _ref_facts_spill(
                     f"SUM(CASE WHEN year BETWEEN {year + 1} AND {later} THEN COALESCE(paid, 0) ELSE 0 END) AS after_{year}",
                 ]
             )
-        quoted = name.replace("'", "''")
         out = con.execute(
-            f"SELECT {', '.join(select)} FROM read_parquet('{quoted}') GROUP BY id_debito"
+            f"SELECT {', '.join(select)} FROM {relation} GROUP BY id_debito"
         ).pl()
-        con.close()
         return out
     finally:
-        if os.path.exists(name):
-            os.unlink(name)
+        con.close()
+        _drop_files(temps)
 
 
 def ref_facts(panel: pl.DataFrame | pl.LazyFrame, params: PgeParams) -> pl.DataFrame:
@@ -1211,6 +1604,196 @@ def _recovery_prepared(
     return assert_public(out), n_sup
 
 
+_FACT_COLUMNS = (
+    "id_debito",
+    "year",
+    "cnpj",
+    "cnpj_root",
+    "origin",
+    "enrol_date",
+    "situacao",
+    "stock",
+    "paid",
+    "present_in_december",
+    "enrolled_value",
+)
+
+
+def _store_open_flags(con, instalments, years: list[int]) -> str | None:
+    """Open-instalment flags stay in DuckDB. They are not collected."""
+    relation = _sql_relation(con, instalments, "instalments")
+    if relation is None:
+        return None
+    flags = []
+    for year in years:
+        ref = date(year, 12, 31).isoformat()
+        requested = (
+            f"({_window_sql('data_solicitacao')} AND data_solicitacao <= DATE '{ref}')"
+        )
+        broken = (
+            f"({_window_sql('data_rompimento')} AND data_rompimento <= DATE '{ref}')"
+        )
+        flags.append(
+            f"BOOL_OR({requested} AND NOT ({broken})) AS {_qident(f'open_{year}')}"
+        )
+    if not flags:
+        return None
+    con.execute(
+        f"""
+        CREATE TEMP TABLE opens AS
+        SELECT CAST(id_debito AS BIGINT) AS id_debito, {", ".join(flags)}
+        FROM {relation}
+        GROUP BY 1
+        """
+    )
+    return "opens"
+
+
+def _store_year_snap(con, relation: str, year: int, params: PgeParams) -> None:
+    """One row per in-stock debt for one reference year. The rows stay in DuckDB."""
+    y0 = year - params.history_years + 1
+    y3 = year - params.recoverable_years + 1
+    later = min(params.recovery_through, LAST_YEAR)
+    snap = f"year = {year} AND COALESCE(present_in_december, FALSE) AND stock > 0"
+    con.execute("DROP TABLE IF EXISTS year_snap")
+    con.execute(
+        f"""
+        CREATE TEMP TABLE year_snap AS
+        SELECT id_debito,
+               MAX(CASE WHEN {snap} THEN cnpj END) AS cnpj,
+               MAX(CASE WHEN {snap} THEN cnpj_root END) AS cnpj_root,
+               MAX(CASE WHEN {snap} THEN origin END) AS origin,
+               MIN(CASE WHEN {snap} THEN enrol_date END) AS enrol_date,
+               MAX(CASE WHEN {snap} THEN situacao END) AS situacao,
+               COALESCE(SUM(CASE WHEN {snap} THEN stock END), 0) AS stock,
+               MAX(CASE WHEN {snap} THEN enrolled_value END) AS enrolled_value,
+               SUM(CASE WHEN year BETWEEN {y0} AND {year}
+                        THEN COALESCE(paid, 0) ELSE 0 END) AS paid_5y,
+               SUM(CASE WHEN year BETWEEN {y3} AND {year}
+                        THEN COALESCE(paid, 0) ELSE 0 END) AS paid_3y,
+               SUM(CASE WHEN year = {year + 1}
+                        THEN COALESCE(paid, 0) ELSE 0 END) AS paid_next,
+               SUM(CASE WHEN year BETWEEN {year + 1} AND {later}
+                        THEN COALESCE(paid, 0) ELSE 0 END) AS paid_after
+        FROM {relation}
+        GROUP BY id_debito
+        HAVING SUM(CASE WHEN {snap} THEN 1 ELSE 0 END) > 0
+        """
+    )
+
+
+def _spill_year(con, year: int, parts: int) -> str:
+    """Write one reference year to disk and return the path. The table can then be dropped."""
+    import tempfile
+
+    handle, name = tempfile.mkstemp(prefix="imp23-year-", suffix=".parquet")
+    os.close(handle)
+    quoted = name.replace("'", "''")
+    con.execute(
+        f"""
+        COPY (
+            SELECT s.id_debito, s.cnpj, s.cnpj_root, s.origin, s.enrol_date, s.situacao,
+                   s.stock, s.enrolled_value, s.paid_5y, s.paid_3y,
+                   s.paid_next, s.paid_after,
+                   TRUE AS in_stock,
+                   FALSE AS guaranteed,
+                   COALESCE(f.match_nivel, 'nao_encontrado') AS match_nivel,
+                   f.registry_code AS registry_code,
+                   COALESCE(o.{_qident(f"open_{year}")}, FALSE) AS instalment_open,
+                   (COALESCE(hash(s.cnpj_root), 0) & {parts - 1}) AS _part
+            FROM year_snap s
+            LEFT JOIN firms f ON s.cnpj = f.cnpj
+            LEFT JOIN opens o ON s.id_debito = o.id_debito
+        ) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+    )
+    return name
+
+
+def _backtest_sql(
+    panel: pl.LazyFrame,
+    firms: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    params: PgeParams,
+    years: list[int],
+):
+    """One reference year at a time. The wide certificate table is not collected."""
+    relation, temps = _acquire_relation(_lazy(panel).select(_FACT_COLUMNS))
+    con = _duck()
+    try:
+        if _store_open_flags(con, instalments, years) is None:
+            return None
+        _BUILDS["ref_facts"] += 1
+        _SQL_RUNS["backtest"] += 1
+        con.register(
+            "firms",
+            firms.select(
+                "cnpj",
+                "match_nivel",
+                pl.col("situacao_cadastral").alias("registry_code"),
+            ),
+        )
+        # One root stays in one batch, so the unit's history is complete.
+        # The stock is written to disk before it is classified, so DuckDB's
+        # buffer is released first.
+        n_parts = 8
+        year_paths: list[tuple[int, str]] = []
+        for year in years:
+            _store_year_snap(con, relation, year, params)
+            year_paths.append((year, _spill_year(con, year, n_parts)))
+            con.execute("DROP TABLE IF EXISTS year_snap")
+    finally:
+        con.close()
+        _drop_files(temps)
+    classes: list[pl.DataFrame] = []
+    recovered: list[pl.DataFrame] = []
+    n_sup = 0
+    keep = [
+        "id_debito",
+        "cnpj",
+        "origin",
+        "specific",
+        "binary_class",
+        "stock",
+        "paid_next",
+        "paid_after",
+        "recoverable",
+    ]
+    try:
+        for year, year_path in year_paths:
+            parts: list[pl.DataFrame] = []
+            for part in range(n_parts):
+                chunk = (
+                    pl.scan_parquet(year_path)
+                    .filter(pl.col("_part") == part)
+                    .drop("_part")
+                    .collect()
+                )
+                if chunk.height == 0:
+                    continue
+                classified = classify_pge(chunk, date(year, 12, 31), params)
+                parts.append(classified.select(keep))
+                del chunk, classified
+            if not parts:
+                continue
+            classified = pl.concat(parts)
+            summary, n1 = summarise_pge(classified, year)
+            rec, n2 = _recovery_prepared(classified, year)
+            classes.append(summary)
+            recovered.append(rec)
+            n_sup += n1 + n2
+            del classified, parts
+    finally:
+        _drop_files([path for _, path in year_paths])
+    empty_c = pl.DataFrame()
+    empty_r = pl.DataFrame()
+    return (
+        pl.concat(classes, how="diagonal_relaxed") if classes else empty_c,
+        pl.concat(recovered, how="diagonal_relaxed") if recovered else empty_r,
+        {"n_cells_suppressed": n_sup},
+    )
+
+
 def backtest_rule(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
@@ -1218,6 +1801,10 @@ def backtest_rule(
     params: PgeParams,
 ) -> tuple[pl.DataFrame, pl.DataFrame, dict[str, int]]:
     years = [year for year in params.ref_years if year <= LAST_YEAR]
+    if _is_lazy(panel):
+        reduced = _backtest_sql(panel, firms, instalments, params, years)
+        if reduced is not None:
+            return reduced
     facts = ref_facts(panel, params)
     opens = _open_flags(instalments, years)
     firm = firms.select(
@@ -1342,6 +1929,26 @@ def request_share(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas)
+    if _is_lazy(instalments):
+        reduced = _share_sql(
+            cdas,
+            instalments,
+            where=_window_sql("data_solicitacao"),
+            flag="has_request",
+            group_cols=["enrol_year"],
+            metrics={
+                "n_cda": "COUNT(*)",
+                "n_with_request": "CAST(SUM(has_request) AS BIGINT)",
+                "enrolled": "CAST(SUM(enrolled_value) AS DOUBLE)",
+            },
+            run_key="share",
+        )
+        if reduced is not None:
+            out, n_sup = reduced
+            out = out.with_columns(
+                (pl.col("n_with_request") / pl.col("n_cda")).alias("share_with_request")
+            )
+            return assert_public(out), n_sup
     frame = _with_semi_flag(
         cdas, instalments, _plausible("data_solicitacao"), "has_request"
     )
@@ -1368,6 +1975,12 @@ def status_distribution(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    if _is_lazy(instalments):
+        reduced = _status_count_sql(
+            cdas, instalments, "status_parcelamento", "n_requests"
+        )
+        if reduced is not None:
+            return reduced
     # Collapse to debt × status before the firm join, so the raw request table is not held.
     compact = (
         _lazy(instalments)
@@ -1460,6 +2073,12 @@ def km_enrol_to_request(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int, dict[str, int]]:
     cdas = _cohort_cdas(panel, cdas)
+    if _is_lazy(instalments):
+        reduced = _enrol_km_sql(
+            cdas, instalments, "data_solicitacao", count_negative=True
+        )
+        if reduced is not None:
+            return reduced
     first = _collect(
         _lazy(instalments)
         .filter(_plausible("data_solicitacao"))
@@ -1490,6 +2109,10 @@ def km_request_to_break(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    if _is_lazy(instalments):
+        reduced = _break_km_sql(cdas, instalments)
+        if reduced is not None:
+            return reduced
     req = _collect(
         _lazy(instalments)
         .filter(_plausible("data_solicitacao"))
@@ -1525,6 +2148,10 @@ def break_rates(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    if _is_lazy(instalments):
+        reduced = _break_rates_sql(cdas, instalments)
+        if reduced is not None:
+            return reduced
     req = _collect(
         _lazy(instalments)
         .filter(_plausible("data_solicitacao"))
@@ -1572,6 +2199,17 @@ def recovery_by_flag(
         label_yes, label_no = "with a break", "without a break"
     else:
         raise ValueError(flag)
+    if _is_lazy(instalments):
+        date_col = "data_solicitacao" if flag == "request" else "data_rompimento"
+        reduced = _recovery_flag_sql(
+            cdas,
+            instalments,
+            where=_window_sql(date_col),
+            label_yes=label_yes,
+            label_no=label_no,
+        )
+        if reduced is not None:
+            return reduced
     flagged = _with_semi_flag(cdas, instalments, mask, "_hit")
     frame = flagged.with_columns(
         pl.when(pl.col("_hit"))
@@ -1600,6 +2238,29 @@ def protest_share(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas)
+    if _is_lazy(protests):
+        reduced = _share_sql(
+            cdas,
+            protests,
+            where="id_debito IS NOT NULL",
+            flag="protested",
+            group_cols=["enrol_year"],
+            metrics={
+                "n_cda": "COUNT(*)",
+                "n_protested": "CAST(SUM(protested) AS BIGINT)",
+                "enrolled": "CAST(SUM(enrolled_value) AS DOUBLE)",
+                "enrolled_protested": (
+                    "CAST(SUM(CASE WHEN protested = 1 THEN enrolled_value END) AS DOUBLE)"
+                ),
+            },
+            run_key="share",
+        )
+        if reduced is not None:
+            out, n_sup = reduced
+            out = out.with_columns(
+                (pl.col("n_protested") / pl.col("n_cda")).alias("share_protested")
+            )
+            return assert_public(out), n_sup
     frame = _with_semi_flag(
         cdas, protests, pl.col("id_debito").is_not_null(), "protested"
     )
@@ -1629,6 +2290,10 @@ def km_enrol_to_protest(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas)
+    if _is_lazy(protests):
+        reduced = _enrol_km_sql(cdas, protests, "data_protesto", count_negative=False)
+        if reduced is not None:
+            return reduced
     first = _collect(
         _lazy(protests)
         .filter(_plausible("data_protesto"))
@@ -1658,6 +2323,10 @@ def protest_status(
     cdas: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     cdas = _cohort_cdas(panel, cdas).select("id_debito", "cnpj", "origin")
+    if _is_lazy(protests):
+        reduced = _status_count_sql(cdas, protests, "status_protesto", "n_rows")
+        if reduced is not None:
+            return reduced
     compact = (
         _lazy(protests)
         .group_by(
@@ -1676,6 +2345,438 @@ def protest_status(
     return assert_public(out), n_sup
 
 
+def _id_eq(left: str, right: str) -> str:
+    return f"CAST({left}.id_debito AS BIGINT) = CAST({right}.id_debito AS BIGINT)"
+
+
+def _recovery_around_sql(
+    cdas: pl.DataFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    payments: pl.DataFrame | pl.LazyFrame,
+) -> tuple[pl.DataFrame, int] | None:
+    """Keep GARE on disk and aggregate it only for ids that have a protest date.
+
+    The protest table is reduced to one date per debt before any payment row is
+    read. Payment rows are not collected into Polars.
+    """
+    con = _duck()
+    try:
+        protest_sql = _sql_relation(con, protests, "protests")
+        pay_sql = _sql_relation(con, payments, "payments")
+        if protest_sql is None or pay_sql is None:
+            return None
+        con.register(
+            "cohort",
+            cdas.select("id_debito", "cnpj", "origin", "enrolled_value"),
+        )
+        con.execute(
+            f"""
+            CREATE TEMP TABLE dated AS
+            SELECT CAST(p.id_debito AS BIGINT) AS id_debito,
+                   MIN(p.data_protesto) AS protest_date
+            FROM {protest_sql} p
+            INNER JOIN cohort c ON {_id_eq("p", "c")}
+            WHERE {_window_sql("p.data_protesto")}
+            GROUP BY 1
+            """
+        )
+        con.execute(
+            f"""
+            CREATE TEMP TABLE paid AS
+            SELECT d.id_debito,
+                   SUM(CASE WHEN g.pay_date < d.protest_date THEN g.amount ELSE 0 END)
+                       AS paid_before,
+                   SUM(CASE WHEN g.pay_date >= d.protest_date THEN g.amount ELSE 0 END)
+                       AS paid_after
+            FROM {pay_sql} g
+            INNER JOIN dated d ON CAST(g.id_debito AS BIGINT) = d.id_debito
+            WHERE {_window_sql("g.pay_date")}
+            GROUP BY d.id_debito
+            """
+        )
+        con.execute(
+            """
+            CREATE TEMP TABLE base_paid AS
+            SELECT c.origin, c.cnpj, c.enrolled_value,
+                   COALESCE(p.paid_before, 0) AS paid_before,
+                   COALESCE(p.paid_after, 0) AS paid_after
+            FROM cohort c
+            INNER JOIN dated d ON CAST(c.id_debito AS BIGINT) = d.id_debito
+            LEFT JOIN paid p ON d.id_debito = p.id_debito
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "base_paid",
+            [],
+            {
+                "n_cda": "COUNT(*)",
+                "paid_before": "CAST(SUM(paid_before) AS DOUBLE)",
+                "paid_after": "CAST(SUM(paid_after) AS DOUBLE)",
+                "enrolled": "CAST(SUM(enrolled_value) AS DOUBLE)",
+            },
+            pool="origin",
+        )
+    finally:
+        con.close()
+    _SQL_RUNS["recovery"] += 1
+    out = out.with_columns(
+        (pl.col("paid_before") / pl.col("enrolled")).alias("recovery_before"),
+        (pl.col("paid_after") / pl.col("enrolled")).alias("recovery_after"),
+    )
+    return assert_public(out), n_sup
+
+
+def _date_quality_sql(df: pl.LazyFrame, col: str) -> dict[str, Any] | None:
+    relation = _compile_relation(df)
+    if relation is None:
+        return None
+    quoted = _qident(col)
+    start = WINDOW_START.isoformat()
+    end = WINDOW_END.isoformat()
+    con = _duck()
+    try:
+        row = con.execute(
+            f"""
+            SELECT COUNT(*) AS n,
+                   COUNT(*) FILTER (WHERE {quoted} IS NULL) AS n_null,
+                   COUNT(*) FILTER (
+                       WHERE {quoted} IS NOT NULL AND {quoted} < DATE '{start}'
+                   ) AS n_before_window,
+                   COUNT(*) FILTER (
+                       WHERE {quoted} IS NOT NULL AND {quoted} > DATE '{end}'
+                   ) AS n_after_window,
+                   COUNT(*) FILTER (
+                       WHERE {quoted} IS NOT NULL AND year({quoted}) < 1000
+                   ) AS n_year_before_1000
+            FROM {relation}
+            """
+        ).fetchone()
+    finally:
+        con.close()
+    _SQL_RUNS["dates"] += 1
+    keys = (
+        "n",
+        "n_null",
+        "n_before_window",
+        "n_after_window",
+        "n_year_before_1000",
+    )
+    return {
+        "column": col,
+        **{key: int(value or 0) for key, value in zip(keys, row, strict=True)},
+    }
+
+
+def _distinct_ids(relation: str, where: str) -> str:
+    return (
+        f"(SELECT DISTINCT CAST(id_debito AS BIGINT) AS id_debito "
+        f"FROM {relation} WHERE {where})"
+    )
+
+
+def _share_sql(
+    cdas: pl.DataFrame,
+    events: pl.DataFrame | pl.LazyFrame,
+    *,
+    where: str,
+    flag: str,
+    group_cols: list[str],
+    metrics: dict[str, str],
+    run_key: str,
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, events, "events")
+        if relation is None:
+            return None
+        con.register("cohort", cdas)
+        con.execute(
+            f"""
+            CREATE TEMP VIEW detail AS
+            SELECT c.*, CASE WHEN h.id_debito IS NULL THEN 0 ELSE 1 END AS {flag}
+            FROM cohort c
+            LEFT JOIN {_distinct_ids(relation, where)} h
+              ON CAST(c.id_debito AS BIGINT) = h.id_debito
+            """
+        )
+        out, n_sup = _suppress_sql(con, "detail", group_cols, metrics, pool="origin")
+    finally:
+        con.close()
+    _SQL_RUNS[run_key] += 1
+    return out, n_sup
+
+
+def _status_count_sql(
+    cdas: pl.DataFrame,
+    events: pl.DataFrame | pl.LazyFrame,
+    status_col: str,
+    metric: str,
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, events, "events")
+        if relation is None:
+            return None
+        con.register("cohort", cdas.select("id_debito", "cnpj", "origin"))
+        quoted = _qident(status_col)
+        con.execute(
+            f"""
+            CREATE TEMP VIEW detail AS
+            SELECT c.origin, c.cnpj,
+                   COALESCE(CAST(e.{quoted} AS VARCHAR), 'missing status') AS status
+            FROM {relation} e
+            INNER JOIN cohort c ON {_id_eq("e", "c")}
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "detail",
+            ["origin"],
+            {metric: "COUNT(*)"},
+            pool="status",
+        )
+    finally:
+        con.close()
+    _SQL_RUNS["status"] += 1
+    return assert_public(out), n_sup
+
+
+def _km_from_counts(
+    raw: pl.DataFrame, sizes: pl.DataFrame, group_cols: list[str]
+) -> tuple[pl.DataFrame, int]:
+    if raw.height == 0:
+        return assert_public(raw), 0
+    small = sizes.filter(pl.col("n_cnpj_group") < MIN_CNPJ)
+    kept = raw.join(
+        sizes.filter(pl.col("n_cnpj_group") >= MIN_CNPJ),
+        on=group_cols,
+        how="inner",
+    )
+    return assert_public(kaplan_meier(kept, group_cols)), small.height
+
+
+def _km_aggregate(con, group_cols: list[str]) -> tuple[pl.DataFrame, pl.DataFrame]:
+    keys = ", ".join(_qident(col) for col in group_cols)
+    raw = con.execute(
+        f"""
+        SELECT {keys}, t, COUNT(*) AS n, SUM(d) AS d, {_n_distinct_sql()} AS n_cnpj
+        FROM events
+        WHERE t >= 0
+        GROUP BY {keys}, t
+        """
+    ).pl()
+    sizes = con.execute(
+        f"""
+        SELECT {keys}, {_n_distinct_sql()} AS n_cnpj_group
+        FROM events
+        WHERE t >= 0
+        GROUP BY {keys}
+        """
+    ).pl()
+    return raw, sizes
+
+
+def _enrol_km_sql(
+    cdas: pl.DataFrame,
+    events: pl.DataFrame | pl.LazyFrame,
+    date_col: str,
+    *,
+    count_negative: bool,
+) -> tuple | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, events, "events_raw")
+        if relation is None:
+            return None
+        con.register(
+            "cohort",
+            cdas.select("id_debito", "cnpj", "origin", "enrol_date"),
+        )
+        quoted = _qident(date_col)
+        censor = CENSOR.isoformat()
+        con.execute(
+            f"""
+            CREATE TEMP VIEW events AS
+            SELECT origin, cnpj, d,
+                   {_month_sql("enrol_date", "end_date")} AS t
+            FROM (
+                SELECT c.origin, c.cnpj, c.enrol_date,
+                       CASE WHEN h.event IS NULL THEN DATE '{censor}'
+                            ELSE h.event END AS end_date,
+                       CASE WHEN h.event IS NULL THEN 0 ELSE 1 END AS d
+                FROM cohort c
+                LEFT JOIN (
+                    SELECT CAST(id_debito AS BIGINT) AS id_debito,
+                           MIN({quoted}) AS event
+                    FROM {relation}
+                    WHERE {_window_sql(quoted)}
+                    GROUP BY 1
+                ) h ON CAST(c.id_debito AS BIGINT) = h.id_debito
+            )
+            """
+        )
+        n_neg = 0
+        if count_negative:
+            n_neg = int(
+                con.execute(
+                    "SELECT COUNT(*) FILTER (WHERE t < 0) FROM events"
+                ).fetchone()[0]
+                or 0
+            )
+        raw, sizes = _km_aggregate(con, ["origin"])
+    finally:
+        con.close()
+    _SQL_RUNS["km"] += 1
+    curve, n_sup = _km_from_counts(raw, sizes, ["origin"])
+    if count_negative:
+        return curve, n_sup, {"n_negative_duration": n_neg}
+    return curve, n_sup
+
+
+def _break_km_sql(
+    cdas: pl.DataFrame, instalments: pl.DataFrame | pl.LazyFrame
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, instalments, "instalments")
+        if relation is None:
+            return None
+        con.register("cohort", cdas.select("id_debito", "cnpj", "origin"))
+        censor = CENSOR.isoformat()
+        plausible_break = _window_sql("data_rompimento")
+        con.execute(
+            f"""
+            CREATE TEMP VIEW events AS
+            SELECT origin, cnpj, d,
+                   {_month_sql("data_solicitacao", "end_date")} AS t
+            FROM (
+                SELECT c.origin, c.cnpj, e.data_solicitacao,
+                       CASE WHEN {plausible_break} THEN e.data_rompimento
+                            ELSE DATE '{censor}' END AS end_date,
+                       CASE WHEN {plausible_break} THEN 1 ELSE 0 END AS d
+                FROM {relation} e
+                INNER JOIN cohort c ON {_id_eq("e", "c")}
+                WHERE {_window_sql("e.data_solicitacao")}
+            )
+            """
+        )
+        raw, sizes = _km_aggregate(con, ["origin"])
+    finally:
+        con.close()
+    _SQL_RUNS["km"] += 1
+    return _km_from_counts(raw, sizes, ["origin"])
+
+
+def _break_rates_sql(
+    cdas: pl.DataFrame, instalments: pl.DataFrame | pl.LazyFrame
+) -> tuple[pl.DataFrame, pl.DataFrame, int] | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, instalments, "instalments")
+        if relation is None:
+            return None
+        con.register("cohort", cdas.select("id_debito", "cnpj", "origin"))
+        plausible_break = _window_sql("e.data_rompimento")
+        con.execute(
+            f"""
+            CREATE TEMP VIEW req AS
+            SELECT c.origin, c.cnpj,
+                   CASE WHEN {plausible_break} THEN 1 ELSE 0 END AS broken,
+                   {_parcel_case("e.qtd_parcelas")} AS parcel_band
+            FROM {relation} e
+            INNER JOIN cohort c ON {_id_eq("e", "c")}
+            WHERE {_window_sql("e.data_solicitacao")}
+            """
+        )
+        by_origin, n1 = _suppress_sql(
+            con,
+            "req",
+            [],
+            {
+                "n_requests": "COUNT(*)",
+                "n_broken": "CAST(SUM(broken) AS BIGINT)",
+            },
+            pool="origin",
+        )
+        con.execute(
+            """
+            CREATE TEMP VIEW req_band AS
+            SELECT origin, cnpj, broken, parcel_band
+            FROM req
+            WHERE parcel_band IS NOT NULL
+            """
+        )
+        by_band, n2 = _suppress_sql(
+            con,
+            "req_band",
+            ["origin"],
+            {
+                "n_requests": "COUNT(*)",
+                "n_broken": "CAST(SUM(broken) AS BIGINT)",
+            },
+            pool="parcel_band",
+        )
+    finally:
+        con.close()
+    _SQL_RUNS["break"] += 1
+    by_origin = by_origin.with_columns(
+        (pl.col("n_broken") / pl.col("n_requests")).alias("break_rate")
+    )
+    by_band = by_band.with_columns(
+        (pl.col("n_broken") / pl.col("n_requests")).alias("break_rate")
+    )
+    return assert_public(by_origin), assert_public(by_band), n1 + n2
+
+
+def _recovery_flag_sql(
+    cdas: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    *,
+    where: str,
+    label_yes: str,
+    label_no: str,
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    try:
+        relation = _sql_relation(con, instalments, "instalments")
+        if relation is None:
+            return None
+        con.register(
+            "cohort",
+            cdas.select("id_debito", "cnpj", "origin", "paid", "enrolled_value"),
+        )
+        yes = label_yes.replace("'", "''")
+        no = label_no.replace("'", "''")
+        con.execute(
+            f"""
+            CREATE TEMP VIEW detail AS
+            SELECT c.origin, c.cnpj, c.paid, c.enrolled_value,
+                   CASE WHEN h.id_debito IS NULL THEN '{no}' ELSE '{yes}' END
+                       AS {_qident("group")}
+            FROM cohort c
+            LEFT JOIN {_distinct_ids(relation, where)} h
+              ON CAST(c.id_debito AS BIGINT) = h.id_debito
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "detail",
+            ["origin"],
+            {
+                "n_cda": "COUNT(*)",
+                "paid": "CAST(SUM(paid) AS DOUBLE)",
+                "enrolled": "CAST(SUM(enrolled_value) AS DOUBLE)",
+            },
+            pool="group",
+        )
+    finally:
+        con.close()
+    _SQL_RUNS["share"] += 1
+    out = out.with_columns((pl.col("paid") / pl.col("enrolled")).alias("recovery"))
+    return assert_public(out), n_sup
+
+
 def recovery_around_protest(
     panel: pl.DataFrame | pl.LazyFrame,
     protests: pl.DataFrame | pl.LazyFrame,
@@ -1685,6 +2786,10 @@ def recovery_around_protest(
 ) -> tuple[pl.DataFrame, int]:
     """Paid before the protest date and paid on or after it, over enrolled value."""
     cdas = _cohort_cdas(panel, cdas)
+    if _is_lazy(protests) or _is_lazy(payments):
+        reduced = _recovery_around_sql(cdas, protests, payments)
+        if reduced is not None:
+            return reduced
     dated = _collect(
         _lazy(protests)
         .filter(_plausible("data_protesto"))
@@ -1811,6 +2916,249 @@ def _age_frame(
     )
 
 
+_AGE_COLUMNS = (
+    "id_debito",
+    "year",
+    "cnpj",
+    "origin",
+    "stock",
+    "paid",
+    "age",
+    "enrol_year",
+    "enrolled_value",
+)
+
+
+def _bind_age(con, panel: pl.LazyFrame, firms: pl.DataFrame) -> list[str] | None:
+    """Register firms and build ``age_rows``. Returns temp files, or None."""
+    reject_person_columns(firms)
+    relation, temps = _acquire_relation(_lazy(panel).select(_AGE_COLUMNS))
+    con.register(
+        "firms",
+        firms.select(
+            "cnpj",
+            "match_nivel",
+            pl.col("situacao_cadastral").alias("registry_code"),
+        ),
+    )
+    listed = ", ".join(f"p.{_qident(col)}" for col in _AGE_COLUMNS)
+    con.execute(
+        f"""
+        CREATE TEMP VIEW age_rows AS
+        SELECT {listed},
+               {_age_case("p.age")} AS age_band,
+               {_status_case()} AS status
+        FROM {relation} p
+        LEFT JOIN firms f ON p.cnpj = f.cnpj
+        WHERE p.year >= {FIRST_YEAR} AND p.year <= {LAST_YEAR}
+        """
+    )
+    return temps
+
+
+def _rate_frame(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns((pl.col("paid") / pl.col("stock")).alias("rate"))
+
+
+def _annual_sql(
+    panel: pl.LazyFrame, firms: pl.DataFrame
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    temps: list[str] = []
+    try:
+        bound = _bind_age(con, panel, firms)
+        if bound is None:
+            return None
+        temps = bound
+        con.execute(
+            """
+            CREATE TEMP VIEW annual_src AS
+            SELECT id_debito, year, cnpj, origin, stock, paid, age_band
+            FROM age_rows
+            WHERE stock > 0 AND age_band IS NOT NULL
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "annual_src",
+            ["year", "age_band"],
+            {
+                "n_cda": _n_distinct_sql("id_debito"),
+                "paid": "CAST(SUM(paid) AS DOUBLE)",
+                "stock": "CAST(SUM(stock) AS DOUBLE)",
+            },
+            pool="origin",
+        )
+    finally:
+        con.close()
+        _drop_files(temps)
+    _SQL_RUNS["age"] += 1
+    out = _rate_frame(out)
+    years = set(out["year"].drop_nulls().to_list())
+    if any(year > LAST_YEAR for year in years):
+        raise ValueError("annual recovery includes a year after the window")
+    return assert_public(out), n_sup
+
+
+def _mean_sql(
+    panel: pl.LazyFrame, firms: pl.DataFrame
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    temps: list[str] = []
+    try:
+        bound = _bind_age(con, panel, firms)
+        if bound is None:
+            return None
+        temps = bound
+        con.execute(
+            """
+            CREATE TEMP VIEW mean_src AS
+            SELECT id_debito, cnpj, origin, stock, paid, age_band
+            FROM age_rows
+            WHERE stock > 0 AND age_band IS NOT NULL
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "mean_src",
+            ["age_band"],
+            {
+                "paid": "CAST(SUM(paid) AS DOUBLE)",
+                "stock": "CAST(SUM(stock) AS DOUBLE)",
+                "n_cda": _n_distinct_sql("id_debito"),
+            },
+            pool="origin",
+        )
+    finally:
+        con.close()
+        _drop_files(temps)
+    _SQL_RUNS["age"] += 1
+    return assert_public(_rate_frame(out)), n_sup
+
+
+def _status_age_sql(
+    panel: pl.LazyFrame, firms: pl.DataFrame
+) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    temps: list[str] = []
+    try:
+        bound = _bind_age(con, panel, firms)
+        if bound is None:
+            return None
+        temps = bound
+        con.execute(
+            """
+            CREATE TEMP VIEW status_src AS
+            SELECT id_debito, cnpj, origin, stock, paid, age_band, status
+            FROM age_rows
+            WHERE stock > 0 AND age_band IS NOT NULL
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "status_src",
+            ["age_band", "origin"],
+            {
+                "paid": "CAST(SUM(paid) AS DOUBLE)",
+                "stock": "CAST(SUM(stock) AS DOUBLE)",
+                "n_cda": _n_distinct_sql("id_debito"),
+            },
+            pool="status",
+        )
+    finally:
+        con.close()
+        _drop_files(temps)
+    _SQL_RUNS["age"] += 1
+    return assert_public(_rate_frame(out)), n_sup
+
+
+def _unobserved_band(out: pl.DataFrame) -> pl.DataFrame:
+    cohorts = out["enrol_year"].unique().drop_nulls().to_list()
+    if not cohorts:
+        return out
+    gap = pl.DataFrame(
+        {
+            "enrol_year": cohorts,
+            "age_band": [AGE_LABELS[-1]] * len(cohorts),
+            "origin": ["not observable"] * len(cohorts),
+            "n_cda": [None] * len(cohorts),
+            "cum_paid": [None] * len(cohorts),
+            "enrolled": [None] * len(cohorts),
+            "n_cnpj": [None] * len(cohorts),
+            "cumulative": [None] * len(cohorts),
+        }
+    )
+    return pl.concat([out, gap], how="diagonal_relaxed")
+
+
+def _cumulative_sql(panel: pl.LazyFrame) -> tuple[pl.DataFrame, int] | None:
+    con = _duck()
+    temps: list[str] = []
+    try:
+        relation, temps = _acquire_relation(
+            _lazy(panel).select(
+                "id_debito",
+                "year",
+                "cnpj",
+                "origin",
+                "paid",
+                "age",
+                "enrol_year",
+                "enrolled_value",
+            )
+        )
+        con.execute(
+            f"""
+            CREATE TEMP VIEW cum_last AS
+            SELECT id_debito, age_band,
+                   MAX(CASE WHEN rn = n_in THEN cum_paid END) AS cum_paid,
+                   MAX(enrolled_value) AS enrolled_value,
+                   MAX(CASE WHEN rn = n_in THEN origin END) AS origin,
+                   MAX(CASE WHEN rn = n_in THEN cnpj END) AS cnpj,
+                   MIN(enrol_year) AS enrol_year
+            FROM (
+                SELECT id_debito, age_band, enrolled_value, origin, cnpj, enrol_year,
+                       SUM(COALESCE(paid, 0)) OVER (
+                           PARTITION BY id_debito ORDER BY year
+                       ) AS cum_paid,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY id_debito, age_band ORDER BY age, year
+                       ) AS rn,
+                       COUNT(*) OVER (PARTITION BY id_debito, age_band) AS n_in
+                FROM (
+                    SELECT id_debito, year, cnpj, origin, paid, age, enrol_year,
+                           enrolled_value, {_age_case("age")} AS age_band
+                    FROM {relation}
+                    WHERE enrol_year BETWEEN {FIRST_YEAR} AND {LAST_YEAR}
+                      AND year BETWEEN {FIRST_YEAR} AND {LAST_YEAR}
+                      AND year >= enrol_year
+                ) tagged
+                WHERE age_band IS NOT NULL AND age_band <> '{AGE_LABELS[-1]}'
+            ) ordered
+            GROUP BY id_debito, age_band
+            """
+        )
+        out, n_sup = _suppress_sql(
+            con,
+            "cum_last",
+            ["enrol_year", "age_band"],
+            {
+                "n_cda": "COUNT(*)",
+                "cum_paid": "CAST(SUM(cum_paid) AS DOUBLE)",
+                "enrolled": "CAST(SUM(enrolled_value) AS DOUBLE)",
+            },
+            pool="origin",
+        )
+    finally:
+        con.close()
+        _drop_files(temps)
+    _SQL_RUNS["age"] += 1
+    out = out.with_columns(
+        (pl.col("cum_paid") / pl.col("enrolled")).alias("cumulative")
+    )
+    return assert_public(_unobserved_band(out)), n_sup
+
+
 def annual_recovery(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
@@ -1818,6 +3166,10 @@ def annual_recovery(
     base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Non-cumulative paid/stock by year, age band and origin."""
+    if base is None and _is_lazy(panel):
+        reduced = _annual_sql(panel, firms)
+        if reduced is not None:
+            return reduced
     lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
@@ -1845,6 +3197,10 @@ def mean_recovery(
     base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Stock-weighted mean of the annual rate, by age band and origin."""
+    if base is None and _is_lazy(panel):
+        reduced = _mean_sql(panel, firms)
+        if reduced is not None:
+            return reduced
     lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
@@ -1869,6 +3225,10 @@ def recovery_by_status(
     base: pl.DataFrame | None = None,
 ) -> tuple[pl.DataFrame, int]:
     """Stock-weighted recovery by age band, origin and registration status."""
+    if base is None and _is_lazy(panel):
+        reduced = _status_age_sql(panel, firms)
+        if reduced is not None:
+            return reduced
     lf = _lazy(_age_frame(panel, firms, base)).filter(
         (pl.col("stock") > 0) & pl.col("age_band").is_not_null()
     )
@@ -1896,6 +3256,10 @@ def cumulative_by_band(
     Cohorts are enrolments inside the window. The band above ten years is emitted
     empty: those cohorts do not reach it.
     """
+    if base is None and _is_lazy(panel):
+        reduced = _cumulative_sql(panel)
+        if reduced is not None:
+            return reduced
     source = _lazy(panel) if base is None else _lazy(base)
     lf = source.filter(
         pl.col("enrol_year").is_between(FIRST_YEAR, LAST_YEAR)
@@ -1958,6 +3322,13 @@ def recovery_age_page(
 ) -> dict[str, Any]:
     """Age-band tables. The panel stays lazy; each table is a streaming aggregate."""
     _BUILDS["age_base"] += 1
+    if _is_lazy(panel):
+        return {
+            "annual": annual_recovery(panel, firms),
+            "mean": mean_recovery(panel, firms),
+            "cumulative": cumulative_by_band(panel),
+            "status": recovery_by_status(panel, firms),
+        }
     base = _age_frame(panel, firms)
     if isinstance(base, pl.DataFrame):
         base = base.lazy()
@@ -1978,11 +3349,123 @@ def _cnae_division(expr: pl.Expr) -> pl.Expr:
     )
 
 
+def _attach_flags(df: pl.DataFrame) -> pl.DataFrame:
+    """Dated instalment and protest flags. The protest status is not a column."""
+    return (
+        df.with_columns(
+            pl.col("match_nivel").fill_null("nao_encontrado"),
+            _status_expr(),
+        )
+        .with_columns(
+            pl.col("stock").log().alias("log_stock"),
+            pl.col("year").cast(pl.Utf8),
+            (
+                pl.col("first_request").is_not_null()
+                & (pl.col("first_request").dt.year() < pl.col("year"))
+            )
+            .cast(pl.Int8)
+            .alias("instalment_requested_before"),
+            (
+                pl.col("first_break").is_not_null()
+                & (pl.col("first_break").dt.year() < pl.col("year"))
+            )
+            .cast(pl.Int8)
+            .alias("instalment_broken_before"),
+            pl.when(
+                pl.col("first_protest").is_not_null()
+                & (pl.col("first_protest").dt.year() < pl.col("year"))
+            )
+            .then(pl.lit("protested before the year"))
+            .when(
+                pl.col("first_protest").is_null()
+                & (pl.col("n_null_protest").fill_null(0) > 0)
+            )
+            .then(pl.lit("date missing"))
+            .otherwise(pl.lit("not protested"))
+            .alias("protest_before"),
+            _cnae_division(pl.col("cnae_divisao")).alias("cnae_division"),
+            pl.col("porte")
+            .cast(pl.Utf8)
+            .replace_strict(PORTE_LABEL, default="other code")
+            .fill_null("unknown")
+            .alias("porte_label"),
+        )
+        .select(
+            "id_debito",
+            "year",
+            "cnpj",
+            "cnpj_root",
+            "paid_flag",
+            "log_stock",
+            "age",
+            "rate_l1",
+            "origin",
+            "status",
+            "cnae_division",
+            "porte_label",
+            "instalment_requested_before",
+            "instalment_broken_before",
+            "protest_before",
+        )
+    )
+
+
+def _logit_side_sql(
+    instalments: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
+    ids: pl.DataFrame,
+) -> dict[str, pl.DataFrame] | None:
+    """One date per sampled debt. The protest and request tables are not collected."""
+    con = _duck()
+    try:
+        inst = _sql_relation(con, instalments, "instalments")
+        prot = _sql_relation(con, protests, "protests")
+        if inst is None or prot is None:
+            return None
+        con.register("sample_ids", ids.select("id_debito"))
+        req = con.execute(
+            f"""
+            SELECT CAST(e.id_debito AS BIGINT) AS id_debito,
+                   MIN(e.data_solicitacao) AS first_request
+            FROM {inst} e
+            INNER JOIN sample_ids i ON {_id_eq("e", "i")}
+            WHERE {_window_sql("e.data_solicitacao")}
+            GROUP BY 1
+            """
+        ).pl()
+        brk = con.execute(
+            f"""
+            SELECT CAST(e.id_debito AS BIGINT) AS id_debito,
+                   MIN(e.data_rompimento) AS first_break
+            FROM {inst} e
+            INNER JOIN sample_ids i ON {_id_eq("e", "i")}
+            WHERE {_window_sql("e.data_rompimento")}
+            GROUP BY 1
+            """
+        ).pl()
+        protest = con.execute(
+            f"""
+            SELECT CAST(e.id_debito AS BIGINT) AS id_debito,
+                   MIN(CASE WHEN {_window_sql("e.data_protesto")}
+                            THEN e.data_protesto END) AS first_protest,
+                   CAST(SUM(CASE WHEN e.data_protesto IS NULL THEN 1 ELSE 0 END)
+                        AS BIGINT) AS n_null_protest
+            FROM {prot} e
+            INNER JOIN sample_ids i ON {_id_eq("e", "i")}
+            GROUP BY 1
+            """
+        ).pl()
+    finally:
+        con.close()
+    _SQL_RUNS["logit"] += 1
+    return {"req": req, "brk": brk, "prot": protest}
+
+
 def estimation_frame(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
-    instalments: pl.DataFrame,
-    protests: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
     params: PgeParams,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Design of the nested logits. The frame is an input to the fit, not a page table."""
@@ -2029,63 +3512,9 @@ def estimation_frame(
     def _features(rows: pl.LazyFrame) -> pl.LazyFrame:
         return (
             rows.join(firm, on="cnpj", how="left")
-            .with_columns(
-                pl.col("match_nivel").fill_null("nao_encontrado"), _status_expr()
-            )
             .join(first_req, on="id_debito", how="left")
             .join(first_break, on="id_debito", how="left")
             .join(protest_facts, on="id_debito", how="left")
-            .with_columns(
-                pl.col("stock").log().alias("log_stock"),
-                pl.col("year").cast(pl.Utf8),
-                (
-                    pl.col("first_request").is_not_null()
-                    & (pl.col("first_request").dt.year() < pl.col("year"))
-                )
-                .cast(pl.Int8)
-                .alias("instalment_requested_before"),
-                (
-                    pl.col("first_break").is_not_null()
-                    & (pl.col("first_break").dt.year() < pl.col("year"))
-                )
-                .cast(pl.Int8)
-                .alias("instalment_broken_before"),
-                pl.when(
-                    pl.col("first_protest").is_not_null()
-                    & (pl.col("first_protest").dt.year() < pl.col("year"))
-                )
-                .then(pl.lit("protested before the year"))
-                .when(
-                    pl.col("first_protest").is_null()
-                    & (pl.col("n_null_protest").fill_null(0) > 0)
-                )
-                .then(pl.lit("date missing"))
-                .otherwise(pl.lit("not protested"))
-                .alias("protest_before"),
-                _cnae_division(pl.col("cnae_divisao")).alias("cnae_division"),
-                pl.col("porte")
-                .cast(pl.Utf8)
-                .replace_strict(PORTE_LABEL, default="other code")
-                .fill_null("unknown")
-                .alias("porte_label"),
-            )
-            .select(
-                "id_debito",
-                "year",
-                "cnpj",
-                "cnpj_root",
-                "paid_flag",
-                "log_stock",
-                "age",
-                "rate_l1",
-                "origin",
-                "status",
-                "cnae_division",
-                "porte_label",
-                "instalment_requested_before",
-                "instalment_broken_before",
-                "protest_before",
-            )
         )
 
     trunc_expr = (
@@ -2112,7 +3541,34 @@ def estimation_frame(
             seed=params.seed
         )
         rows = eligible.filter((digest % span) < keep)
-    collected = _collect(_features(rows))
+    collected = None
+    if _is_lazy(instalments) or _is_lazy(protests):
+        base = _collect(
+            rows.join(firm, on="cnpj", how="left").select(
+                "id_debito",
+                "year",
+                "cnpj",
+                "cnpj_root",
+                "paid_flag",
+                "stock",
+                "age",
+                "rate_l1",
+                "origin",
+                "match_nivel",
+                "registry_code",
+                "cnae_divisao",
+                "porte",
+            )
+        )
+        side = _logit_side_sql(instalments, protests, base.select("id_debito").unique())
+        if side is not None:
+            collected = _attach_flags(
+                base.join(side["req"], on="id_debito", how="left")
+                .join(side["brk"], on="id_debito", how="left")
+                .join(side["prot"], on="id_debito", how="left")
+            )
+    if collected is None:
+        collected = _attach_flags(_collect(_features(rows)))
     notes: dict[str, Any] = {
         "n_before_sample": n_before,
         "n_cnae_truncated": n_trunc,
@@ -2318,8 +3774,8 @@ def fit_nested(
 def fit_payment_models(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
-    instalments: pl.DataFrame,
-    protests: pl.DataFrame,
+    instalments: pl.DataFrame | pl.LazyFrame,
+    protests: pl.DataFrame | pl.LazyFrame,
     params: PgeParams,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     frame, notes = estimation_frame(panel, firms, instalments, protests, params)
