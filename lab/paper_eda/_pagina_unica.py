@@ -70,6 +70,10 @@ LAB_PAGES = [
     ("eda/2026-11-04_benchmark_wilcoxon", "4.6",
      "Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN",
      "lab-ben-wsr", "bw", "06_parte_c", "BEN-W"),
+    # Next number after the Wilcoxon entry (4.6, #lab-ben-wsr).
+    ("eda/2026-11-04_inferencia_avd", "4.7",
+     "Declared and assessed VAT inference from the section 4.5 specification",
+     "lab-avd-inf", "avd", "06_parte_c", "AVD-14"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
     ("eda/2026-11-04_pd_logit_extended", "5.9",
@@ -560,6 +564,15 @@ OECD Economics Department Working Papers, No. 1848. https://doi.org/10.1787/2a85
 def novidades(state: dict) -> str:
     stars = state["star_secs"]
     star_links = ", ".join(f"[{t.split(' ')[0]}](#{a})" for a, t in stars[:12]) + (" …" if len(stars) > 12 else "")
+    included = state.get("lab_included", ())
+    inference = ""
+    if "lab-avd-inf" in included and "lab-lin" in included:
+        inference = (
+            "19. **Declared versus assessed inference (section 4.7).** The payment logits and the "
+            "quantile regressions of the balance follow the specification selected in "
+            "[4.5 Linearity and group heterogeneity diagnostics](#lab-lin). "
+            "[4.7 Declared and assessed inference](#lab-avd-inf).\n"
+        )
     return f"""<!-- Gerado por lab/paper_eda/_pagina_unica.py a partir do _freeze das partes. Não editar à mão. -->
 
 {guide(state)}
@@ -631,7 +644,7 @@ that section.
     those blocks are added. Association only.
     [1.10](#lab-imp-vars) · [3.16](#lab-imp-parc) · [3.17](#lab-imp-age) · [3.18](#lab-imp-rule) ·
     [5.9](#lab-imp-pd).
-:::
+{inference}:::
 
 ::: {{.callout-warning title="DEBITO quality (flagged only, nothing corrected)"}}
 - The snapshots of **2018-12** and of **2020-10 to 2020-12** are missing. The 2020 M10–M12 file repeats M04–M06, and
@@ -775,6 +788,9 @@ def lab_blocks(state: dict) -> tuple[dict, list[str]]:
         # A 4.5 ainda não tem _freeze neste commit: o render é no Mac. As outras entradas continuam obrigatórias.
         if src == "eda/2026-11-04_diagnostico_linearidade" and not freeze.exists():
             print(f"{src}: sem _freeze; a seção 4.5 fica de fora até o render local.", file=sys.stderr)
+            continue
+        if src == "eda/2026-11-04_inferencia_avd" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.7 fica de fora até o render local.", file=sys.stderr)
             continue
         b, inc = lab_section(src, num, short, anchor, pfx, codes, state)
         state["lab_included"].add(anchor)

@@ -115,6 +115,10 @@ Citações usadas no diagnóstico de 04/11/2026. Os DOI foram conferidos no Cros
 
 O teste de Harvey–Collier entra como na seção 4.2 do laboratório, sem citação nova.
 
+## F — Inferência do AVD (lab 4.7)
+
+A seção 4.7 ajusta a especificação impressa na seção 4.5. As citações são as da seção E acima: spline cúbica restrita (Durrleman e Simon 1989), ICC latente (Goldstein, Browne e Rasbash 2002), regressão quantílica (Koenker e Bassett 1978) e erros HC3 (MacKinnon e White 1985). Não há citação nova. Os ICC 0,061 (declarado) e 0,034 (autuado) são a triagem de momentos da seção 4.5, não uma estimativa nova.
+
 ## Síntese para os 4 projetos
 
 | Frente | Seguro agora | Evitar reivindicar |
