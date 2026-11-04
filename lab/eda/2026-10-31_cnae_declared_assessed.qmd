@@ -544,6 +544,8 @@ print(
 )
 ```
 
+**Rio de Janeiro in declared stock.** Rio de Janeiro is the second state in declared stock. That share comes from a small number of large debtors whose headquarters are in Rio de Janeiro and that have no debtor establishment in São Paulo. Without those debtors, Rio de Janeiro falls to about 0.3 percent of declared stock. The state is the address in the Federal Revenue (RFB) CNPJ registry of the certificate's CNPJ, not a field of the certificate. Whether these debts are ICMS-ST (tax substitution) or DIFAL (the interstate rate difference) owed to São Paulo cannot be tested with the current extract: no field separates them. The question stays open, pending confirmation from PGE.
+
 ## Repeated enrolment
 
 ```{python}
