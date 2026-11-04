@@ -5,11 +5,12 @@ extract and they do not read person columns. The December 2025 loader lives
 in ``analyze.py`` and runs on the machine that has the disk.
 
 Working rules, shared with the decision note and not taken from the cited
-papers: a spline wins when ΔAIC is at least 10 or the fitted log-odds are not
-monotone; the stock OLS is set aside when the RESET powers add at least 0.01
-to R² or the Spearman correlation of absolute residuals and fitted values is
-at least 0.20; a mixed logit is fit when a latent ICC is at least 0.05 or at
-least 1 percent of publishable groups fall outside the 99.8 percent funnel.
+papers: within each segment, a spline wins when ΔAIC is at least 10 or the
+fitted log-odds are not monotone; the stock OLS is set aside when the RESET
+powers add at least 0.01 to R² or the Spearman correlation of absolute
+residuals and fitted values is at least 0.20; a mixed logit is fit only when
+a latent ICC is at least 0.05. The funnel share is reported and does not
+select the mixed logit.
 """
 
 from __future__ import annotations
@@ -43,6 +44,10 @@ QUANTILE_CAP = 80_000
 MIXED_CAP = 30_000
 MIN_CDA = 10
 MIN_FIRMS = 5
+# Section 5.9: a cell with 1 to 4 payers is not printed.
+PAYER_PRINT_MIN = 5
+N_BINS = 40
+MIN_BIN_COUNT = 5
 DECLARED = "#154C56"
 ASSESSED = "#D55E00"
 GREY = "#8A9399"
@@ -110,16 +115,29 @@ def empirical_log_odds(k, n, a: float = HALDANE):
     return estimate, se, low, high
 
 
+def _small_cell_mask(
+    frame: pd.DataFrame,
+    min_cda: int = MIN_CDA,
+    min_firms: int = MIN_FIRMS,
+) -> pd.Series:
+    """Cells with fewer than 10 CDAs, fewer than 5 firms, or 1 to 4 payers."""
+    small = (frame["n_cda"] < min_cda) | (frame["n_firms"] < min_firms)
+    if "n_paid" in frame.columns:
+        paid = frame["n_paid"]
+        small = small | (paid.notna() & (paid >= 1) & (paid < PAYER_PRINT_MIN))
+    return small
+
+
 def suppress_cells(
     frame: pd.DataFrame,
     min_cda: int = MIN_CDA,
     min_firms: int = MIN_FIRMS,
 ) -> pd.DataFrame:
-    """Blank numeric measures in cells with fewer than 10 CDAs or 5 firms."""
+    """Blank numeric measures. A count of 1 to 4 payers is not printed."""
     out = frame.copy()
     if "n_cda" not in out.columns or "n_firms" not in out.columns:
         return out
-    small = (out["n_cda"] < min_cda) | (out["n_firms"] < min_firms)
+    small = _small_cell_mask(out, min_cda, min_firms)
     for column in out.columns:
         if column in KEEP_COLUMNS:
             continue
@@ -451,16 +469,16 @@ def maybe_fit_mixed(
     icc_cut: float = ICC_CUT,
     funnel_cut: float = FUNNEL_CUT,
 ):
-    """Fit a random-intercept model only when the screen crosses a working rule."""
+    """Fit a random-intercept logit only when the latent ICC reaches the cut.
+
+    ``funnel_share`` and ``funnel_cut`` stay in the signature so the call site
+    can pass the diagnostic. They do not open the fit.
+    """
+    del funnel_share, funnel_cut
     icc = (
         0.0 if moment_icc is None or not np.isfinite(moment_icc) else float(moment_icc)
     )
-    funnel = (
-        0.0
-        if funnel_share is None or not np.isfinite(funnel_share)
-        else float(funnel_share)
-    )
-    if icc >= icc_cut or funnel >= funnel_cut:
+    if icc >= icc_cut:
         return fitter()
     return None
 
@@ -601,12 +619,15 @@ def porte_shape(frame: pd.DataFrame) -> pd.DataFrame:
         usable = True
         for level in order:
             block = part.loc[part["porte"].astype(str) == level]
-            if len(block) < MIN_CDA or block["root"].nunique() < MIN_FIRMS:
+            n_paid = float(block["paid_flag"].sum())
+            if (
+                len(block) < MIN_CDA
+                or block["root"].nunique() < MIN_FIRMS
+                or 1 <= n_paid < PAYER_PRINT_MIN
+            ):
                 usable = False
                 break
-            estimate, *_rest = empirical_log_odds(
-                float(block["paid_flag"].sum()), len(block)
-            )
+            estimate, *_rest = empirical_log_odds(n_paid, len(block))
             odds.append(estimate)
         monotone = bool(usable and all(b >= a for a, b in itertools.pairwise(odds)))
         rows.append(
@@ -654,12 +675,17 @@ def _group_raw(frame: pd.DataFrame, keys: list[str], segment: str) -> pd.DataFra
     return agg
 
 
+def _publishable_groups(table: pd.DataFrame) -> pd.DataFrame:
+    if table.empty:
+        return table
+    return table.loc[~_small_cell_mask(table)].copy()
+
+
 def funnel_outside_share(frame: pd.DataFrame, keys: list[str]) -> float:
-    table = _group_raw(frame, keys, "pooled")
-    eligible = table.loc[(table["n_cda"] >= MIN_CDA) & (table["n_firms"] >= MIN_FIRMS)]
-    if eligible.empty:
+    table = _publishable_groups(_group_raw(frame, keys, "pooled"))
+    if table.empty:
         return float("nan")
-    return float(eligible["outside_998"].mean())
+    return float(table["outside_998"].mean())
 
 
 def group_tables(
@@ -672,8 +698,7 @@ def group_tables(
     for segment, part in slices:
         raw = _group_raw(part, keys, str(segment))
         published.append(suppress_cells(raw))
-        keep = raw.loc[(raw["n_cda"] >= MIN_CDA) & (raw["n_firms"] >= MIN_FIRMS)]
-        plot_rows.append(keep)
+        plot_rows.append(_publishable_groups(raw))
     return pd.concat(published, ignore_index=True), pd.concat(
         plot_rows, ignore_index=True
     )
@@ -682,7 +707,8 @@ def group_tables(
 def apply_svg_template(fig: go.Figure) -> go.Figure:
     template = copy.deepcopy(pio.templates["plotly_white"])
     for name in list(template.data):
-        if str(name).endswith("gl"):
+        label = str(name)
+        if label.endswith("gl") or label.startswith("histogram2d"):
             setattr(template.data, name, None)
     fig.layout.template = template
     return fig
@@ -711,47 +737,94 @@ def _style(fig: go.Figure, x_title: str, y_title: str) -> go.Figure:
     return fig
 
 
-def _cloud(fig: go.Figure, x, y, name: str, color: str) -> None:
+def _bin_edges(values: np.ndarray, n_bins: int) -> np.ndarray:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return np.linspace(0.0, 1.0, n_bins + 1)
+    lo = float(np.min(finite))
+    hi = float(np.max(finite))
+    if hi <= lo:
+        hi = lo + 1.0
+    return np.linspace(lo, hi, n_bins + 1)
+
+
+def binned_counts(x, y, n_bins: int = N_BINS, min_count: int = MIN_BIN_COUNT):
+    """Counts on a fixed grid. Bins with fewer than 5 certificates are blank."""
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
-    if x_arr.size > 8000:
-        fig.add_trace(
-            go.Histogram2d(
-                x=x_arr,
-                y=y_arr,
-                name=name,
-                colorscale=[[0, "#f4f7f7"], [1, color]],
-                showscale=False,
-            )
-        )
-        return
+    mask = np.isfinite(x_arr) & np.isfinite(y_arr)
+    x_arr, y_arr = x_arr[mask], y_arr[mask]
+    x_edges = _bin_edges(x_arr, n_bins)
+    y_edges = _bin_edges(y_arr, n_bins)
+    if x_arr.size == 0:
+        counts = np.zeros((n_bins, n_bins), dtype=float)
+    else:
+        counts, x_edges, y_edges = np.histogram2d(x_arr, y_arr, bins=[x_edges, y_edges])
+    # Plotly reads z[row, col] as (y, x). histogram2d stores (x, y).
+    z = counts.T.astype(float)
+    z[z < min_count] = np.nan
+    x_centre = (x_edges[:-1] + x_edges[1:]) / 2.0
+    y_centre = (y_edges[:-1] + y_edges[1:]) / 2.0
+    return x_centre, y_centre, z
+
+
+def assert_bin_grid(fig: go.Figure) -> None:
+    """A cloud figure carries bin centres and counts, not certificate values."""
+    for trace in fig.data:
+        kind = str(trace.type)
+        if kind in {"histogram2d", "scattergl"}:
+            raise RuntimeError(f"Figure trace {kind} is not an aggregate grid.")
+        if kind == "heatmap":
+            z = np.asarray(trace.z, dtype=float)
+            if z.ndim != 2 or z.shape[0] > N_BINS or z.shape[1] > N_BINS:
+                raise RuntimeError("Heatmap is larger than the bin grid.")
+            finite = z[np.isfinite(z)]
+            if finite.size and np.any(finite < MIN_BIN_COUNT):
+                raise RuntimeError("A heatmap bin has fewer than 5 certificates.")
+            if len(trace.x) > N_BINS or len(trace.y) > N_BINS:
+                raise RuntimeError("Heatmap axes carry more than the bin centres.")
+        elif kind == "scatter":
+            n_points = 0 if trace.x is None else len(trace.x)
+            if n_points > N_BINS:
+                raise RuntimeError(
+                    "A scatter trace carries more points than the bin grid."
+                )
+
+
+def _heatmap(fig: go.Figure, x, y, name: str, color: str) -> None:
+    x_centre, y_centre, z = binned_counts(x, y)
     fig.add_trace(
-        go.Scatter(
-            x=x_arr,
-            y=y_arr,
-            mode="markers",
+        go.Heatmap(
+            x=x_centre,
+            y=y_centre,
+            z=z,
             name=name,
-            marker={"size": 5, "color": color, "opacity": 0.45},
+            colorscale=[[0, "#f7f4f2"], [1, color]],
+            showscale=False,
+            hovertemplate="bin count=%{z}<extra></extra>",
         )
     )
 
 
-def residual_figures(
-    actual, fitted, resid, continuous: dict, max_points: int = 20_000, seed: int = 1
-) -> dict:
+def residual_figures(actual, fitted, resid, continuous: dict) -> dict:
+    """Bin counts and a short quantile summary. No certificate residual is stored."""
     actual = np.asarray(actual, dtype=float)
     fitted = np.asarray(fitted, dtype=float)
     resid = np.asarray(resid, dtype=float)
     figs = {}
     residual = go.Figure()
-    _cloud(residual, fitted, resid, "Residual", DECLARED)
+    _heatmap(residual, fitted, resid, "Certificates", DECLARED)
     residual.add_hline(y=0, line_color=GREY, line_width=1)
-    figs["residual_vs_fitted"] = _style(residual, "Fitted value", "Residual")
+    figs["residual_vs_fitted"] = _style(
+        residual, "Fitted value (bin centre)", "Residual (bin centre)"
+    )
 
     observed = go.Figure()
-    _cloud(observed, fitted, actual, "Observed", DECLARED)
-    lo = float(np.nanmin([np.nanmin(fitted), np.nanmin(actual)]))
-    hi = float(np.nanmax([np.nanmax(fitted), np.nanmax(actual)]))
+    _heatmap(observed, fitted, actual, "Certificates", DECLARED)
+    finite_fit = fitted[np.isfinite(fitted)]
+    finite_act = actual[np.isfinite(actual)]
+    lo = float(min(np.min(finite_fit), np.min(finite_act)))
+    hi = float(max(np.max(finite_fit), np.max(finite_act)))
     observed.add_trace(
         go.Scatter(
             x=[lo, hi],
@@ -761,14 +834,14 @@ def residual_figures(
             line={"color": "#1B1B1B", "dash": "dash", "width": 1.4},
         )
     )
-    figs["actual_vs_fitted"] = _style(observed, "Fitted value", "Observed value")
+    figs["actual_vs_fitted"] = _style(
+        observed, "Fitted value (bin centre)", "Observed value (bin centre)"
+    )
 
     sample = resid[np.isfinite(resid)]
-    if sample.size > max_points:
-        rng = np.random.default_rng(seed)
-        sample = sample[rng.choice(sample.size, size=max_points, replace=False)]
-    theoretical = stats.norm.ppf((np.arange(1, sample.size + 1) - 0.5) / sample.size)
-    ordered = np.sort(sample)
+    probs = (np.arange(1, N_BINS + 1) - 0.5) / N_BINS
+    theoretical = stats.norm.ppf(probs)
+    ordered = np.quantile(sample, probs) if sample.size else np.full(N_BINS, np.nan)
     qq = go.Figure()
     qq.add_trace(
         go.Scatter(
@@ -776,7 +849,7 @@ def residual_figures(
             y=ordered,
             mode="markers",
             name="Residual quantile",
-            marker={"size": 4, "color": DECLARED},
+            marker={"size": 6, "color": DECLARED},
         )
     )
     q_t = np.quantile(theoretical, [0.25, 0.75])
@@ -785,8 +858,11 @@ def residual_figures(
     intercept = float(q_s[0] - slope * q_t[0])
     qq.add_trace(
         go.Scatter(
-            x=[theoretical[0], theoretical[-1]],
-            y=[intercept + slope * theoretical[0], intercept + slope * theoretical[-1]],
+            x=[float(theoretical[0]), float(theoretical[-1])],
+            y=[
+                intercept + slope * float(theoretical[0]),
+                intercept + slope * float(theoretical[-1]),
+            ],
             mode="lines",
             name="Normal reference",
             line={"color": GREY, "dash": "dash"},
@@ -795,9 +871,13 @@ def residual_figures(
     figs["qq"] = _style(qq, "Normal quantile", "Residual quantile")
     for name, values in continuous.items():
         panel = go.Figure()
-        _cloud(panel, values, resid, name, ASSESSED)
+        _heatmap(panel, values, resid, "Certificates", ASSESSED)
         panel.add_hline(y=0, line_color=GREY, line_width=1)
-        figs[f"residual_vs_{name}"] = _style(panel, name, "Residual")
+        figs[f"residual_vs_{name}"] = _style(
+            panel, f"{name} (bin centre)", "Residual (bin centre)"
+        )
+    for fig in figs.values():
+        assert_bin_grid(fig)
     return figs
 
 
@@ -839,7 +919,9 @@ def logodds_figure(
                 )
             )
     label = "log(1 + stock)" if variable == "log_stock" else "Debt age (years)"
-    return _style(fig, f"Bin midpoint of {label}", "Payment log-odds")
+    styled = _style(fig, f"Bin midpoint of {label}", "Payment log-odds")
+    assert_bin_grid(styled)
+    return styled
 
 
 def funnel_figure(plot_rows: pd.DataFrame, grouping: str) -> go.Figure:
@@ -890,21 +972,46 @@ def _fmt(value, digits: int = 2) -> str:
     return f"{float(value):.{digits}f}"
 
 
+def _spline_needed(delta_aic: float, curved: bool) -> bool:
+    aic_hit = np.isfinite(delta_aic) and float(delta_aic) >= DELTA_AIC
+    return bool(aic_hit or curved)
+
+
+def _payment_lines(rows: list[dict]) -> tuple[str, str]:
+    """One clause per segment, from that segment's own ΔAIC and curved flag."""
+    labels = {"log_stock": "log stock", "debt_age": "debt age"}
+    by_segment: dict[str, list[dict]] = {}
+    for row in rows:
+        by_segment.setdefault(str(row["segment"]), []).append(row)
+    choice_parts = []
+    evidence_parts = []
+    for segment in sorted(by_segment):
+        needed = []
+        for row in by_segment[segment]:
+            variable = str(row["variable"])
+            delta_aic = float(row["delta_aic"])
+            curved = bool(row["curved"])
+            evidence_parts.append(
+                f"{segment} {labels.get(variable, variable)}: "
+                f"ΔAIC = {_fmt(delta_aic)}, curved = {curved}"
+            )
+            if _spline_needed(delta_aic, curved):
+                needed.append(labels.get(variable, variable))
+        if needed:
+            choice_parts.append(f"{segment}: Spline on {' and '.join(needed)}")
+        else:
+            choice_parts.append(f"{segment}: Linear logit in log stock and debt age")
+    if not choice_parts:
+        return (
+            "Linear logit in log stock and debt age.",
+            "Spline comparison was not available.",
+        )
+    return ". ".join(choice_parts) + ".", "; ".join(evidence_parts) + "."
+
+
 def inference_decision(evidence: dict) -> pd.DataFrame:
     """Short decision table. Large-sample p-values are not the rule."""
-    spline_vars = []
-    if evidence["delta_aic_log_stock"] >= DELTA_AIC or evidence["curved_log_stock"]:
-        spline_vars.append("log stock")
-    if evidence["delta_aic_debt_age"] >= DELTA_AIC or evidence["curved_debt_age"]:
-        spline_vars.append("debt age")
-    if spline_vars:
-        payment = (
-            "Logit with a restricted cubic spline on "
-            + " and ".join(spline_vars)
-            + ". Report marginal effects on a figure."
-        )
-    else:
-        payment = "Linear logit in log stock and debt age."
+    payment, payment_evidence = _payment_lines(list(evidence["spline_by_segment"]))
 
     stock_material = (
         evidence["delta_r2_stock"] >= PARTIAL_R2 or evidence["fan_stock"] >= FAN_CUT
@@ -943,12 +1050,9 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
         )
 
     groups = []
-    if (
-        evidence["icc_municipality"] >= ICC_CUT
-        or evidence["funnel_municipality"] >= FUNNEL_CUT
-    ):
+    if evidence["icc_municipality"] >= ICC_CUT:
         groups.append("municipality")
-    if evidence["icc_division"] >= ICC_CUT or evidence["funnel_division"] >= FUNNEL_CUT:
+    if evidence["icc_division"] >= ICC_CUT:
         groups.append("CNAE division")
     if groups:
         group_choice = (
@@ -966,12 +1070,7 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
         (
             "Probability of payment",
             payment,
-            (
-                "ΔAIC log stock = "
-                f"{_fmt(evidence['delta_aic_log_stock'])}; ΔAIC debt age = "
-                f"{_fmt(evidence['delta_aic_debt_age'])}; curved log stock = "
-                f"{evidence['curved_log_stock']}; curved debt age = {evidence['curved_debt_age']}."
-            ),
+            payment_evidence,
         ),
         (
             "Debt balance",
@@ -998,7 +1097,8 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
             (
                 "Latent ICC municipality = "
                 f"{_fmt(evidence['icc_municipality'], 3)}; CNAE division = "
-                f"{_fmt(evidence['icc_division'], 3)}; share of groups outside the 99.8% funnel = "
+                f"{_fmt(evidence['icc_division'], 3)}. "
+                "Funnel share outside the 99.8% limits (diagnostic only) = "
                 f"{_fmt(evidence['funnel_municipality'], 3)} and {_fmt(evidence['funnel_division'], 3)}."
             ),
         ),
@@ -1007,8 +1107,8 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
             package,
             (
                 f"Estimation sample n = {int(evidence['n_estimation'])}. "
-                "Working rules: ΔAIC 10, ICC 0.05, partial R² 0.01, rank correlation 0.20, "
-                "funnel share 0.01."
+                "Premissas: ΔAIC 10 and ICC 0.05 select the specification. "
+                "The 99.8% funnel and its 1% share are reported and do not select a mixed logit."
             ),
         ),
     ]
@@ -1054,13 +1154,6 @@ def publish(frame: pd.DataFrame) -> str:
         + html
         + "</div>"
     )
-
-
-def _max_finite(values: list[float]) -> float:
-    finite = [float(v) for v in values if np.isfinite(v)]
-    if not finite:
-        return float("nan")
-    return float(max(finite))
 
 
 def _icc_record(summary: dict, **meta) -> dict:
@@ -1143,7 +1236,6 @@ def run_diagnostics(
                 hc3.fittedvalues,
                 hc3.resid,
                 continuous,
-                seed=seed,
             )
             figures.update(
                 {f"{outcome}_{sample_name}_{name}": fig for name, fig in panels.items()}
@@ -1339,17 +1431,19 @@ def run_diagnostics(
         ]
         return float(moment_rows["icc"].iloc[0])
 
-    def _spline_flag(variable: str, field: str, reduce):
-        part = spline.loc[spline["variable"] == variable, field]
-        if field == "curved":
-            return bool(part.fillna(False).astype(bool).any()) if len(part) else False
-        return reduce(part.tolist())
-
+    spline_rows = []
+    if not spline.empty:
+        for record in spline.itertuples(index=False):
+            spline_rows.append(
+                {
+                    "segment": str(record.segment),
+                    "variable": str(record.variable),
+                    "delta_aic": float(record.delta_aic),
+                    "curved": bool(record.curved),
+                }
+            )
     evidence = {
-        "delta_aic_log_stock": _spline_flag("log_stock", "delta_aic", _max_finite),
-        "delta_aic_debt_age": _spline_flag("debt_age", "delta_aic", _max_finite),
-        "curved_log_stock": _spline_flag("log_stock", "curved", None),
-        "curved_debt_age": _spline_flag("debt_age", "curved", None),
+        "spline_by_segment": spline_rows,
         "delta_r2_stock": _pull("log_stock", "full", "delta_r2"),
         "fan_stock": _pull("log_stock", "full", "fan"),
         "delta_r2_stock_trim": _pull("log_stock", "trim", "delta_r2"),

@@ -129,13 +129,13 @@ display(HTML(diag.publish(result["coefficients"])))
 
 ## Residual plots
 
-**How to read.** In the residual plot the horizontal axis is the fitted value and the vertical axis is the residual (observed minus fitted). The grey line is zero. A fan means the spread of residuals changes with the fitted value. A curve means the conditional mean is not a straight line in $x$.
+**How to read.** The colour in the residual plot is the number of certificates in a bin. The horizontal axis is the centre of a fitted-value bin and the vertical axis is the centre of a residual bin. Counts are computed in Python. A bin with fewer than 5 certificates is blank, so no certificate value is sent to the page. The grey line is a residual of zero. A fan means the occupied bins spread as the fitted value grows. A bend means the occupied bins leave the zero line.
 
-In the observed-against-fitted plot both axes are in the outcome's units. The dashed line is the 45-degree line, the locus where the fitted value equals the observed value. A cloud that bends off that line is a curved conditional mean. A cloud that spreads as the fitted value grows is heteroskedasticity, which HC3 already targets; the decision treats a Spearman correlation of at least 0.20 between the absolute residual and the fitted value as a material fan.
+In the observed-against-fitted plot both axes are bin centres, in the outcome's units. The dashed line is the 45-degree line, the locus where the fitted value equals the observed value. Occupied bins that leave that line are a curved conditional mean. Bins that spread away from the line are heteroskedasticity, which HC3 already targets. The decision treats a Spearman correlation of at least 0.20 between the absolute residual and the fitted value, computed on the certificates and not drawn, as a material fan.
 
-The normal quantile plot has theoretical normal quantiles on the horizontal axis and ordered residuals on the vertical axis. The dashed line goes through the sample quartiles. Departure from that line is a departure from a normal residual, which does not by itself reject a linear mean.
+The normal quantile plot has 40 theoretical normal quantiles on the horizontal axis and the matching quantiles of the residual distribution on the vertical axis. It is not a point per certificate. The dashed line goes through the quartiles of those 40 quantiles. Departure from that line is a departure from a normal residual, which does not by itself reject a linear mean.
 
-Points are the estimation sample when it has at most 8,000 rows. Larger samples are drawn as a two-dimensional histogram of counts. The first figure of each pair is the full estimation sample. The second drops the top 1 percent by stock.
+The first figure of each pair is the full estimation sample. The second drops the top 1 percent by stock.
 
 ```{python}
 #| label: fig-stock-residual
@@ -155,7 +155,7 @@ result["figures"]["log_stock_trim_actual_vs_fitted"].show()
 
 ```{python}
 #| label: fig-stock-qq
-#| fig-cap: "Normal quantile plot of the log-stock residuals. Full estimation sample, then the sample without the top 1 percent."
+#| fig-cap: "Forty quantiles of the log-stock residuals against normal quantiles. Full estimation sample, then the sample without the top 1 percent."
 result["figures"]["log_stock_full_qq"].show()
 result["figures"]["log_stock_trim_qq"].show()
 ```
@@ -199,7 +199,7 @@ result["figures"]["recovery_full_residual_vs_log_stock"].show()
 
 Ramsey's RESET (1969) adds the square and the cube of the fitted values to the linear equation and tests those two terms with an $F$ statistic (`power=3`, `use_f=True`). The HC3 variant uses the same added terms with a heteroskedasticity-consistent covariance (White 1980; MacKinnon and White 1985). The Harvey–Collier statistic is the one already used in section 4.2: a test that the mean of the recursive residuals is zero.
 
-The partial $R^2$ is the gain in $R^2$ from those two powers. At this sample size a small $p$-value is cheap. The decision uses a partial $R^2$ of at least 0.01, or a rank correlation of at least 0.20 between the absolute residual and the fitted value. Both cuts are working rules, of the same kind as the ΔAIC and ICC cuts below.
+The partial $R^2$ is the gain in $R^2$ from those two powers. At this sample size a small $p$-value is cheap. The decision uses a partial $R^2$ of at least 0.01, or a rank correlation of at least 0.20 between the absolute residual and the fitted value. Both cuts are working assumptions, listed under Premissas.
 
 **How to read.** One row per outcome, sample and segment. `pooled` uses both segments. `declared` and `assessed` drop the segment indicator and refit inside the segment. `reset_p` is the classical $F$ test. `reset_p_hc3` is the HC3 version. `harvey_p` is the Harvey–Collier $p$-value, missing when the recursion is not defined.
 
@@ -220,7 +220,7 @@ $$
 
 The interval is $\hat\lambda \pm 1.96\,\mathrm{se}(\hat\lambda)$. It stays finite when $k=0$ and when $k=n$.
 
-On the same certificates, two logits are fit for each variable: a straight line in that variable, and a restricted cubic spline with 4 degrees of freedom (Durrleman and Simon 1989, via `cr()`). The likelihood-ratio statistic compares the two maximised log-likelihoods. ΔAIC is the linear AIC minus the spline AIC, so a positive value favours the spline. The spline is treated as needed when ΔAIC is at least 10 or the spline log-odds are not monotone on the 5th-to-95th percentile grid. Ten AIC units are a working rule from the decision note, not a result in Durrleman and Simon. Firm size and registration status are categories: the log-odds are reported by level, and the only shape question for size is whether Micro, Small and Other sizes rise in that order.
+On the same certificates, two logits are fit for each variable, separately in Declared and in Assessed: a straight line in that variable, and a restricted cubic spline with 4 degrees of freedom (Durrleman and Simon 1989, via `cr()`). The likelihood-ratio statistic compares the two maximised log-likelihoods. ΔAIC is the linear AIC minus the spline AIC, so a positive value favours the spline. For that segment and that variable, the spline is used when ΔAIC is at least 10 or the spline log-odds are not monotone on the 5th-to-95th percentile grid. A segment whose ΔAIC stays below 10 and whose spline is monotone keeps the linear logit. Firm size and registration status are categories: the log-odds are reported by level, and the only shape question for size is whether Micro, Small and Other sizes rise in that order. A level with 1 to 4 payers is left blank.
 
 **How to read the figure.** The horizontal axis is the midpoint of the quantile bin (the average of the bin edges). The vertical axis is the payment log-odds. Dots are the bin estimates, with the 95 percent interval. A dotted line is the linear logit. A solid line is the spline logit. Declared is teal and assessed is orange. A line that turns while the dots turn with it is curvature of the payment log-odds. A line that turns while the dots stay flat is the spline using degrees of freedom the bins do not support. Bins with fewer than 10 certificates or 5 firms are omitted.
 
@@ -279,9 +279,9 @@ $$
 \mathrm{ICC} = \frac{\tau^2}{\tau^2 + \pi^2/3},
 $$
 
-as in Goldstein, Browne and Rasbash (2002). The screen is a method-of-moments $\tau^2$: the variance of group payment rates, minus the binomial sampling variance, divided by $[\pi(1-\pi)]^2$. The classical ICC of log stock and of recovery is the unbalanced one-way random-intercept ANOVA. A variational random-intercept logit is fit only when that screen is at least 0.05 or at least 1 percent of publishable groups fall outside the 99.8 percent funnel. When the fit converges, the decision uses its ICC. The fit uses at most 30,000 certificates. A second fit adds the payment-equation controls when the null fitted ICC stays at or above 0.05.
+as in Goldstein, Browne and Rasbash (2002). The screen is a method-of-moments $\tau^2$: the variance of group payment rates, minus the binomial sampling variance, divided by $[\pi(1-\pi)]^2$. The classical ICC of log stock and of recovery is the unbalanced one-way random-intercept ANOVA. A variational random-intercept logit is fit only when that latent ICC is at least 0.05. The share of groups outside the 99.8 percent funnel is printed beside the ICC and does not select the mixed logit. When the fit converges, the decision uses its ICC. The fit uses at most 30,000 certificates. A second fit adds the payment-equation controls when the null fitted ICC stays at or above 0.05.
 
-**How to read the funnel.** The horizontal axis is the number of certificates in the group. The vertical axis is the payment rate. The grey curves are the 99.8 percent limits around the pooled rate. A cloud inside the curves is the dispersion a common rate would produce. A cloud outside them is extra group heterogeneity. Groups under 10 certificates or 5 firms are not drawn.
+**How to read the funnel.** The horizontal axis is the number of certificates in the group. The vertical axis is the payment rate. Each point is one municipality or one CNAE division, not one certificate. The grey curves are the 99.8 percent limits around the pooled rate. A cloud inside the curves is the dispersion a common rate would produce. A cloud outside them is extra group heterogeneity. Groups under 10 certificates, under 5 firms, or with 1 to 4 payers are not drawn. The same cells are blank in the table. A count of 1 to 4 is not printed.
 
 ```{python}
 #| label: fig-funnel-municipality
@@ -303,13 +303,25 @@ display(HTML(diag.publish(result["icc"])))
 
 ```{python}
 #| label: tbl-groups
-#| tbl-cap: "Payment rate and log-odds by municipality and by CNAE division. Cells under 10 certificates or 5 firms are blank."
+#| tbl-cap: "Payment rate and log-odds by municipality and by CNAE division. Cells under 10 certificates, under 5 firms, or with 1 to 4 payers are blank."
 display(HTML(diag.publish(result["groups"])))
 ```
 
+## Premissas
+
+These cuts are working assumptions. They are not estimates from the papers cited below.
+
+- ΔAIC of 10. Inside a segment, a variable moves from the linear logit to the restricted cubic spline when its ΔAIC reaches 10, or when the spline log-odds on that variable are not monotone. Declared and Assessed are decided separately. A segment below the cut keeps the linear logit.
+- Latent ICC of 0.05. A mixed logit, with a random intercept for municipality or for CNAE division, is fit only when that grouping's ICC reaches 0.05.
+- Funnel limits of 99.8 percent, and a 1 percent share of groups outside those limits. The share is a supporting diagnostic. It does not select the mixed logit.
+- RESET partial $R^2$ of 0.01, or a rank correlation of 0.20 between the absolute residual and the fitted value. Either one sets the linear stock equation aside in favour of quantile regression.
+- A heatmap bin with fewer than 5 certificates is blank. A group cell with 1 to 4 payers, fewer than 10 certificates, or fewer than 5 firms is blank.
+
+A $p$-value alone does not choose the specification.
+
 ## Decision
 
-The cuts are working rules: ΔAIC of 10, latent ICC of 0.05, RESET partial $R^2$ of 0.01, absolute residual rank correlation of 0.20, and a 1 percent share of publishable groups outside the 99.8 percent funnel. A $p$-value alone does not choose the specification. The package row is the combination those rows support for the paper.
+The table applies the Premissas to this render. The payment row states Declared and Assessed separately, and each clause uses that segment's own ΔAIC and curved flag. The package row is the combination those rows support for the paper.
 
 ```{python}
 #| label: tbl-decision

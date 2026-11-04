@@ -58,6 +58,47 @@ def test_suppress_blanks_small_cells():
         assert np.isnan(row.n_firms)
 
 
+def test_one_to_four_payers_are_not_printed():
+    frame = pd.DataFrame(
+        {
+            "municipality": ["big", "few_payers"],
+            "uf": ["SP", "SP"],
+            "n_cda": [100, 80],
+            "n_firms": [40, 20],
+            "n_paid": [30, 3],
+            "rate": [0.30, 3 / 80],
+            "log_odds": [-0.8, -3.2],
+        }
+    )
+    out = diag.suppress_cells(frame)
+    few = out.loc[out.municipality == "few_payers"].iloc[0]
+    assert np.isnan(few.n_paid)
+    assert np.isnan(few.rate)
+    assert np.isnan(few.log_odds)
+    assert out.loc[out.municipality == "big", "n_paid"].iloc[0] == 30
+    shown = out["n_paid"].dropna()
+    assert not ((shown >= 1) & (shown <= 4)).any()
+
+    rows = []
+    for name, n, payers in (("Big", 40, 12), ("Tiny", 30, 3)):
+        flags = [1] * payers + [0] * (n - payers)
+        for i, flag in enumerate(flags):
+            rows.append(
+                {
+                    "municipality": name,
+                    "uf": "SP",
+                    "segment": "declared",
+                    "paid_flag": flag,
+                    "root": f"{name[0]}{i // 3:02d}",
+                }
+            )
+    published, plotted = diag.group_tables(pd.DataFrame(rows), ["municipality", "uf"])
+    paid = published["n_paid"].dropna()
+    assert not ((paid >= 1) & (paid <= 4)).any()
+    assert published.loc[published.municipality == "Tiny", "rate"].isna().all()
+    assert set(plotted["municipality"]) == {"Big"}
+
+
 def test_reset_rejects_quadratic_and_keeps_linear():
     rng = np.random.default_rng(20261104)
     n = 500
@@ -117,6 +158,23 @@ def test_figures_have_no_scattergl():
         assert "Scattergl" not in html
         for trace in fig.data:
             assert trace.type != "scattergl"
+        diag.assert_bin_grid(fig)
+
+
+def test_heatmap_drops_bins_with_fewer_than_five_certificates():
+    x = np.concatenate([np.full(80, 0.0), np.full(3, 10.0)])
+    y = np.concatenate([np.full(80, 0.0), np.full(3, 10.0)])
+    x_centre, y_centre, z = diag.binned_counts(x, y, n_bins=8)
+    assert len(x_centre) == 8
+    assert len(y_centre) == 8
+    finite = z[np.isfinite(z)]
+    assert finite.size >= 1
+    assert np.all(finite >= 5)
+    figs = diag.residual_figures(y, x, y - x, {"debt_age": x})
+    for fig in figs.values():
+        html = diag.figure_html(fig)
+        assert "histogram2d" not in html
+        diag.assert_bin_grid(fig)
 
 
 def test_mixed_model_is_fit_only_when_icc_justifies_it():
@@ -131,7 +189,8 @@ def test_mixed_model_is_fit_only_when_icc_justifies_it():
     fitted = diag.maybe_fit_mixed(0.08, 0.0, fitter)
     assert fitted["tau2"] == pytest.approx(0.8)
     assert calls == ["fit"]
-    assert diag.maybe_fit_mixed(0.01, 0.02, fitter)["icc"] == pytest.approx(0.2)
+    assert diag.maybe_fit_mixed(0.01, 0.02, fitter) is None
+    assert calls == ["fit"]
 
     rng = np.random.default_rng(4)
     g = 8
@@ -155,13 +214,30 @@ def test_mixed_model_is_fit_only_when_icc_justifies_it():
     assert out["icc"] > 0
 
 
+def _spline_rows(specs):
+    return [
+        {
+            "segment": segment,
+            "variable": variable,
+            "delta_aic": delta,
+            "curved": curved,
+        }
+        for segment, variable, delta, curved in specs
+    ]
+
+
 def test_decision_table_follows_the_working_rules():
+    both_linear = _spline_rows(
+        [
+            ("assessed", "debt_age", 2.0, False),
+            ("assessed", "log_stock", 1.0, False),
+            ("declared", "debt_age", 2.0, False),
+            ("declared", "log_stock", 1.0, False),
+        ]
+    )
     quiet = diag.inference_decision(
         {
-            "delta_aic_log_stock": 1.0,
-            "delta_aic_debt_age": 2.0,
-            "curved_log_stock": False,
-            "curved_debt_age": False,
+            "spline_by_segment": both_linear,
             "delta_r2_stock": 0.001,
             "fan_stock": 0.05,
             "delta_r2_stock_trim": 0.001,
@@ -182,10 +258,14 @@ def test_decision_table_follows_the_working_rules():
 
     loud = diag.inference_decision(
         {
-            "delta_aic_log_stock": 25.0,
-            "delta_aic_debt_age": 1.0,
-            "curved_log_stock": True,
-            "curved_debt_age": False,
+            "spline_by_segment": _spline_rows(
+                [
+                    ("assessed", "debt_age", 1.0, False),
+                    ("assessed", "log_stock", -1.8, False),
+                    ("declared", "debt_age", 1.0, False),
+                    ("declared", "log_stock", 25.0, True),
+                ]
+            ),
             "delta_r2_stock": 0.08,
             "fan_stock": 0.4,
             "delta_r2_stock_trim": 0.001,
@@ -205,6 +285,47 @@ def test_decision_table_follows_the_working_rules():
     assert "top 1 percent" in loud_choices["Debt balance"]
     assert "random intercept" in loud_choices["Group heterogeneity"].lower()
     assert "municipality" in loud_choices["Group heterogeneity"].lower()
+    assert "CNAE division" not in loud_choices["Group heterogeneity"]
+    text = loud_choices["Probability of payment"].lower()
+    assessed, declared = text.split("declared:")
+    assert "spline on log stock" in declared
+    assert "linear logit" in assessed
+    assert "spline" not in assessed
+
+    gated = diag.inference_decision(
+        {
+            "spline_by_segment": _spline_rows(
+                [
+                    ("assessed", "log_stock", -1.8, False),
+                    ("declared", "log_stock", 1.0, False),
+                    ("assessed", "debt_age", 1.0, False),
+                    ("declared", "debt_age", 1.0, False),
+                ]
+            ),
+            "delta_r2_stock": 0.001,
+            "fan_stock": 0.01,
+            "delta_r2_stock_trim": 0.001,
+            "fan_stock_trim": 0.01,
+            "delta_r2_recovery": 0.001,
+            "fan_recovery": 0.01,
+            "icc_municipality": 0.01,
+            "icc_division": 0.014,
+            "funnel_municipality": 0.0,
+            "funnel_division": 0.20,
+            "n_estimation": 1000,
+        }
+    )
+    gated_choice = gated.loc[gated.inference == "Group heterogeneity", "choice"].iloc[0]
+    gated_evidence = gated.loc[
+        gated.inference == "Group heterogeneity", "evidence"
+    ].iloc[0]
+    assert "No mixed effects" in gated_choice
+    assert "0.014" in gated_evidence
+    assert "diagnostic only" in gated_evidence
+    assert (
+        "curved = False"
+        in loud.loc[loud.inference == "Probability of payment", "evidence"].iloc[0]
+    )
     assert set(loud.inference) == {
         "Probability of payment",
         "Debt balance",
