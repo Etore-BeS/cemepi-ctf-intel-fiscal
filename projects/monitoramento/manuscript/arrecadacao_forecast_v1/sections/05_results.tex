@@ -6,7 +6,7 @@ The rank is test sMAPE.
 Lower is better.
 The skill score is higher when the model beats the seasonal naive of that grain.
 The HLN column is the two-sided p-value of the leader against that naive.
-The signed-rank comparison of that pair is in laboratory Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+The signed-rank comparison of that pair is in laboratory Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
 The model confidence set uses level 0.10.
 
 \subsection{The lowest sMAPE is not the same model}
@@ -27,7 +27,7 @@ E1 has no row.
   \caption{Lowest test sMAPE on each series and grain.
   Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\) against the seasonal naive of that grain.
   HLN \(p\) is the two-sided Diebold-Mariano test of that leader against the same naive, with the small-sample correction.
-  The signed-rank test of that same pair, and the pairs among the other models, are in laboratory Section 4.5.
+  The signed-rank test of that same pair, and the pairs among the other models, are in laboratory Section 4.6.
   A p-value below 0.05 is discussed in the text.
   It is not a second rank.}
   \label{tab:best}
@@ -261,7 +261,7 @@ Appendix~\ref{app:bars} draws the skill of every model.
 The zero line in those figures is the seasonal naive.
 
 The HLN column tests one pair: the sMAPE leader against the seasonal naive.
-Pairwise results are in the project laboratory, Section 4.5 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+Pairwise results are in the project laboratory, Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
 The loss is the summand inside sMAPE, so the test uses the same score as the rank.
 A small p-value means the paired losses are not compatible with equal accuracy.
 Five cells reject at the 5 percent level: the monthly total (0.022), monthly Declared (0.040), and all three Monday to Friday series (each below 0.001).
