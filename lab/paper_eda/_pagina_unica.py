@@ -66,6 +66,10 @@ LAB_PAGES = [
     ("eda/2026-11-04_diagnostico_linearidade", "4.5",
      "Linearity and group heterogeneity diagnostics for the Declared × Assessed inference",
      "lab-lin", "lin", "06_parte_c", "AVD-13"),
+    # Next number after the linearity diagnostic. Anchor lab-ben-wsr.
+    ("eda/2026-11-04_benchmark_wilcoxon", "4.6",
+     "Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN",
+     "lab-ben-wsr", "bw", "06_parte_c", "BEN-W"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
     ("eda/2026-11-04_pd_logit_extended", "5.9",

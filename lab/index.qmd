@@ -28,6 +28,7 @@ they come from `projects/<frente>/notebooks/articles/` (see `docs/ESTRUTURA.md`)
 
 ## What changed in this version
 
+- *(2026-11-04)* **[Paired forecast tests, section 4.6](paper_eda/index.qmd#lab-ben-wsr):** Wilcoxon signed-rank beside Diebold-Mariano-HLN. The source is `lab/eda/2026-11-04_benchmark_wilcoxon.qmd`. It reads the committed comparison table only. Section 4.5 stays the linearity diagnostic.
 - *(2026-11-04)* **[Recoverability building blocks](paper_eda/index.qmd#lab-imp-vars):** variable availability (1.10), instalment agreements and protest (3.16), recovery by age band (3.17), the current collectable rule on VAT (ICMS) cohorts (3.18; no guarantee table) and the nested extension of the payment logit (5.9). Aggregates only. Association, not a forecast.
 - *(2026-10-31)* **[Declared versus assessed VAT debt by CNAE](paper_eda/index.qmd#lab-cnae-seg):** size, concentration, payment and recovery of the two segments, with CNAE section and division, age, registry status, firm size, state and repeated enrolment. The largest 1 percent of certificates holds 75.8 percent of the pooled stock (3.15).
 - *(2026-10-28)* **[Whole lab in English, single numbering](paper_eda/index.qmd#guia):** texts, titles, captions, axes, tables and notes in English (ICMS → VAT (ICMS)); one numbering scheme (0 to 8, with 1.1, 1.2…); the dated analyses moved into the thematic sections; a contents section with an organogram at the top.
@@ -79,6 +80,7 @@ analysis in one HTML, navigated from the side table of contents; single numberin
 - [3.16 Instalment agreements, defaults and protest](paper_eda/index.qmd#lab-imp-parc) (2026-11-04)
 - [3.17 Recovery by age band, origin and registration status](paper_eda/index.qmd#lab-imp-age) (2026-11-04)
 - [3.18 The PGE collectable rule on VAT (ICMS) cohorts](paper_eda/index.qmd#lab-imp-rule) (2026-11-04)
+- [4.6 Paired tests for the forecasting benchmark](paper_eda/index.qmd#lab-ben-wsr) (2026-11-04)
 - [5.8 Overnight Selic and check of the macro correlations](paper_eda/index.qmd#lab-macro) (2026-10-23; MAC-07 corrections on 26/10)
 - [5.9 Extended probability of payment](paper_eda/index.qmd#lab-imp-pd) (2026-11-04)
 - [8 Appendix: the full EDA notebook (faithful conversion)](paper_eda/index.qmd#lab-edac) (2026-10-23)
