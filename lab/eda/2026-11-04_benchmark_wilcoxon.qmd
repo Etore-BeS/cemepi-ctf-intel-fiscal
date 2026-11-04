@@ -96,11 +96,13 @@ else:
 show[list(columns)].rename(columns=columns)
 ```
 
-`comparison.csv` on this commit has the Diebold-Mariano columns. The columns `wsr_stat`, `wsr_p`, and `wsr_better` are written by `score_benchmark_tests.py` from the saved forecasts. This page does not create them. When they are absent, the Wilcoxon column above says so. It does not fill a p-value.
+`comparison.csv` on this commit has the Diebold-Mariano columns and the Wilcoxon columns `wsr_stat`, `wsr_p`, and `wsr_better`. `score_benchmark_tests.py` wrote those columns from the saved forecasts. This page reads them. It does not compute them, and it does not fill a missing p-value.
 
 ## Pairs inside each cell
 
 A pair counts as significant when `p_bh` is below 0.05. The heatmap is one cell at a time. The mark is the adjusted p-value. Darker is smaller. Read a cell against its own scale. Do not treat a dark cell as a new rank, and do not compare shades across cells.
+
+In `pairwise_wilcoxon.csv`, a count of non-zero differentials equal to 1, 2, 3, or 4 is blank. The blank is the count cell only. This page does not put a number back into that cell.
 
 ```{python}
 #| label: fig-pairs
@@ -151,4 +153,4 @@ else:
 
 ## What this page does not conclude
 
-A dark cell is not a published winner. A disagreement between the two tests on a month or a week is expected when the test block is short. The reading of those disagreements for the manuscript is left to the authors. This page does not state how many of the twelve cells agree, because that count is taken from `wsr_p` only after that column is in the committed table.
+A dark cell is not a published winner. A disagreement between the two tests on a month or a week is expected when the test block is short. The reading of those disagreements for the manuscript is left to the authors. The Agree at 5% column is one call per cell, on the seasonal naive. This page does not add the twelve calls into a tally.
