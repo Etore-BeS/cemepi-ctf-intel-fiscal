@@ -1,0 +1,141 @@
+---
+title: "Recovery curves by age band (≤2, 2–5, 5–10, >10 years) × origin × registration status"
+description: "How does VAT (ICMS) recovery vary by the proposal's age bands, by origin and by registration status?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Status:** exploration. Aggregates only.
+
+::: {.callout-warning title="The register is later than the debts"}
+Registration status is the status on the register date printed by the setup cell. That date is after the debts and after the payments. A firm may be closed because of the debt. The status is not a cause measured before the outcome.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+def _boot() -> None:
+    here = Path.cwd().resolve()
+    for cand in (here, here / "eda", here / "lab" / "eda", *list(here.parents)[:6]):
+        if (cand / "_impairment.py").exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return
+    raise RuntimeError("Helper module _impairment.py is not on the working path.")
+
+_boot()
+import _impairment as I
+
+bundle, params = I.page_setup()
+print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
+panel, firms = bundle["panel"], bundle["firms"]
+```
+
+## Question
+
+How does the recovery of VAT (ICMS) certificates vary across the age bands in the proposal, and does that pattern differ by origin and by registration status?
+
+## Data
+
+The setup cell prints the window, the band edges and the source. The annual rate uses every certificate with positive stock in a year inside the window, including certificates enrolled before the window. Those older certificates are what makes the oldest band observable. The cumulative reading uses only cohorts enrolled inside the window.
+
+Registration status and the division of economic activity come from the same RFB join as the firm section: the manifest hash is checked, and a missing firm or a root-only match keeps its own category.
+
+## Method
+
+The annual rate in band $b$, origin $o$ and year $t$ is
+
+$$r_{b,o,t}=\frac{\sum_i \mathrm{paid}_{i,t}}{\sum_i \mathrm{stock}_{i,t}}$$
+
+for certificates with positive stock. The stock-weighted mean over the window is the same ratio with the sums taken over years. It is not the unweighted mean of the yearly rates.
+
+Age uses the lab convention that a break belongs to the lower band. The band labels and the breaks are printed by the setup cell. This entry does not change the age bands used by the earlier age sections.
+
+The cumulative reading, for a cohort enrolled inside the window, is the sum of payments up to the last observed year inside the band, divided by the enrolled value. The oldest band is emitted empty for these cohorts: the window is too short for a certificate enrolled inside it to reach that age.
+
+## How to read
+
+In the annual chart, the horizontal axis is the calendar year and the vertical axis is paid divided by stock. Each line is an origin and an age band. Compare lines within a year. A higher line is a higher rate in that year. The rate is not cumulative, and it is not a hazard from enrolment.
+
+In the cumulative chart, the horizontal axis is the enrolment year and the vertical axis is cumulative paid divided by enrolled value, at the last observed age inside the band. The empty oldest band means the horizon is not observed. It does not mean the rate is zero.
+
+The status chart uses the register date printed above. Read it as a description of who holds the stock, not as a prediction.
+
+```{python}
+#| label: tbl-annual
+#| tbl-cap: "Annual paid divided by stock, by year, age band and origin."
+annual, n_sup = I.annual_recovery(panel, firms)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+print(f"Years in the table run from {int(annual['year'].drop_nulls().min())} to {int(annual['year'].drop_nulls().max())}.")
+I.publish(annual)
+```
+
+```{python}
+#| label: fig-annual
+#| fig-cap: "Annual paid divided by stock. Each line is an origin and an age band."
+import polars as pl
+plot = annual.drop_nulls(["rate", "year"]).with_columns(
+    (pl.col("origin") + " · " + pl.col("age_band")).alias("series")
+)
+fig = I.fig_lines(plot, "year", "rate", "series", x_title="Year", y_title="Paid / stock")
+fig
+```
+
+```{python}
+#| label: tbl-mean
+#| tbl-cap: "Stock-weighted mean of the annual rate over the window, by age band and origin."
+mean, n_sup = I.mean_recovery(panel, firms)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(mean)
+```
+
+```{python}
+#| label: fig-mean
+#| fig-cap: "Stock-weighted mean recovery by age band. Each line is an origin."
+plot = mean.drop_nulls("rate")
+fig = I.fig_lines(plot, "age_band", "rate", "origin", x_title="Age band", y_title="Paid / stock")
+fig
+```
+
+```{python}
+#| label: tbl-cumulative
+#| tbl-cap: "Cumulative paid divided by enrolled value, by cohort and age band. The oldest band is not observable for these cohorts."
+cum, n_sup = I.cumulative_by_band(panel)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(cum)
+```
+
+```{python}
+#| label: fig-cumulative
+#| fig-cap: "Cumulative recovery by enrolment year. Each line is an age band. The oldest band is omitted because it is not observed."
+plot = cum.filter(pl.col("age_band") != ">10").drop_nulls(["cumulative", "enrol_year"])
+# One line per band, summing origins would hide the comparison. Declared and assessed are separate lines via the series label.
+plot = plot.with_columns((pl.col("origin") + " · " + pl.col("age_band")).alias("series"))
+fig = I.fig_lines(plot, "enrol_year", "cumulative", "series", x_title="Enrolment year", y_title="Cumulative paid / enrolled value")
+fig
+```
+
+```{python}
+#| label: tbl-status
+#| tbl-cap: "Stock-weighted recovery by age band, origin and registration status. Status is the later register."
+status, n_sup = I.recovery_by_status(panel, firms)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(status)
+```
+
+```{python}
+#| label: fig-status
+#| fig-cap: "Stock-weighted recovery by registration status and age band, declared origin. Blank cells are suppressed."
+declared = status.filter(pl.col("origin") == "declared").drop_nulls("rate")
+fig = I.fig_heatmap(
+    declared, "status", "age_band", "rate",
+    x_title="Age band", y_title="Registration status",
+)
+fig
+```
+
+## What not to conclude
+
+The annual rate is not the cumulative recovery of a cohort, and the cumulative reading is not observed for the oldest band. Registration status is not the status at enrolment. A difference between bands is not an effect of age, because older certificates are those that were not paid earlier. The join does not use a natural-person identifier.

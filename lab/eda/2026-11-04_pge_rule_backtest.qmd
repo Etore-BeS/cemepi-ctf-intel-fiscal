@@ -1,0 +1,100 @@
+---
+title: "The current PGE collectable/uncollectable/recoverable rule applied to VAT (ICMS) cohorts, and later recovery by class"
+description: "How does the current collectable rule classify VAT (ICMS) certificates, and what is recovered afterwards by class?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Status:** exploration. Aggregates only. The rule is applied with the assumptions printed below.
+
+::: {.callout-warning title="The guaranteed line is empty"}
+There is no guarantee table. Every guaranteed certificate falls into another class. The collectable share is understated. The warning is printed with the table.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+def _boot() -> None:
+    here = Path.cwd().resolve()
+    for cand in (here, here / "eda", here / "lab" / "eda", *list(here.parents)[:6]):
+        if (cand / "_impairment.py").exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return
+    raise RuntimeError("Helper module _impairment.py is not on the working path.")
+
+_boot()
+import _impairment as I
+
+bundle, params = I.page_setup()
+print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
+print(I.cited_material_note())
+panel, firms, instalments = bundle["panel"], bundle["firms"], bundle["instalments"]
+```
+
+## Question
+
+When the current collectable, uncollectable and recoverable rule is applied to VAT (ICMS) legal-entity certificates, what share of the December stock falls in each class, and how much is paid afterwards?
+
+## Data
+
+The setup cell prints the reference dates, the windows and the definitions of active, inactive and payment history. The population at a reference date is the certificates with positive stock in that December. Payments are GARE amounts. The registry used for active and inactive is the later register printed above. Natural-person branches of the rule are out of scope.
+
+## Method
+
+The function `classify_pge` applies the branches in the order printed above. Suspended debt is uncollectable first. An open instalment, with a request on or before the reference date and no valid break on or before that date, is collectable. Payment history is the unit's payments divided by the unit's enrolled value, over the calendar years printed above. Recent debt was enrolled inside the anniversary window printed above. Recoverable debt is collectable debt whose unit had a payment inside the shorter window.
+
+Later recovery in the next year is payments in that year divided by the December stock. Accumulated recovery is payments from the next year through the end of the analysis window, divided by the same stock.
+
+The guaranteed class is appended with an empty count. It is not estimated.
+
+## How to read
+
+In the stock chart, the horizontal axis is the reference year and the vertical axis is the class share of that origin's December stock. Compare classes within a year. A higher line is a larger share of the stock. The empty guaranteed class is drawn at zero because the table is missing, not because the share was measured at zero.
+
+In the recovery chart, the horizontal axis is the reference year and the vertical axis is payments in the next year divided by the December stock. Compare classes. This is not the seminar material's percentage, and it is not a forecast.
+
+```{python}
+#| label: tbl-classes
+#| tbl-cap: "Certificates, stock and stock share by class and origin, at each reference date. The guaranteed row is empty."
+classes, recovered, meta = I.backtest_rule(panel, firms, instalments, params)
+print(f"Cells pooled by the suppression rule: {meta['n_cells_suppressed']}")
+notes = sorted({n for n in classes["note"].to_list() if n})
+for note in notes:
+    print(note)
+I.publish(classes)
+```
+
+```{python}
+#| label: fig-stock-share
+#| fig-cap: "Share of December stock by class. Each line is an origin and a class. The guaranteed class is the empty line."
+import polars as pl
+plot = classes.drop_nulls(["stock_share", "ref_year"]).with_columns(
+    (pl.col("origin") + " · " + pl.col("class_label")).alias("series")
+)
+fig = I.fig_lines(plot, "ref_year", "stock_share", "series", x_title="Reference year", y_title="Share of December stock")
+fig
+```
+
+```{python}
+#| label: tbl-recovery
+#| tbl-cap: "Payments in the next year, and payments from the next year through the end of the window, divided by the December stock."
+print("Recovery uses the December stock as the denominator. The numerator is later GARE amounts.")
+I.publish(recovered)
+```
+
+```{python}
+#| label: fig-recovery
+#| fig-cap: "Next-year payments divided by the December stock, by class. Each line is an origin and a class."
+plot = recovered.drop_nulls(["recovery_next", "ref_year"]).with_columns(
+    (pl.col("origin") + " · " + pl.col("binary_class")).alias("series")
+)
+fig = I.fig_lines(plot, "ref_year", "recovery_next", "series", x_title="Reference year", y_title="Next-year paid / December stock")
+fig
+```
+
+## What not to conclude
+
+These shares are not the seminar figures cited in the setup cell. The year and the tax cut of those figures are not stated, and this page does not reproduce them. The guaranteed class is empty, so the collectable share is understated. Active and inactive use a register that is later than the reference date. Payment history is VAT (ICMS) only, on the unit printed above. A higher later recovery in one class is an association with the rule. It is not evidence that the rule causes collection.
