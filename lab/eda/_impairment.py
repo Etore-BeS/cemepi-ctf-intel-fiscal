@@ -16,6 +16,7 @@ import os
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,12 @@ GUARANTEE_WARNING = "no guarantee table in the data; collectable share is unders
 CITED_COLLECTION = "1.38%"
 CITED_COLLECTABLE = "27.05%"
 M1_FORMULA = "paid_flag ~ log_stock + age + rate_l1 + C(year)"
+# Bump this when the solver or the acceptance rule changes. Old caches must miss.
+FIT_VERSION = "3"
+FIT_SOLVER = "newton"
+FIT_MAXITER = 100
+# Mean score (gradient of the log likelihood, divided by the sample size).
+FIT_GRAD_TOL = 1e-6
 IMP_AGE_BREAKS = (2.0, 5.0, 10.0)
 AGE_LABELS = ("(0, 2]", "(2, 5]", "(5, 10]", ">10")
 HORIZON_AT_EDGE = {2: "(0, 2]", 5: "(2, 5]", 10: "(5, 10]"}
@@ -3867,40 +3874,70 @@ def nested_formulas(frame: pd.DataFrame) -> list[tuple[str, str]]:
     return blocks
 
 
+def _mean_score_norm(res) -> float:
+    """L2 norm of the mean score. Zero at a maximum of the logit likelihood."""
+    score = np.asarray(res.model.score(np.asarray(res.params, dtype=float))).ravel()
+    return float(np.linalg.norm(score) / max(float(res.nobs), 1.0))
+
+
+def _require_maximum(res, name: str, *, positive_r2: bool = True) -> float:
+    """Reject a fit that stopped short of the maximum.
+
+    A logit that contains an intercept cannot have a negative McFadden
+    pseudo-R² at the maximum. L-BFGS can report convergence before it gets there.
+    The intercept-only model is the one case where the pseudo-R² is zero.
+    """
+    grad = _mean_score_norm(res)
+    pseudo_r2 = float(res.prsquared)
+    r2_ok = pseudo_r2 > 0 if positive_r2 else pseudo_r2 >= -1e-8
+    if not (grad <= FIT_GRAD_TOL and r2_ok):
+        raise RuntimeError(
+            f"{name} did not reach the maximum of the logit likelihood: "
+            f"mean score norm={grad:.3e} (tolerance {FIT_GRAD_TOL:.0e}), "
+            f"pseudo-R²={pseudo_r2:.4f}. Solver={FIT_SOLVER}, maxiter={FIT_MAXITER}."
+        )
+    return pseudo_r2
+
+
+def fit_logit(
+    formula: str,
+    frame: pd.DataFrame,
+    name: str = "logit",
+    *,
+    positive_r2: bool = True,
+):
+    """Newton / IRLS, the same solver as section 5.6.1. A short fit raises."""
+    import statsmodels.formula.api as smf
+
+    model = smf.logit(formula, data=frame)
+    try:
+        fitted = model.fit(
+            disp=False,
+            maxiter=FIT_MAXITER,
+            method=FIT_SOLVER,
+            cov_type="HC1",
+        )
+    except (np.linalg.LinAlgError, ValueError) as exc:
+        raise RuntimeError(f"{name} Newton fit failed: {exc}") from exc
+    _require_maximum(fitted, name, positive_r2=positive_r2)
+    return fitted
+
+
 def fit_nested(
     frame: pd.DataFrame, params: PgeParams
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
-    """HC1 coefficients. Clustered standard errors reuse the same fit.
+    """HC1 coefficients. Clustered standard errors reuse the same Newton fit.
 
-    L-BFGS is tried first. Newton is the fallback. The cluster column is a
-    sandwich on the fitted coefficients, not a second optimisation.
+    The cluster column is a sandwich on the fitted coefficients, not a second
+    optimisation.
     """
-    import statsmodels.formula.api as smf
-
     formulas = nested_formulas(frame)
     coef_rows: list[dict[str, Any]] = []
     fit_rows: list[dict[str, Any]] = []
-    solver_used = "lbfgs"
-
-    def _fit(formula: str):
-        nonlocal solver_used
-        model = smf.logit(formula, data=frame)
-        last: Exception | None = None
-        for method in ("lbfgs", "bfgs", None):
-            kwargs: dict[str, Any] = {"disp": False, "maxiter": 200, "cov_type": "HC1"}
-            if method is not None:
-                kwargs["method"] = method
-            try:
-                fitted = model.fit(**kwargs)
-            except (np.linalg.LinAlgError, ValueError) as exc:
-                last = exc
-                continue
-            solver_used = method or "newton"
-            return fitted
-        raise last if last is not None else RuntimeError("logit did not fit")
+    pseudo: list[float] = []
 
     for name, formula in formulas:
-        res = _fit(formula)
+        res = fit_logit(formula, frame, name)
         index = res.params.index
         se_h = pd.Series(np.asarray(res.bse).ravel(), index=index)
         p_h = pd.Series(np.asarray(res.pvalues).ravel(), index=index)
@@ -3908,7 +3945,7 @@ def fit_nested(
         se_c = pd.Series(np.nan, index=index)
         p_c = pd.Series(np.nan, index=index)
         cluster_ok = False
-        if params.cluster:
+        if params.cluster and name != "M0":
             try:
                 groups = frame.loc[res.model.data.row_labels, "cnpj_root"]
                 res._results._get_robustcov_results(cov_type="cluster", groups=groups)
@@ -3920,15 +3957,17 @@ def fit_nested(
                 cluster_ok = False
         place = {term: i for i, term in enumerate(index)}
         n_year = int(sum(str(term).startswith("C(year)") for term in index))
+        pseudo_r2 = float(res.prsquared)
+        pseudo.append(pseudo_r2)
         fit_rows.append(
             {
                 "model": name,
-                "pseudo_r2": float(res.prsquared),
+                "pseudo_r2": pseudo_r2,
                 "aic": float(res.aic),
                 "bic": float(res.bic),
                 "n": int(res.nobs),
                 "n_year_terms": n_year,
-                "converged": bool(res.mle_retvals.get("converged", True)),
+                "converged": True,
                 "cluster_ok": cluster_ok,
             }
         )
@@ -3953,9 +3992,15 @@ def fit_nested(
                     "stars_cluster": stars(float(p_c.get(term, np.nan))),
                 }
             )
+    for earlier, later in pairwise(pseudo):
+        if later + 1e-8 < earlier:
+            raise RuntimeError(
+                "Pseudo-R² fell in a nested logit. "
+                f"The sequence is {', '.join(f'{value:.4f}' for value in pseudo)}."
+            )
     coef = assert_public(pd.DataFrame(coef_rows))
     fit = assert_public(pd.DataFrame(fit_rows))
-    return coef, fit, solver_used
+    return coef, fit, FIT_SOLVER
 
 
 def _fit_cache_dir() -> Path:
@@ -3976,6 +4021,8 @@ def _fit_cache_key(frame: pd.DataFrame, params: PgeParams) -> str:
     import hashlib
 
     digest = hashlib.sha256()
+    digest.update(FIT_VERSION.encode())
+    digest.update(f"{FIT_SOLVER}|{FIT_MAXITER}|HC1|{FIT_GRAD_TOL}".encode())
     digest.update(M1_FORMULA.encode())
     digest.update(str(params.sample_n).encode())
     digest.update(str(params.seed).encode())

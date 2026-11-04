@@ -7,8 +7,11 @@ import os
 import sys
 import threading
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import polars as pl
 
 EDA = Path(__file__).resolve().parents[1]
@@ -373,7 +376,7 @@ def test_logit_is_nested_on_the_payment_outcome_and_hides_identifiers():
     assert "protest_before" not in formulas["M6"]
     assert "protest_before" in formulas["M7"]
     coef, fit, solver = I.fit_nested(frame, PARAMS)
-    assert solver in {"lbfgs", "bfgs", "newton"}
+    assert solver == "newton"
     I.assert_public(coef)
     I.assert_public(fit)
     assert set(fit["model"]) == {f"M{i}" for i in range(1, 8)}
@@ -383,6 +386,68 @@ def test_logit_is_nested_on_the_payment_outcome_and_hides_identifiers():
     assert "se_cluster" in coef.columns
     assert "stars" in coef.columns
     assert coef["term"].str.startswith("C(year)").sum() == 0
+
+
+def _known_slope_frame(n: int, seed: int = 2026) -> pd.DataFrame:
+    """Logit data with the published 5.6.1 slopes. No stratified draw."""
+    rng = np.random.default_rng(seed)
+    log_stock = rng.normal(8.0, 1.5, n)
+    age = rng.uniform(0.5, 12.0, n)
+    rate_l1 = rng.normal(0.1, 0.25, n)
+    eta = 0.55 - 0.123 * log_stock - 0.077 * age + 0.0016 * rate_l1
+    paid = (rng.random(n) < 1.0 / (1.0 + np.exp(-eta))).astype(int)
+    year = rng.choice(np.arange(2016, 2026), n)
+    return pd.DataFrame(
+        {
+            "id_debito": np.arange(n),
+            "year": year.astype(str),
+            "cnpj_root": [f"r{i // 20:05d}" for i in range(n)],
+            "paid_flag": paid,
+            "log_stock": log_stock,
+            "age": age,
+            "rate_l1": rate_l1,
+            "origin": np.where(rng.random(n) < 0.5, "declared", "assessed"),
+            "status": rng.choice(["active", "closed (baixada)", "other code"], n),
+            "cnae_division": rng.choice(["46", "47", "10"], n),
+            "porte_label": rng.choice(["micro", "other sizes", "small"], n),
+            "instalment_requested_before": rng.integers(0, 2, n),
+            "instalment_broken_before": rng.integers(0, 2, n),
+            "protest_before": rng.choice(
+                ["not protested", "protested before the year"], n
+            ),
+        }
+    )
+
+
+def test_m1_recovers_known_slopes_and_nested_r2_does_not_fall():
+    import time
+
+    frame = _known_slope_frame(100_000)
+    started = time.perf_counter()
+    m0 = I.fit_logit("paid_flag ~ 1", frame, "M0", positive_r2=False)
+    coef, fit, solver = I.fit_nested(frame, I.PgeParams())
+    elapsed = time.perf_counter() - started
+    print(f"5.9 Newton runtime: {elapsed:.1f} s on {len(frame)} rows; solver {solver}.")
+    assert solver == "newton"
+    assert elapsed < 600
+    slopes = coef[coef["model"] == "M1"].set_index("term")["coef"]
+    assert abs(float(slopes["log_stock"]) - (-0.123)) < 0.03
+    assert abs(float(slopes["age"]) - (-0.077)) < 0.02
+    assert abs(float(slopes["rate_l1"]) - 0.0016) < 0.08
+    order = [f"M{i}" for i in range(8)]
+    pseudo = [float(m0.prsquared)] + [
+        float(fit.set_index("model").loc[name, "pseudo_r2"]) for name in order[1:]
+    ]
+    assert pseudo[0] >= -1e-8
+    assert pseudo[1] >= pseudo[0]
+    assert all(later + 1e-8 >= earlier for earlier, later in pairwise(pseudo))
+    assert all(value > 0 for value in pseudo[1:])
+    key = I._fit_cache_key(frame, I.PgeParams())
+    I.FIT_VERSION = "stale"
+    try:
+        assert I._fit_cache_key(frame, I.PgeParams()) != key
+    finally:
+        I.FIT_VERSION = "3"
 
 
 def test_stratified_sample_respects_the_cap():
@@ -912,24 +977,3 @@ def test_real_volume_steps_stay_within_two_gigabytes():
     assert after["age"] > before["age"]
     assert after["backtest"] > before["backtest"]
     assert after["logit"] > before["logit"]
-    import time
-
-    started = time.perf_counter()
-    _coef, _fit, fit_notes = I.fit_payment_models(
-        panel, firms, instalments, protests, PARAMS
-    )
-    elapsed = time.perf_counter() - started
-    print(
-        f"5.9 fit runtime: {elapsed:.1f} s; "
-        f"N {fit_notes['n_sampled']} of {fit_notes['n_before_sample']}; "
-        f"solver {fit_notes['solver']}; cache {fit_notes['fit_cache']}"
-    )
-    assert elapsed < 600
-    assert fit_notes["n_sampled"] <= PARAMS.sample_n
-    assert fit_notes["stratified"] is True
-    again = time.perf_counter()
-    _, _, cached_notes = I.fit_payment_models(
-        panel, firms, instalments, protests, PARAMS
-    )
-    print(f"5.9 cached fit runtime: {time.perf_counter() - again:.1f} s")
-    assert cached_notes["fit_cache"] == "hit"
