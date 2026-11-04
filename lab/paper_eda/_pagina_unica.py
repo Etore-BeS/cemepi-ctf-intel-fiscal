@@ -62,6 +62,10 @@ LAB_PAGES = [
     ("eda/2026-11-04_pge_rule_backtest", "3.18",
      "The current PGE collectable/uncollectable/recoverable rule applied to VAT (ICMS) cohorts, and later recovery by class",
      "lab-imp-rule", "rule", "05_parte_b3", "IMP-23"),
+    # 4.4 is already "Persistence of recovery" (C.4). This diagnostic is the next free number.
+    ("eda/2026-11-04_diagnostico_linearidade", "4.5",
+     "Linearity and group heterogeneity diagnostics for the Declared × Assessed inference",
+     "lab-lin", "lin", "06_parte_c", "AVD-13"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
     ("eda/2026-11-04_pd_logit_extended", "5.9",
@@ -208,6 +212,20 @@ EXTRA = {
                 "records), the schema of the DEBITO table without the person columns. The lab shows aggregates only."),
     "s-b-5-24": ("lab-agregados-b524", "Changed in the lab", "Aggregates only: the paper showed the first rows with the hash."),
 }
+# Apontador da 4.2 para a 4.5. Entra só quando o _freeze dessa entrada existe: o alvo #lab-lin
+# é criado pela própria entrada, e sem o render local a âncora não teria destino.
+LIN_POINTER = (
+    "s-c-2",
+    (
+        "lab-lin-pointer",
+        "CDA-level linearity for the declared × assessed inference",
+        (
+            "Section 4.2 tests linearity of the monthly portfolio series against macroeconomic indicators. "
+            "The certificate-level diagnostic that chooses the inference for the declared × assessed paper is "
+            "[4.5 Linearity and group heterogeneity diagnostics](#lab-lin)."
+        ),
+    ),
+)
 STAR_TEXT = ("Significance stars in tables and correlation maps: \\* p ≤ 0.10; \\*\\* p ≤ 0.05; \\*\\*\\* p ≤ 0.01 (no "
              "correction for multiple testing). In tables, each p column gets a “(sig.)” column with the stars next to it, "
              "and rows with p ≤ 0.10 in the first p column are in **bold** (no background colour). The caption above each "
@@ -747,8 +765,15 @@ def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, codes: st
 def lab_blocks(state: dict) -> tuple[dict, list[str]]:
     """Seções do lab agrupadas pela parte do paper depois da qual entram ("APPENDIX" = depois de todas)."""
     by_part, incs = {}, []
+    state["lab_included"] = set()
     for src, num, short, anchor, pfx, part, codes in LAB_PAGES:
+        freeze = LAB / "_freeze" / src / "execute-results" / "html.json"
+        # A 4.5 ainda não tem _freeze neste commit: o render é no Mac. As outras entradas continuam obrigatórias.
+        if src == "eda/2026-11-04_diagnostico_linearidade" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.5 fica de fora até o render local.", file=sys.stderr)
+            continue
         b, inc = lab_section(src, num, short, anchor, pfx, codes, state)
+        state["lab_included"].add(anchor)
         by_part.setdefault(part, []).append(f"<!-- lab: {src} -->\n\n{b}")
         incs += inc
     return by_part, incs
@@ -812,6 +837,8 @@ def main() -> int:
     state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": [], "pt2en": {}, "lab_pages": []}
     includes = []
     lab_by_part, lab_inc = lab_blocks(state)
+    if "lab-lin" in state.get("lab_included", ()):
+        EXTRA[LIN_POINTER[0]] = LIN_POINTER[1]
     includes += lab_inc
     bodies = []
     for name in PARTS:
