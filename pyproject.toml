@@ -103,4 +103,4 @@ override-dependencies = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["scripts/tests", "pipelines/litigancia/tests", "pipelines/cnpj_enrich/tests"]
+testpaths = ["scripts/tests", "pipelines/litigancia/tests", "pipelines/cnpj_enrich/tests", "lab/eda/tests"]
