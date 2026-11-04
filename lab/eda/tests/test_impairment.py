@@ -450,6 +450,44 @@ def test_m1_recovers_known_slopes_and_nested_r2_does_not_fall():
         I.FIT_VERSION = "3"
 
 
+def test_a_zero_payer_category_is_merged_and_does_not_separate():
+    frame = _known_slope_frame(2_000, seed=11)
+    extra = frame.iloc[:40].copy()
+    extra["origin"] = "nowhere"
+    extra["paid_flag"] = 0
+    extra["id_debito"] = np.arange(2_000, 2_040)
+    rare = frame.iloc[40:55].copy()
+    rare["cnae_division"] = "99"
+    rare["paid_flag"] = [1] * 4 + [0] * 11
+    rare["id_debito"] = np.arange(2_040, 2_055)
+    frame = pd.concat([frame, extra, rare], ignore_index=True)
+    merged, merges = I._merge_sparse_payers(frame)
+    nowhere = [
+        item
+        for item in merges
+        if item["variable"] == "origin" and item["category"] == "nowhere"
+    ]
+    cnae = [
+        item
+        for item in merges
+        if item["variable"] == "cnae_division" and item["category"] == "99"
+    ]
+    assert len(nowhere) == 1
+    assert nowhere[0]["n_payers"] == 0
+    assert nowhere[0]["n"] == 40
+    assert len(cnae) == 1
+    assert cnae[0]["n_payers"] == 4
+    assert (merged["origin"] == "nowhere").sum() == 0
+    assert (merged["cnae_division"] == "99").sum() == 0
+    coef, fit, solver = I.fit_nested(merged, I.PgeParams(cluster=False))
+    assert solver == "newton"
+    assert float(coef["coef"].abs().max()) < 5
+    assert (fit["score_norm"] < I.FIT_GRAD_TOL).all()
+    bare = I._fit_cache_key(merged, I.PgeParams(), [])
+    listed = I._fit_cache_key(merged, I.PgeParams(), merges)
+    assert bare != listed
+
+
 def test_stratified_sample_respects_the_cap():
     bundle = I.synthetic_bundle()
     params = I.PgeParams(sample_n=40)

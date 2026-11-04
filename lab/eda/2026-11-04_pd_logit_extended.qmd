@@ -42,7 +42,7 @@ Holding the payment-section logit fixed, how do the associations change when ori
 
 The sample is the one printed below: certificate-years with positive stock and an observed lag, inside the window. When that frame is larger than the cap printed by the setup cell, the fit draws a stratified sample of that size. The strata are the year, the origin and the payment outcome. The seed is the lab seed. The outcome is any payment in the year. The instalment flags use a request, or a valid break, dated before the year. The protest flag uses a protest date before the year, or records that the protest row has no date. The protest status itself is not a regressor.
 
-CNAE enters as the division. A division, a status or a size with fewer firms than the suppression floor is pooled. A pool that stays under the floor is dropped from every model, so the nested models share one sample.
+CNAE enters as the division. A division, a status or a size with fewer firms than the suppression floor is pooled. A pool that stays under the floor is dropped from every model, so the nested models share one sample. An origin, a registration status or a CNAE division with fewer than 10 payers in the sample is merged into `other` before the fit. If that pool still has fewer than 10 payers, those rows are left out, so a level with no payers is not a coefficient.
 
 ## Method
 
@@ -74,6 +74,25 @@ print(f"Rows dropped because a pooled category stayed under the floor: {notes['n
 print(f"Rows in every nested model: {notes['n_estimated']}.")
 print(f"CNAE values longer than the division, truncated: {notes['n_cnae_truncated']}.")
 print(f"Categories pooled before the fit: {notes['n_cells_suppressed']}.")
+print(f"Rows left out because a merged 'other' still had fewer than 10 payers: {notes['n_dropped_sparse_payers']}.")
+merges = notes["payer_merges"]
+if merges:
+    print("Categories with fewer than 10 payers:")
+    for item in merges:
+        if item["left_out"]:
+            print(
+                f"  {item['variable']} 'other' still had {item['n_payers']} payers "
+                f"in {item['n']} rows, so those rows were left out of the fit."
+            )
+        else:
+            print(
+                f"  {item['variable']} {item['category']}: {item['n']} rows, "
+                f"{item['n_payers']} payers, merged into other."
+            )
+else:
+    print("No origin, status or CNAE category had fewer than 10 payers.")
+for _, fit_row in fit.iterrows():
+    print(f"{fit_row['model']}: mean score norm {fit_row['score_norm']:.3e}.")
 print("The protest status is not a regressor. The protest variable is the date relative to the year.")
 print(f"Stars: {I.stars(0.10)} means p ≤ 0.10; {I.stars(0.05)} means p ≤ 0.05; {I.stars(0.01)} means p ≤ 0.01. No correction for multiple tests.")
 I.publish(fit)

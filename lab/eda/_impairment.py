@@ -42,6 +42,10 @@ FIT_SOLVER = "newton"
 FIT_MAXITER = 100
 # Mean score (gradient of the log likelihood, divided by the sample size).
 FIT_GRAD_TOL = 1e-6
+# A category with fewer payers than this separates. It is merged into "other".
+MIN_PAYERS = 10
+PAYER_OTHER = "other"
+PAYER_COLUMNS = ("origin", "status", "cnae_division")
 IMP_AGE_BREAKS = (2.0, 5.0, 10.0)
 AGE_LABELS = ("(0, 2]", "(2, 5]", "(5, 10]", ">10")
 HORIZON_AT_EDGE = {2: "(0, 2]", 5: "(2, 5]", 10: "(5, 10]"}
@@ -3803,6 +3807,67 @@ def _pool_rare(df: pl.DataFrame, col: str) -> tuple[pl.DataFrame, int]:
     return out, n_sup
 
 
+def _category_name(value) -> str:
+    if value is None:
+        return "(missing)"
+    if isinstance(value, float) and math.isnan(value):
+        return "(missing)"
+    return str(value)
+
+
+def _merge_sparse_payers(
+    frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+    """Merge origin, status and CNAE levels with fewer than 10 payers into other.
+
+    A pool that still has fewer than 10 payers is left out of the fit. A dummy
+    for a level with no payers is perfect separation, not a slope.
+    """
+    out = frame.copy()
+    merged: list[dict[str, Any]] = []
+    for column in PAYER_COLUMNS:
+        if column not in out.columns:
+            continue
+        names = out[column].map(_category_name)
+        counts = (
+            pd.DataFrame({"name": names, "paid_flag": out["paid_flag"]})
+            .groupby("name", dropna=False)["paid_flag"]
+            .agg(n="size", n_payers="sum")
+        )
+        sparse = [
+            name for name, row in counts.iterrows() if int(row["n_payers"]) < MIN_PAYERS
+        ]
+        for name in sparse:
+            merged.append(
+                {
+                    "variable": column,
+                    "category": str(name),
+                    "n": int(counts.loc[name, "n"]),
+                    "n_payers": int(counts.loc[name, "n_payers"]),
+                    "left_out": False,
+                }
+            )
+        if sparse:
+            out.loc[names.isin(sparse), column] = PAYER_OTHER
+        pool = out[column].map(_category_name) == PAYER_OTHER
+        n_pool = int(pool.sum())
+        n_pay = int(out.loc[pool, "paid_flag"].sum()) if n_pool else 0
+        if n_pool and n_pay < MIN_PAYERS:
+            merged.append(
+                {
+                    "variable": column,
+                    "category": PAYER_OTHER,
+                    "n": n_pool,
+                    "n_payers": n_pay,
+                    "left_out": True,
+                }
+            )
+            out.loc[pool, column] = None
+    keep = [column for column in PAYER_COLUMNS if column in out.columns]
+    out = out.dropna(subset=keep).reset_index(drop=True)
+    return out, merged
+
+
 def nested_formulas(frame: pd.DataFrame) -> list[tuple[str, str]]:
     """M1 is the payment-section logit. Later models add one block at a time."""
     origin_ref = "declared" if (frame["origin"] == "declared").any() else None
@@ -3967,6 +4032,7 @@ def fit_nested(
                 "bic": float(res.bic),
                 "n": int(res.nobs),
                 "n_year_terms": n_year,
+                "score_norm": _mean_score_norm(res),
                 "converged": True,
                 "cluster_ok": cluster_ok,
             }
@@ -4017,12 +4083,24 @@ def _fit_cache_dir() -> Path:
     return root
 
 
-def _fit_cache_key(frame: pd.DataFrame, params: PgeParams) -> str:
+def _merge_digest(merges: list[dict[str, Any]]) -> str:
+    import hashlib
+
+    blob = json.dumps(merges, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _fit_cache_key(
+    frame: pd.DataFrame,
+    params: PgeParams,
+    merges: list[dict[str, Any]] | None = None,
+) -> str:
     import hashlib
 
     digest = hashlib.sha256()
     digest.update(FIT_VERSION.encode())
     digest.update(f"{FIT_SOLVER}|{FIT_MAXITER}|HC1|{FIT_GRAD_TOL}".encode())
+    digest.update(_merge_digest(merges or []).encode())
     digest.update(M1_FORMULA.encode())
     digest.update(str(params.sample_n).encode())
     digest.update(str(params.seed).encode())
@@ -4072,7 +4150,16 @@ def fit_payment_models(
     started = time.perf_counter()
     frame, notes = estimation_frame(panel, firms, instalments, protests, params)
     # The micro frame stays inside this function. Only the coefficient tables leave.
-    key = _fit_cache_key(frame, params)
+    before = len(frame)
+    frame, merges = _merge_sparse_payers(frame)
+    notes["payer_merges"] = merges
+    notes["n_dropped_sparse_payers"] = before - len(frame)
+    notes["n_estimated"] = len(frame)
+    if frame.empty:
+        raise RuntimeError(
+            "No rows left after merging categories with fewer than 10 payers."
+        )
+    key = _fit_cache_key(frame, params, merges)
     cached = _read_fit_cache(key)
     if cached is None:
         coef, fit, solver = fit_nested(frame, params)
