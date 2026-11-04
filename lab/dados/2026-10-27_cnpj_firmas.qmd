@@ -146,7 +146,9 @@ tabela(pd.DataFrame({"origin": kmt.origin.map(ORI), "status": kmt.status.map(ST)
 
 ## CNAE division × origin
 
-**Method.** Main CNAE 2.0 code of the debtor establishment, at **division** level (2 digits; IBGE/CONCLA; CNAE 2.0 follows ISIC Rev. 4), crossed with the origin. By division: distinct CNPJs, December 2025 stock, the **weight of assessed debt** $w_d = 100\,E^{\text{ass}}_d/(E^{\text{ass}}_d+E^{\text{dec}}_d)$ (share of the division's stock that comes from infringement notices) and the aggregate recovery rate $\bar\rho$ of the 2016–2025 panel, by origin and in total. CDAs without an establishment-level match have no CNAE and form the "no CNAE" row.
+**Method.** Main CNAE 2.3 code of the debtor establishment, at **division** level (2 digits; IBGE/CONCLA CNAE-Subclasses 2.3, the version on the March 2026 RFB register; it follows ISIC Rev. 4 through the class), crossed with the origin. By division: distinct CNPJs, December 2025 stock, the **weight of assessed debt** $w_d = 100\,E^{\text{ass}}_d/(E^{\text{ass}}_d+E^{\text{dec}}_d)$ (share of the division's stock that comes from infringement notices) and the aggregate recovery rate $\bar\rho$ of the 2016–2025 panel, by origin and in total. CDAs without an establishment-level match have no CNAE and form the "no CNAE" row.
+
+**Source.** VAT (ICMS) certificates of legal entities, 2016–2025 panel and December 2025 snapshot; payments from GARE (`VALOR_RECEITA`); main CNAE 2.3 division (2 digits) of the debtor establishment from the March 2026 RFB enrichment (`cnpj_enriquecido`, `rfb-2026-03`), joined by CNPJ. **Representation.** One row per division: distinct CNPJs, December 2025 stock (value), weight of assessed debt = assessed ÷ (assessed + declared) stock of the division, and aggregate recovery of the 2016–2025 panel by origin and in total; a division is pooled into "others (suppressed)" when any of its cells has 1 to 4 CNPJs, and a pooled group still below 5 CNPJs is blank; certificates without an establishment-level match form the "no CNAE" row. **How to read.** The weight shows how much of a division's stock comes from tax assessments; compare recovery across origins within a row; the CNAE is that of March 2026, after the debts, so it describes the debtor, not a cause.
 
 ```{python}
 #| label: tbl-cnae-divisao
@@ -175,6 +177,8 @@ print(f"Divisions shown: {len(mostradas)}; pooled by suppression: {A['n_divisoes
       f"Weight of assessed debt between {fmt(mostradas.peso_autuado.min(), 1)}% and {fmt(mostradas.peso_autuado.max(), 1)}%. "
       f"Spearman (weight of assessed debt × total recovery, across divisions): rho = {fmt(rho, 2)} (p = {p:.2g}).")
 ```
+
+**Source and representation.** Same divisions as the table above (pooled divisions and "no CNAE" left out); one bubble per division, x = weight of assessed debt in the December 2025 stock (%), y = aggregate recovery 2016–2025 (%, log scale), bubble area proportional to the December 2025 stock. **How to read.** The pattern across divisions is ecological: it does not say that a firm in a given division recovers more or less.
 
 ```{python}
 #| label: fig-cnae-divisao

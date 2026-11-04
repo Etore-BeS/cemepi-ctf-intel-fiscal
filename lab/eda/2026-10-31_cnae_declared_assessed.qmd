@@ -297,6 +297,8 @@ print(
 )
 ```
 
+**Source.** December 2025 snapshot of the legal-entity VAT (ICMS) extract (`VALOR_SEM_HONORARIOS`), declared and assessed segments; CNAE section of the debtor establishment from the March 2026 Federal Revenue (RFB) register, CNAE 2.3 structure, establishment-level matches only. **Representation.** One row per segment × section (manufacturing, trade, transport, information); `n_positive` is the count of certificates (CDAs) with positive stock in that segment and section; the Gini coefficient and the share of the section's stock held by its largest 1 percent of certificates are computed on stock values inside each segment and section. **How to read.** A higher Gini or top-1 percent share means the section's stock sits in fewer certificates; compare the two segments within a section, not sections with the pooled figure.
+
 ```{python}
 #| label: tbl-section-concentration
 #| tbl-cap: "Gini coefficient and top 1 percent stock share inside the main CNAE sections."
@@ -351,6 +353,8 @@ print(
 
 ## Activity
 
+**Source.** December 2025 stock of the legal-entity VAT (ICMS) extract (`VALOR_SEM_HONORARIOS`), declared and assessed segments; CNAE section of the debtor establishment from the March 2026 Federal Revenue (RFB) register, CNAE 2.3, establishment-level matches only. **Representation.** Share of each segment's stock by section (value); one pair of bars for each of the 20 sections in the table (A to T; section U is absent), and only "unmatched" is left out. There is no 1 percent cut, no "All other sections" group, no payment or recovery rate, and no suppression. **How to read.** Bar length is that section's share of the segment's stock. Compare the declared and assessed bars of one section. A short bar is a small share, and the section is still drawn.
+
 ```{python}
 #| label: fig-section
 #| fig-cap: "Share of segment stock by CNAE section."
@@ -369,6 +373,8 @@ fig.update_layout(template="plotly_white", barmode="group", height=640,
 fig.update_xaxes(title="Share of the segment stock", tickformat=".0%")
 show(fig)
 ```
+
+**Source.** As above: December 2025 stock, GARE payments dated before 1 January 2026, CNAE section of the establishment (RFB, March 2026; CNAE 2.3). **Representation.** Shares of each segment's total stock by section (value), plus the share of certificates with any payment (count) and recovery = paid ÷ stock (value), in percent; sections shown have at least 1 percent of either segment's stock, the rest is pooled in "All other sections"; rows with 1 to 4 firms are suppressed. **How to read.** Read down a column to see where a segment's stock sits; compare the declared and assessed columns of a row to see whether a section is weighted towards one origin; payment and recovery are not stock shares.
 
 ```{python}
 #| label: tbl-section
@@ -408,6 +414,8 @@ print(
 )
 ```
 
+**Source.** December 2025 certificates and GARE payments before 1 January 2026, by CNAE section (RFB, March 2026). **Representation.** Share of certificates with at least one payment (count-based), sections with at least 2 percent of a segment's stock, one bar per segment. **How to read.** A taller bar means more certificates in that section received any payment; it says nothing about how much of the stock was paid.
+
 ```{python}
 #| label: fig-payment
 #| fig-cap: "Share of certificates with any payment, for sections with at least 2 percent of a segment's stock."
@@ -425,6 +433,8 @@ fig.update_layout(template="plotly_white", barmode="group", height=420,
 fig.update_yaxes(title="Share of certificates with a payment", tickformat=".0%")
 show(fig)
 ```
+
+**Source.** December 2025 stock and GARE payments before 1 January 2026; CNAE **division** (2 digits) of the debtor establishment from the March 2026 RFB register, CNAE 2.3. **Representation.** Seven selected divisions; stock share of each segment (value) and recovery = paid ÷ stock (value), in percent; English labels are short renderings of the official Portuguese names; the full list of divisions is in `tables/cnae_division.csv`, where rows with 1 to 4 firms are blank. **How to read.** Compare the declared and assessed stock shares of a division to see which origin it weighs on; low recovery with a high stock share marks where the unpaid stock concentrates.
 
 ```{python}
 #| label: tbl-division
@@ -533,6 +543,8 @@ print(
     "Paulínia, with 215 firms, holds 4.9 percent of assessed stock."
 )
 ```
+
+**Rio de Janeiro in declared stock.** Rio de Janeiro is the second state in declared stock. That share comes from a small number of large debtors whose headquarters are in Rio de Janeiro and whose debt in São Paulo is small next to their stock in Rio. Without those debtors, Rio de Janeiro falls to about 0.3 percent of declared stock. The state is the address in the Federal Revenue (RFB) CNPJ registry of the certificate's CNPJ, not a field of the certificate. Whether these debts are ICMS-ST (tax substitution) or DIFAL (the interstate rate difference) owed to São Paulo cannot be tested with the current extract: no field separates them. The question stays open, pending confirmation from PGE.
 
 ## Repeated enrolment
 
