@@ -25,4 +25,11 @@
         Their errors are dependent.
         The p-value is a paired comparison of the stored losses, not a multi-step correction with \(h\) equal to the test length.
         That correction is not positive when \(h\) equals the test length.
+  \item The Wilcoxon signed-rank test assumes independent differentials that are symmetric about the median.
+        Forecast errors can be autocorrelated.
+        The one-step HLN factor does not remove that dependence.
+        With 12 or 13 test points the rank test has low power.
+        The rank test is a robustness check.
+        It does not replace the Diebold-Mariano test or the model confidence set.
+        The procedure is the lab page \path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
 \end{itemize}

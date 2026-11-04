@@ -33,8 +33,10 @@ The skill score compares a model with the seasonal naive of that same grain.
 We define it in Section~\ref{sec:ss}.
 A positive skill score means lower sMAPE than that naive forecast.
 A Diebold-Mariano test with the Harvey-Leybourne-Newbold correction asks whether that gap is larger than the noise in the test block~\citep{diebold1995comparing,harvey1997testing}.
+A Wilcoxon signed-rank test ranks the same loss differentials~\citep{wilcoxon1945individual}.
+Its specification is the lab page \path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
 A model confidence set lists the models the same block does not separate~\citep{hansen2011mcs}.
-Neither test changes the rank.
+None of these tests changes the rank.
 
 TEM is the Time-Energy Model~\citep{brusokas2025tem}.
 It scores candidate forecasts with an energy.
@@ -55,7 +57,7 @@ Does the test block separate that model from the seasonal naive, and from the ot
 \begin{itemize}
   \item One protocol for three series and four grains.
         Models are chosen by validation sMAPE and ranked by test sMAPE.
-        The skill score, the corrected Diebold-Mariano test, and the model confidence set are further columns.
+        The skill score, the corrected Diebold-Mariano test, the Wilcoxon signed-rank test, and the model confidence set are further columns.
         They are not the rank.
   \item Separate labels for E1 and E2.
         E1 abstains by an energy threshold.

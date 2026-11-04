@@ -1,7 +1,11 @@
-"""Skill, Diebold-Mariano-HLN, and model confidence set from saved forecasts.
+"""Skill, Diebold-Mariano-HLN, Wilcoxon signed-rank, and the model confidence set.
 
 Reads ``results/<series>/<grain>/state.json``. Does not refit models.
 The loss is the sMAPE summand. The DM horizon is h=1.
+The Wilcoxon procedure is the lab page
+``lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd``.
+The leader-versus-naive signed-rank p-value is not adjusted.
+Every pair inside the cell is adjusted with Benjamini-Hochberg.
 The model confidence set uses alpha=0.10 and a circular block bootstrap.
 """
 
@@ -12,10 +16,18 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from forecast_compare import diebold_mariano_hln, model_confidence_set, smape_loss
+from forecast_compare import (
+    PAIRWISE_COLUMNS,
+    diebold_mariano_hln,
+    model_confidence_set,
+    pairwise_wilcoxon,
+    smape_loss,
+    wilcoxon_paired,
+)
 
 ALPHA = 0.10
 BOOTSTRAP = 999
+_WSR_BETTER = {"model": "model", "reference": "seasonal_naive", "tie": "tie"}
 
 
 def article_dir() -> Path:
@@ -63,6 +75,8 @@ def score_state(state: dict, ranked: pd.DataFrame) -> dict:
     if best_name not in losses:
         raise RuntimeError(f"best model {best_name} has no finite test forecast")
     dm = diebold_mariano_hln(losses[best_name], losses[seasonal], h=1)
+    wsr = wilcoxon_paired(losses[best_name], losses[seasonal])
+    pairs = [pair.as_dict() for pair in pairwise_wilcoxon(losses)]
     mcs = model_confidence_set(losses, alpha=ALPHA, bootstrap=BOOTSTRAP, seed=42)
     return {
         "series": meta["series"],
@@ -79,6 +93,10 @@ def score_state(state: dict, ranked: pd.DataFrame) -> dict:
         "dm_hln": dm.dm_hln,
         "dm_p": dm.p_value,
         "dm_better": dm.better,
+        "wsr_stat": wsr.statistic,
+        "wsr_p": wsr.p_value,
+        "wsr_better": _WSR_BETTER[wsr.better],
+        "pairwise": pairs,
         "mcs_block": mcs.block,
         "mcs_included": mcs.included,
         "best_in_mcs": best_name in mcs.included,
@@ -94,6 +112,7 @@ def main() -> None:
     root = article_dir() / "results"
     rows = []
     details = []
+    pair_rows = []
     for state_path in sorted(root.glob("*/*/state.json")):
         ranked_path = state_path.parent / "metrics_test_ranked.csv"
         if not ranked_path.exists():
@@ -103,6 +122,10 @@ def main() -> None:
             continue
         scored = score_state(state, official_rank(state_path))
         details.append(scored)
+        for pair in scored["pairwise"]:
+            pair_rows.append(
+                {"series": scored["series"], "grain": scored["grain"], **pair}
+            )
         rows.append(
             {
                 key: scored[key]
@@ -119,6 +142,9 @@ def main() -> None:
                     "dm_hln",
                     "dm_p",
                     "dm_better",
+                    "wsr_stat",
+                    "wsr_p",
+                    "wsr_better",
                     "best_in_mcs",
                 )
             }
@@ -127,12 +153,17 @@ def main() -> None:
         print(
             f"{scored['series']} {scored['grain']}: {scored['best']} "
             f"sMAPE={scored['smape']:.3f} skill={scored['skill']:.3f} "
-            f"HLN p={scored['dm_p']:.4f} MCS={scored['mcs_included']}",
+            f"HLN p={scored['dm_p']:.4f} WSR p={scored['wsr_p']:.4f} "
+            f"MCS={scored['mcs_included']}",
             flush=True,
         )
     out = article_dir() / "results" / "comparison.json"
     out.write_text(json.dumps(details, indent=2))
     pd.DataFrame(rows).to_csv(article_dir() / "results" / "comparison.csv", index=False)
+    pairs_path = article_dir() / "results" / "pairwise_wilcoxon.csv"
+    pd.DataFrame(pair_rows, columns=list(PAIRWISE_COLUMNS)).to_csv(
+        pairs_path, index=False
+    )
     print("wrote", out, flush=True)
 
 

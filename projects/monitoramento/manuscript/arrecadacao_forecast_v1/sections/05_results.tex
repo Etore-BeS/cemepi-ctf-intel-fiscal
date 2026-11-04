@@ -6,6 +6,8 @@ The rank is test sMAPE.
 Lower is better.
 The skill score is higher when the model beats the seasonal naive of that grain.
 The HLN column is the two-sided p-value of the leader against that naive.
+The Wilcoxon column is the two-sided signed-rank p-value of that same pair.
+Its reading is not filled in this draft.
 The model confidence set uses level 0.10.
 
 \subsection{The lowest sMAPE is not the same model}
@@ -26,6 +28,8 @@ E1 has no row.
   \caption{Lowest test sMAPE on each series and grain.
   Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\) against the seasonal naive of that grain.
   HLN \(p\) is the two-sided Diebold-Mariano test of that leader against the same naive, with the small-sample correction.
+  Wilcoxon \(p\) is the two-sided signed-rank test of that same pair.
+  The specification is the lab page cited in Section~\ref{sec:tests}.
   A p-value below 0.05 is discussed in the text.
   It is not a second rank.}
   \label{tab:best}
@@ -248,7 +252,7 @@ Assessed is not usable on its own on any grain.
 \subsection{What each test is saying}
 \label{sec:read-tests}
 
-The three tools answer three questions.
+Skill, the HLN test, the Wilcoxon signed-rank test, and the model confidence set answer different questions.
 They can disagree, and the disagreement is the result.
 
 The skill score is a ratio of two sMAPE values on the same test block.
@@ -321,3 +325,5 @@ The HLN p-value says whether the block can support that one comparison.
 The set says which other models are still in the race.
 On these twelve cells, only Monday to Friday puts the seasonal naive out of the set and also rejects it in the paired test.
 Even there, the set still contains more than TimesFM.
+
+\discutir{Wilcoxon signed-rank on the same leader-versus-naive losses, from comparison.csv column wsr_p after the local render. State how many of the 12 cells agree with the Diebold-Mariano call at 5 percent. On Monday to Friday, where TimesFM has the largest skill, state whether the rank test agrees. Where the two tests disagree, including monthly cells with 12 points, state what that does and does not say about relative gains and absolute limits. Do not fill this paragraph before the column exists.}

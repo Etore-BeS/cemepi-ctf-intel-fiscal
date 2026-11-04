@@ -1,8 +1,10 @@
-"""Diebold-Mariano with the HLN correction, and the model confidence set.
+"""Diebold-Mariano with the HLN correction, the Wilcoxon signed-rank test, and the MCS.
 
 Loss is the summand of sMAPE, so the tests use the same score as the rank.
 The HLN factor follows Harvey, Leybourne and Newbold (1997) for horizon h=1:
 the statistic is compared with a Student-t distribution on n-1 degrees of freedom.
+The Wilcoxon procedure is specified in
+lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd. This module follows that page.
 The model confidence set follows Hansen, Lunde and Nason (2011): a range
 statistic, circular block bootstrap, and elimination until the set is not rejected.
 """
@@ -13,6 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
 EPS = 1e-12
 
@@ -86,6 +89,183 @@ def diebold_mariano_hln(
     else:
         better = "tie"
     return DMResult(n, h, mean, float(dm), float(dm_hln), p_value, better)
+
+
+@dataclass(frozen=True)
+class WilcoxonResult:
+    n: int
+    n_nonzero: int
+    statistic: float
+    p_value: float
+    median_differential: float
+    better: str
+
+
+def wilcoxon_paired(
+    loss_model: np.ndarray, loss_reference: np.ndarray
+) -> WilcoxonResult:
+    """Two-sided Wilcoxon signed-rank test on one pair of loss series.
+
+    ``diff = loss_model - loss_reference`` uses the same finite pairs as the
+    Diebold-Mariano test. A negative median favours ``loss_model``.
+    All-zero differentials are a tie and do not raise.
+    The reported statistic is SciPy's positive rank sum.
+    """
+    diff = np.asarray(loss_model, float) - np.asarray(loss_reference, float)
+    diff = diff[np.isfinite(diff)]
+    n = int(diff.size)
+    if n < 1:
+        raise ValueError(f"need at least 1 paired loss, got {n}")
+    median = float(np.median(diff))
+    if median < 0:
+        better = "model"
+    elif median > 0:
+        better = "reference"
+    else:
+        better = "tie"
+    n_nonzero = int(np.count_nonzero(diff))
+    if n_nonzero == 0:
+        return WilcoxonResult(n, 0, 0.0, 1.0, median, "tie")
+    try:
+        result = stats.wilcoxon(
+            diff,
+            zero_method="wilcox",
+            alternative="two-sided",
+            method="auto",
+        )
+    except ValueError:
+        return WilcoxonResult(n, n_nonzero, 0.0, 1.0, median, "tie")
+    statistic = float(result.statistic)
+    p_value = float(result.pvalue)
+    if not np.isfinite(statistic) or not np.isfinite(p_value):
+        return WilcoxonResult(n, n_nonzero, 0.0, 1.0, median, "tie")
+    return WilcoxonResult(n, n_nonzero, statistic, p_value, median, better)
+
+
+def benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg adjusted p-values.
+
+    Same call as ``lab/paper_eda/_prelude.py``: ``multipletests(..., method="fdr_bh")``.
+    """
+    p_values = np.asarray(p_values, dtype=float)
+    if p_values.size == 0:
+        return np.asarray(p_values, dtype=float)
+    if p_values.ndim != 1:
+        raise ValueError("p-values must be one-dimensional")
+    if not np.isfinite(p_values).all():
+        raise ValueError("p-values must be finite")
+    adjusted = multipletests(p_values, method="fdr_bh")[1]
+    return np.asarray(adjusted, dtype=float)
+
+
+@dataclass(frozen=True)
+class PairwiseWilcoxon:
+    model_a: str
+    model_b: str
+    n: int
+    n_nonzero: int
+    median_differential: float
+    statistic: float
+    p_raw: float
+    p_bh: float
+    better: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "model_a": self.model_a,
+            "model_b": self.model_b,
+            "n": self.n,
+            "n_nonzero": self.n_nonzero,
+            "median_diff": self.median_differential,
+            "stat": self.statistic,
+            "p_raw": self.p_raw,
+            "p_bh": self.p_bh,
+            "better": self.better,
+        }
+
+
+PAIRWISE_COLUMNS = (
+    "series",
+    "grain",
+    "model_a",
+    "model_b",
+    "n",
+    "n_nonzero",
+    "median_diff",
+    "stat",
+    "p_raw",
+    "p_bh",
+    "better",
+)
+
+
+def pairwise_wilcoxon(losses: dict[str, np.ndarray]) -> list[PairwiseWilcoxon]:
+    """Every unordered pair, with Benjamini-Hochberg adjustment inside this dict.
+
+    ``model_a`` is the earlier key. The median is loss(model_a) minus loss(model_b).
+    The family is this dictionary only. It is not pooled across cells.
+    """
+    names = list(losses)
+    computed: list[tuple[str, str, WilcoxonResult, str]] = []
+    for i, left in enumerate(names):
+        for right in names[i + 1 :]:
+            result = wilcoxon_paired(losses[left], losses[right])
+            if result.better == "model":
+                winner = left
+            elif result.better == "reference":
+                winner = right
+            else:
+                winner = "tie"
+            computed.append((left, right, result, winner))
+    if not computed:
+        return []
+    raw = np.array([item[2].p_value for item in computed], dtype=float)
+    adjusted = benjamini_hochberg(raw)
+    rows: list[PairwiseWilcoxon] = []
+    for (left, right, result, winner), p_bh in zip(computed, adjusted, strict=True):
+        rows.append(
+            PairwiseWilcoxon(
+                left,
+                right,
+                result.n,
+                result.n_nonzero,
+                result.median_differential,
+                result.statistic,
+                result.p_value,
+                float(p_bh),
+                winner,
+            )
+        )
+    return rows
+
+
+def summarize_pairwise(
+    best: str,
+    pairs: list[dict[str, object]],
+    *,
+    alpha: float = 0.05,
+) -> dict[str, int | bool]:
+    """Counts for one cell. Significant means adjusted p below ``alpha``.
+
+    The leader beats all rivals only when every pair that includes ``best``
+    is significant and the median differential names ``best``.
+    """
+    rivals: list[dict[str, object]] = []
+    n_significant = 0
+    for pair in pairs:
+        p_bh = float(pair["p_bh"])
+        if p_bh < alpha:
+            n_significant += 1
+        if pair["model_a"] == best or pair["model_b"] == best:
+            rivals.append(pair)
+    beats_all = bool(rivals) and all(
+        float(pair["p_bh"]) < alpha and pair["better"] == best for pair in rivals
+    )
+    return {
+        "n_pairs": len(pairs),
+        "n_significant": n_significant,
+        "leader_beats_all": beats_all,
+    }
 
 
 def _block_indices(n: int, block: int, rng: np.random.Generator) -> np.ndarray:

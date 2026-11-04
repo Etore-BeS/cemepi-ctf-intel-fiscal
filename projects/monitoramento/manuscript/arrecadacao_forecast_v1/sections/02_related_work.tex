@@ -60,7 +60,11 @@ E2 only compares a boosting forecast with the seasonal naive.
 \paragraph{Tests of a forecast rank.}
 Diebold and Mariano test equal predictive accuracy from a loss differential~\citep{diebold1995comparing}.
 Harvey, Leybourne and Newbold correct that statistic for a short sample~\citep{harvey1997testing}.
+Wilcoxon ranks the paired differentials~\citep{wilcoxon1945individual}.
+Benjamini and Hochberg control the false discovery rate when every pair in a cell is tested~\citep{benjamini1995controlling}.
+The specification of that rank test is the lab page
+\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
 Hansen, Lunde and Nason build a set of models that survive a sequence of equivalence tests~\citep{hansen2011mcs}.
-This paper uses those three references for the tests in Section~\ref{sec:tests}.
+This paper uses those references for the tests in Section~\ref{sec:tests}.
 The tests do not choose the rank.
 The rank remains test sMAPE.

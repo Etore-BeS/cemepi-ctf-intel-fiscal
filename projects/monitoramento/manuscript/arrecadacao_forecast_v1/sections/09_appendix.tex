@@ -260,3 +260,31 @@ These panels replace a single overcrowded line plot.
   The non-zero days are where the panels separate.}
   \label{fig:zoo-autuado-daily}
 \end{figure}
+
+\section{Pairwise Wilcoxon signed-rank}
+\label{app:wilcoxon}
+
+Each cell tests every unordered pair of models that have a finite test forecast.
+The family is the cell.
+Adjusted \(p\)-values use Benjamini--Hochberg, as specified in the lab page
+\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
+The pair rows are written to \path{results/pairwise_wilcoxon.csv}.
+The summary counts are written to \path{tables/tab_wilcoxon_pairs.tex}.
+
+\discutir{after the local render, state how many cells have an sMAPE leader that beats every rival at 5 percent after Benjamini--Hochberg. State what a disagreement with the Diebold-Mariano test says about relative gains and absolute limits. Do not invent the counts.}
+
+\IfFileExists{tables/tab_wilcoxon_pairs.tex}{%
+\begin{table}[ht]
+  \caption{Pairwise Wilcoxon signed-rank tests inside each cell.
+  Pairs is the number of unordered pairs.
+  Significant is the number of pairs whose Benjamini--Hochberg adjusted \(p\)-value is below 0.05.
+  Leader beats all is yes only when every pair that includes the sMAPE leader is significant and the median loss differential favours that leader.}
+  \label{tab:wilcoxon-pairs}
+  \centering
+  \scriptsize
+  \input{tables/tab_wilcoxon_pairs}
+\end{table}
+}{%
+The summary table is not in this draft.
+Rebuild it from the saved forecasts before reading a count from it.
+}

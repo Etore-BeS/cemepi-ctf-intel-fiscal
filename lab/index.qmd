@@ -15,6 +15,14 @@ stock, Figure 3.5.18, K-means with k = 2/3/4, DEBITO quality warnings, with vs. 
 dated lab analyses sit inside the thematic sections they belong to (1.9, 2.8, 3.12–3.14 and 5.8); the full EDA notebook
 is the appendix (section 8). The whole page is in English; ICMS, the Brazilian state VAT, is called VAT (ICMS).
 
+## Forecast tests (specification)
+
+**[Wilcoxon signed-rank beside Diebold-Mariano](forecast/2026-11-04_wilcoxon_signed_rank.qmd)** (2026-11-04).
+This page is the specification the forecast manuscript cites.
+It defines the paired signed-rank test on the sMAPE loss differential, the tie rule, and the
+Benjamini–Hochberg adjustment already used in the lab (`fdr_bh`).
+It does not read the saved forecasts. Cell counts are rendered locally.
+
 ## What this site is
 
 Lab notebook of the research on the enrolled tax debt (dívida ativa) of the State of São Paulo.
@@ -28,6 +36,7 @@ they come from `projects/<frente>/notebooks/articles/` (see `docs/ESTRUTURA.md`)
 
 ## What changed in this version
 
+- *(2026-11-04)* **[Wilcoxon signed-rank specification](forecast/2026-11-04_wilcoxon_signed_rank.qmd):** paired signed-rank test beside Diebold-Mariano, and all pairs inside a forecast cell with the lab's Benjamini–Hochberg adjustment. No saved forecasts on this page.
 - *(2026-10-28)* **[Whole lab in English, single numbering](paper_eda/index.qmd#guia):** texts, titles, captions, axes, tables and notes in English (ICMS → VAT (ICMS)); one numbering scheme (0 to 8, with 1.1, 1.2…); the dated analyses moved into the thematic sections; a contents section with an organogram at the top.
 - *(2026-10-27)* **[Registration status and CNAE of debtor firms](paper_eda/index.qmd#lab-cnpj-firmas):** RFB registration status (2026-03) × recovery by origin, with Kaplan–Meier to the first payment, and CNAE division × origin, suppressing divisions with a cell of fewer than 5 CNPJs; 2016 to 2025, aggregates only (3.14).
 - *(2026-10-27)* **[Debtor firms by municipality of São Paulo state](paper_eda/index.qmd#lab-cnpj-geo):** count, value and rate per thousand active establishments by municipality, aggregates only (3.13).

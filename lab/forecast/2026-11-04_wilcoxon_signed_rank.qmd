@@ -1,0 +1,101 @@
+---
+title: "Wilcoxon signed-rank test beside the Diebold-Mariano test"
+description: "Specification of the paired signed-rank test on forecast loss differentials. The forecast manuscript cites this page."
+date: 2026-11-04
+date-format: "DD/MM/YYYY"
+---
+
+**Status:** specification for the VAT collection forecast manuscript. This page does not read saved forecasts and does not state a result on those series.
+
+**Code that follows this page:** `projects/monitoramento/scripts/forecast_compare.py` (`wilcoxon_paired`, `pairwise_wilcoxon`, `benjamini_hochberg`).
+
+This page is the source of truth for the signed-rank test. The manuscript cites this page. It does not redefine the tie rule or the multiple-test correction.
+
+## Loss differential
+
+Let $L_t(m)$ be the per-period sMAPE loss of a model and $L_t(r)$ the loss of the reference on the same test date. The differential is
+
+$$
+d_t = L_t(m) - L_t(r).
+$$
+
+Keep a date only when $d_t$ is finite. This is the same filter as the Diebold-Mariano test in `diebold_mariano_hln`. The count of kept dates is $n$. The count with $d_t \neq 0$ is $n_0$.
+
+The median $\tilde d$ is the median of the finite differentials, zeros included.
+
+- If $\tilde d < 0$, the first series has the lower loss.
+- If $\tilde d > 0$, the second series has the lower loss.
+- If $\tilde d = 0$, the median names no winner. The label is `tie`.
+
+## Signed-rank test
+
+The null says that the finite differentials are symmetric about zero. The alternative is two-sided.
+
+When $n_0 = 0$, do not call the rank routine. The comparison is a tie. The positive rank sum is 0. The two-sided $p$-value is 1. This case must not raise.
+
+Otherwise call
+
+```python
+scipy.stats.wilcoxon(
+    diff,
+    zero_method="wilcox",
+    alternative="two-sided",
+    method="auto",
+)
+```
+
+`zero_method="wilcox"` drops zero differentials before ranking. `method="auto"` uses the exact null when the nonzero sample has no tied absolute values and is small enough for that algorithm. It uses the normal approximation otherwise. The stored statistic is SciPy's sum of the ranks of the positive differentials.
+
+A check with no ties and $n = 12$, and with every differential negative, has two-sided $p$-value $2/2^{12}$. The tests lock that value. They use synthetic losses only.
+
+## Two reports
+
+Both reports use the models that enter the model confidence set: every model with a finite forecast on every test date and a finite sMAPE loss on every test date.
+
+**(A) Leader against the seasonal naive.** One signed-rank test per cell. The first series is the test-sMAPE leader. The second series is the seasonal naive of that grain. The $p$-value is not adjusted for the number of cells. `comparison.csv` stores it as `wsr_p`, the positive rank sum as `wsr_stat`, and the median call as `wsr_better`. The labels match the Diebold-Mariano column: `model`, `seasonal_naive`, `tie`.
+
+**(B) Every unordered pair in the cell.** The family is the cell. Pairs are not pooled across cells. `model_a` is the earlier key in the loss dictionary. The median is the loss of `model_a` minus the loss of `model_b`. `results/pairwise_wilcoxon.csv` stores $n$, the median, the statistic, the raw $p$-value (`p_raw`), the adjusted $p$-value (`p_bh`), and the winner (`better`, a model name or `tie`).
+
+## Benjamini-Hochberg adjustment
+
+Adjust the raw $p$-values of report (B) with the same call the lab already uses in `lab/paper_eda/_prelude.py`:
+
+```python
+statsmodels.stats.multitest.multipletests(p_values, method="fdr_bh")
+```
+
+The procedure is Benjamini and Hochberg (1995), *Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing*, Journal of the Royal Statistical Society: Series B (Methodological), 57(1), 289–300. DOI: `10.1111/j.2517-6161.1995.tb02031.x`.
+
+The adjusted $p$-value is at least the raw $p$-value and is at most 1. Sorting the raw $p$-values does not reverse the adjusted $p$-values.
+
+Report (A) stays outside this family.
+
+The summary table counts a pair as significant when the adjusted $p$-value is below 0.05. The 0.05 threshold is the count. It is not a second rank. The sMAPE leader beats all rivals only when every pair that includes that leader is significant and the median names that leader.
+
+The summary is `tables/tab_wilcoxon_pairs.tex`. The leader-versus-naive signed-rank $p$-value is the `Wilcoxon p` column of `tables/tab_best.tex`, beside `HLN p`.
+
+## What the test assumes
+
+The signed-rank test assumes independent differentials, symmetric about the median. Forecast errors can be autocorrelated. The Diebold-Mariano statistic in this project uses the Harvey-Leybourne-Newbold factor at horizon 1. That factor does not remove the dependence from the rank test. A month has 12 test points and a week has 13. Power is low on those grains. The rank test is a robustness check. It does not replace the Diebold-Mariano test or the model confidence set.
+
+The signed-rank reference is Wilcoxon (1945), *Individual Comparisons by Ranking Methods*, Biometrics Bulletin, 1(6), 80–83. DOI: `10.2307/3001968`.
+
+## What the manuscript may say
+
+The manuscript may cite this page, the two references above, and the column definitions on this page. A sentence that counts agreements, names a winner from the rank test, or reads a disagreement on the VAT series is not on this page. Those sentences stay marked for the authors until the tables below exist.
+
+## Local render
+
+The saved forecasts stay on the machine that already holds them. From the repository root:
+
+```bash
+uv run --no-sync python projects/monitoramento/scripts/score_benchmark_tests.py
+uv run --no-sync python projects/monitoramento/scripts/make_segment_figures.py
+```
+
+```fish
+uv run --no-sync python projects/monitoramento/scripts/score_benchmark_tests.py
+uv run --no-sync python projects/monitoramento/scripts/make_segment_figures.py
+```
+
+The first command reads `state.json` and writes `comparison.csv`, `comparison.json`, and `pairwise_wilcoxon.csv`. The second command writes `tab_best.tex` and `tab_wilcoxon_pairs.tex`. This page does not run those commands.

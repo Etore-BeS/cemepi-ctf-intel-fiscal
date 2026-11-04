@@ -508,7 +508,7 @@ The network is small and is trained only on this series.
 \label{sec:tests}
 
 The rank stays test sMAPE.
-Two tests describe that rank.
+Three tests describe that rank.
 They do not change it.
 
 The Diebold-Mariano test compares the best model with the seasonal naive of the same grain~\citep{diebold1995comparing}.
@@ -517,6 +517,28 @@ The horizon in the Harvey-Leybourne-Newbold correction is one step~\citep{harvey
 The corrected statistic is compared with a Student-$t$ distribution on $n-1$ degrees of freedom.
 The test is two-sided.
 A negative statistic means the best model has lower loss than the seasonal naive.
+
+The Wilcoxon signed-rank test uses those same per-period loss differentials~\citep{wilcoxon1945individual}.
+The specification is the lab page
+\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
+That page fixes the tie rule, the exact and normal nulls, and the multiple-test correction.
+This section cites that page.
+It does not redefine the procedure.
+
+The first signed-rank comparison is the best model against the seasonal naive of the same grain.
+That comparison is one test per cell.
+It is not adjusted for the number of cells.
+The second comparison tests every pair of models in the cell.
+The $p$-values of those pairs are adjusted inside the cell with the Benjamini--Hochberg procedure~\citep{benjamini1995controlling}.
+The lab uses the same procedure for its other screens (\path{lab/paper_eda/_prelude.py}, method \texttt{fdr\_bh}).
+The test is two-sided.
+A negative median differential favours the series named first.
+The signed-rank test assumes independent differentials that are symmetric about the median.
+Forecast errors can be autocorrelated.
+The one-step Diebold-Mariano factor does not remove that dependence from the rank test.
+With 12 monthly points or 13 weekly points the rank test has low power.
+The rank test is a robustness check.
+It does not replace the Diebold-Mariano test or the model confidence set.
 
 The model confidence set uses level 0.10~\citep{hansen2011mcs}.
 The statistic is the largest $t$ of a model against the average loss of the other models.
@@ -537,4 +559,10 @@ The saved forecasts are under
 E1 calls the published TEM code.
 That vendor tree is not in this worktree, so E1 has no score.
 M9 uses the public weights \texttt{google/timesfm-3.0-pytorch}.
-Every number in Section~\ref{sec:results} is read from those saved tables.
+The Wilcoxon procedure is specified in
+\path{lab/forecast/2026-11-04_wilcoxon_signed_rank.qmd}.
+\path{projects/monitoramento/scripts/score_benchmark_tests.py} writes the Wilcoxon columns of \path{comparison.csv} and the pair rows in \path{pairwise_wilcoxon.csv}.
+\path{projects/monitoramento/scripts/make_segment_figures.py} writes the Wilcoxon column of \path{tables/tab_best.tex} and \path{tables/tab_wilcoxon_pairs.tex}.
+Those files are rebuilt from the saved forecasts.
+This draft does not contain a Wilcoxon $p$-value until that rebuild.
+Every other number in Section~\ref{sec:results} is read from the saved tables.

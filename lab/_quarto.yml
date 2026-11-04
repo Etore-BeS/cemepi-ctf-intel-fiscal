@@ -6,6 +6,7 @@ project:
   render:
     # Atenção: um padrão sem "/" (ex.: "*.qmd") casa em qualquer subpasta e trazia de volta as 8 partes do paper.
     - "index.qmd"
+    - "forecast/2026-11-04_wilcoxon_signed_rank.qmd"  # especificação do teste; sem código executável e sem freeze
     - "paper_eda/index.qmd"   # a página única: o EDA do paper E todas as entradas do lab (seções 1–8, numeração única). As 8 partes
                               # (paper_eda/0*.qmd) e as entradas (eda/*.qmd, dados/*.qmd) NÃO são páginas: o _freeze
                               # delas alimenta esta página (CTF-03, 26/10/2026). Para executar uma delas e atualizar o
@@ -35,6 +36,8 @@ website:
         text: Home
       - href: paper_eda/index.qmd
         text: Paper EDA (main)
+      - href: forecast/2026-11-04_wilcoxon_signed_rank.qmd
+        text: Forecast tests
       - text: Article supplements
         href: suplementos/index.qmd
   page-footer:
