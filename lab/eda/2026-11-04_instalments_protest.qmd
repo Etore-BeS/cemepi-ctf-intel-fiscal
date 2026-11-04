@@ -1,0 +1,212 @@
+---
+title: "Instalment agreements, defaults on them and protest of VAT (ICMS) CDAs"
+description: "How common are instalment requests and protest on VAT (ICMS) certificates, and how does later recovery differ?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Status:** exploration. Aggregates only.
+
+::: {.callout-warning title="The status columns are not dated"}
+The instalment status and the protest status are the status at extraction. They are not the status on the enrolment date. An association between a request and later recovery is not a causal effect.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+def _boot() -> None:
+    here = Path.cwd().resolve()
+    for cand in (here, here / "eda", here / "lab" / "eda", *list(here.parents)[:6]):
+        if (cand / "_impairment.py").exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return
+    raise RuntimeError("Helper module _impairment.py is not on the working path.")
+
+_boot()
+import polars as pl
+import _impairment as I
+
+bundle, params = I.page_setup(include=("panel", "instalments", "protests", "payments", "cohort"))
+print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
+panel = bundle["panel"]
+instalments, protests, payments = bundle["instalments"], bundle["protests"], bundle["payments"]
+# The certificate index is already cached. Each table below is its own cell.
+cohort = bundle.get("cohort")
+```
+
+## Question
+
+What share of VAT (ICMS) certificates has an instalment request, how often a request is broken, and how does recovery differ for certificates with and without a request, a break or a protest?
+
+## Data
+
+The setup cell prints the window and the source. The instalment table and the protest table link to the legal-entity VAT (ICMS) extract by the debt id. Both tables cover enrolments from the start of the window. Certificates enrolled before the window stay out of these shares.
+
+## Method
+
+A request date or a break date outside the window is counted and left unchanged. It is not used as an event time, and an impossible break date does not close a request.
+
+The share with a request is the number of certificates with a valid request date divided by the certificates enrolled inside the window. Recovery is the sum of GARE amounts divided by the sum of enrolled values.
+
+The time from enrolment to the first request, from the request to a valid break, and from enrolment to a valid protest date uses the Kaplan–Meier estimator
+
+$$\hat S(t)=\prod_{t_j\le t}\left(1-\frac{d_j}{n_j}\right)$$
+
+The curve shows $1-\hat S(t)$. $d_j$ is the number of events in month $t_j$ and $n_j$ is the number of certificates still at risk. Certificates with no event by the end of the window are censored. A point with fewer certificates at risk than the suppression floor is hidden. Kaplan and Meier (1958) define the estimator.
+
+*Reference:* Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American Statistical Association*, 53(282), 457–481. https://doi.org/10.1080/01621459.1958.10501452
+
+## How to read
+
+In the share chart, the horizontal axis is the enrolment year and the vertical axis is the share of certificates with a request. Compare origins. A higher line is a higher share. It is not a recovery rate.
+
+In a Kaplan–Meier chart, the horizontal axis is months since the start of the spell and the vertical axis is the share that has had the event. A steeper line is an earlier event. The curve is not a causal effect of the instalment or of the protest.
+
+```{python}
+#| label: tbl-date-quality
+#| tbl-cap: "Impossible dates. Counted and left unchanged."
+quality = pl.DataFrame([
+    I.date_quality(instalments, "data_rompimento"),
+    I.date_quality(protests, "data_protesto"),
+])
+print("Dates outside the window, and break years before year 1000, are flagged. They are not rewritten.")
+I.publish(quality)
+```
+
+```{python}
+#| label: tbl-request-share
+#| tbl-cap: "Share of certificates with an instalment request, by enrolment year and origin."
+share, n_sup = I.request_share(panel, instalments, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(share)
+```
+
+```{python}
+#| label: fig-request-share
+#| fig-cap: "Share of certificates with a request, by enrolment year. One line per origin."
+plot = share.drop_nulls(["share_with_request", "enrol_year"])
+fig = I.fig_lines(
+    plot, "enrol_year", "share_with_request", "origin",
+    x_title="Enrolment year", y_title="Share with a request",
+)
+fig
+```
+
+```{python}
+#| label: tbl-status
+#| tbl-cap: "Instalment status at extraction, by origin. Rare statuses are pooled."
+status, n_sup = I.status_distribution(panel, instalments, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(status)
+```
+
+```{python}
+#| label: fig-km-request
+#| fig-cap: "Share of certificates with a first request, by months since enrolment. Kaplan–Meier."
+curve, n_sup, extra = I.km_enrol_to_request(panel, instalments, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+print(f"Negative durations excluded: {extra['n_negative_duration']}")
+fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since enrolment", y_title="Share with a first request")
+fig
+```
+
+```{python}
+#| label: fig-km-break
+#| fig-cap: "Share of requests with a valid break, by months since the request. Kaplan–Meier."
+curve, n_sup = I.km_request_to_break(instalments, panel, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since the request", y_title="Share with a valid break")
+fig
+```
+
+```{python}
+#| label: tbl-break
+#| tbl-cap: "Share of requests with a valid break date, by origin and by the number of instalments on the request."
+by_origin, by_band, n_sup = I.break_rates(panel, instalments, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+print("By origin:")
+display_origin = I.publish(by_origin)
+display_band = I.publish(by_band)
+display_origin
+```
+
+```{python}
+#| label: tbl-break-band
+#| tbl-cap: "Share of requests with a valid break, by origin and by the instalment-count band."
+display_band
+```
+
+```{python}
+#| label: fig-break-band
+#| fig-cap: "Share of requests with a valid break. Each bar is an origin and an instalment-count band."
+plot = by_band.drop_nulls("break_rate").with_columns(
+    (pl.col("origin") + " · " + pl.col("parcel_band")).alias("cell")
+)
+fig = I.fig_bars(plot, "cell", "break_rate", x_title="Origin and instalment-count band", y_title="Share with a valid break")
+fig
+```
+
+```{python}
+#| label: tbl-recovery-request
+#| tbl-cap: "Recovery, paid divided by enrolled value, for certificates with and without a request."
+rec, n_sup = I.recovery_by_flag(panel, instalments, flag="request", cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(rec)
+```
+
+```{python}
+#| label: tbl-recovery-break
+#| tbl-cap: "Recovery, paid divided by enrolled value, for certificates with and without a valid break."
+rec, n_sup = I.recovery_by_flag(panel, instalments, flag="break", cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(rec)
+```
+
+```{python}
+#| label: tbl-protest-share
+#| tbl-cap: "Share of certificates with a protest row, by enrolment year and origin."
+pshare, n_sup = I.protest_share(panel, protests, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(pshare)
+```
+
+```{python}
+#| label: fig-protest-share
+#| fig-cap: "Share of certificates with a protest row, by enrolment year. One line per origin."
+plot = pshare.drop_nulls(["share_protested", "enrol_year"])
+fig = I.fig_lines(plot, "enrol_year", "share_protested", "origin", x_title="Enrolment year", y_title="Share with a protest row")
+fig
+```
+
+```{python}
+#| label: fig-km-protest
+#| fig-cap: "Share of certificates with a valid protest date, by months since enrolment. Kaplan–Meier."
+curve, n_sup = I.km_enrol_to_protest(panel, protests, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+fig = I.fig_lines(curve.drop_nulls("share"), "t", "share", "origin", x_title="Months since enrolment", y_title="Share with a valid protest date")
+fig
+```
+
+```{python}
+#| label: tbl-protest-status
+#| tbl-cap: "Protest status at extraction. Rare statuses are pooled. The status is not used as a dated regressor."
+pstatus, n_sup = I.protest_status(panel, protests, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+I.publish(pstatus)
+```
+
+```{python}
+#| label: tbl-protest-recovery
+#| tbl-cap: "Amount paid before the protest date and on or after it, divided by enrolled value."
+around, n_sup = I.recovery_around_protest(panel, protests, payments, cdas=cohort)
+print(f"Cells pooled by the suppression rule: {n_sup}")
+print("Certificates with a protest row and no usable date are in the quality table. They are not in this split.")
+I.publish(around)
+```
+
+## What not to conclude
+
+The tables cover enrolments inside the window. They do not describe older certificates. The status is the extraction status. A higher recovery for certificates with a request is an association. It is not the effect of granting the instalment, and it is not the effect of the protest. A payment is not the same thing as recovery of the whole credit. The comparison of amounts before and after the protest date is descriptive. The protest date is not assigned by an experiment.

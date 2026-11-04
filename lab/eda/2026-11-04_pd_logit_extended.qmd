@@ -1,0 +1,109 @@
+---
+title: "Model 1 extended: probability of payment with origin, registration status, CNAE division, size, instalments and protest"
+description: "How does the payment logit change when origin, register, activity, size, instalments and protest are added?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Status:** exploration. Association only. This is not a forecast and not a rating.
+
+::: {.callout-warning title="The register is later than the outcome"}
+Registration status, the activity division and size come from the register date printed by the setup cell. That date is after the payments. A coefficient on those fields is an association. It is not a prediction of a future payment, and a payment in the year is not recovery of the credit.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+def _boot() -> None:
+    here = Path.cwd().resolve()
+    for cand in (here, here / "eda", here / "lab" / "eda", *list(here.parents)[:6]):
+        if (cand / "_impairment.py").exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return
+    raise RuntimeError("Helper module _impairment.py is not on the working path.")
+
+_boot()
+import _impairment as I
+
+bundle, params = I.page_setup(include=("panel", "firms", "instalments", "protests"))
+print(I.assumptions_text(params, synthetic=bundle["synthetic"]))
+panel, firms = bundle["panel"], bundle["firms"]
+instalments, protests = bundle["instalments"], bundle["protests"]
+```
+
+## Question
+
+Holding the payment-section logit fixed, how do the associations change when origin, registration status, CNAE division, size, an earlier instalment and an earlier protest are added one block at a time?
+
+## Data
+
+The sample is the one printed below: certificate-years with positive stock and an observed lag, inside the window. When that frame is larger than the cap printed by the setup cell, the fit draws a stratified sample of that size. The strata are the year, the origin and the payment outcome. The seed is the lab seed. The outcome is any payment in the year. The instalment flags use a request, or a valid break, dated before the year. The protest flag uses a protest date before the year, or records that the protest row has no date. The protest status itself is not a regressor.
+
+CNAE enters as the division. A division, a status or a size with fewer firms than the suppression floor is pooled. A pool that stays under the floor is dropped from every model, so the nested models share one sample. An origin, a registration status or a CNAE division with fewer than 10 payers in the sample is merged into `other` before the fit. If that pool still has fewer than 10 payers, those rows are left out, so a level with no payers is not a coefficient.
+
+## Method
+
+Model 1 is the payment-section logit
+
+$$\Pr(\mathrm{paid\_flag}_{it}=1)=\Lambda(\beta_0+\beta_1\log\mathrm{stock}_{it}+\beta_2\mathrm{age}_{it}+\beta_3\mathrm{rate}_{i,t-1}+\gamma_{t})$$
+
+$\Lambda$ is the logistic function. $\gamma_t$ is a year fixed effect. The odds ratio of a coefficient is $\exp(\hat\beta)$. The nested models add, in order, origin, registration status, CNAE division, size, the two instalment flags, and the dated protest flag. The likelihood is maximised with Newton (IRLS), the same solver as section 5.6.1. A fit that stops with a mean score above the tolerance, or with a pseudo-R² that is not positive, is rejected. Standard errors are HC1. The column beside them is the cluster-robust standard error by the firm root, computed from the same fit. Stars follow the lab rule printed below. McFadden's pseudo-R² is the value statsmodels reports as `prsquared`. AIC and BIC are the values on the fitted object. A second render reads the coefficient tables from the on-disk cache when the sample and the inputs are unchanged.
+
+The probability of non-recovery in the proposal equals one minus this fitted probability only when recovery means any payment in the year. That equivalence is not used as a rating here.
+
+## How to read
+
+One row of the coefficient table is one term in one nested model. The odds ratio is the multiplicative change in the odds of a payment in the year when the term increases by one unit and the other terms stay fixed. An odds ratio above one is a positive association with payment. The confidence interval is the HC1 interval on the odds ratio. Stars mark the lab thresholds. They are not corrected for the number of tests.
+
+The fit table is one row per model. Read the pseudo-R², AIC and BIC as a comparison of nested associations on the same sample. A lower AIC is a better in-sample description. It is not an out-of-sample score.
+
+In the figure, the horizontal axis is the term of model 1 and the vertical axis is the odds ratio. The dotted line at one is no association. The figure omits the year fixed effects. They remain in the model.
+
+```{python}
+#| label: tbl-fit
+#| tbl-cap: "Nested logits. Pseudo-R², AIC, BIC and the number of certificate-years. Year fixed effects are in the model and out of the coefficient table."
+coef, fit, notes = I.fit_payment_models(panel, firms, instalments, protests, params)
+print(f"Base formula: {notes['formula_m1']}")
+print(f"Stratified sample target N: {notes['sample_n']}. Strata: {notes['strata']}. Seed: {notes['seed']}.")
+print(f"Rows before the sample: {notes['n_before_sample']}. Rows in the sample: {notes['n_sampled']}.")
+print(f"Solver: {notes['solver']}. Fit cache: {notes['fit_cache']}. Elapsed seconds: {notes['fit_seconds']}.")
+print(f"Rows dropped because a pooled category stayed under the floor: {notes['n_dropped_blank']}.")
+print(f"Rows in every nested model: {notes['n_estimated']}.")
+print(f"CNAE values longer than the division, truncated: {notes['n_cnae_truncated']}.")
+print(f"Categories pooled before the fit: {notes['n_cells_suppressed']}.")
+merged_categories = I.payer_merge_table(notes["payer_merges"])
+if merged_categories.height == 0:
+    print("No origin, status or CNAE category had fewer than 10 payers.")
+else:
+    print("Categories merged into other before the fit:")
+    from IPython.display import display
+    display(I.publish(merged_categories))
+for _, fit_row in fit.iterrows():
+    print(f"{fit_row['model']}: mean score norm {fit_row['score_norm']:.3e}.")
+print("The protest status is not a regressor. The protest variable is the date relative to the year.")
+print(f"Stars: {I.stars(0.10)} means p ≤ 0.10; {I.stars(0.05)} means p ≤ 0.05; {I.stars(0.01)} means p ≤ 0.01. No correction for multiple tests.")
+I.publish(fit)
+```
+
+```{python}
+#| label: tbl-coef
+#| tbl-cap: "Coefficients, HC1 interval, odds ratio and clustered standard errors. Year fixed effects are omitted from the display."
+I.publish(coef)
+```
+
+```{python}
+#| label: fig-odds-m1
+#| fig-cap: "Odds ratios of model 1. The dotted line is an odds ratio of one. Year fixed effects are omitted."
+import polars as pl
+m1 = pl.from_pandas(coef).filter(pl.col("model") == "M1")
+fig = I.fig_bars(m1, "term", "odds_ratio", x_title="Term", y_title="Odds ratio")
+fig.add_hline(y=1, line_dash="dot", line_color="#8A9499")
+fig
+```
+
+## What not to conclude
+
+A coefficient is not a forecast of recovery and not a rating. The outcome is a payment in the year. It is not the event "the credit was not recovered". Registry fields are later than the outcome, so they cannot be used as if they were known at the start of the year. The instalment and protest flags are dated before the year, and they are still choices of the debtor and of the administration. The cluster column does not make the estimates causal. The sample is a stratified draw when the frame exceeds the cap printed above; it is not the population.
