@@ -86,6 +86,7 @@ print(f"spline cache: {splines['cache']}")
 #| label: icc-mixed
 groups = diag.block_groups(frame)
 result["groups"] = groups["groups"]
+result["group_counts"] = groups["group_counts"]
 result["icc"] = groups["icc"]
 result["figures"].update(groups["figures"])
 print(f"mixed cache: {groups['cache']}")
@@ -306,7 +307,7 @@ display(HTML(diag.publish(result["porte_shape"])))
 
 ## Quantile regression of the balance
 
-Koenker and Bassett (1978) replace the conditional mean with a conditional quantile. The outcome is $\log(1+S_i)$ and the regressors are the stock equation above. The four quantiles are $\tau = 0.25, 0.50, 0.75, 0.90$. When the estimation sample is larger than 80,000 certificates, this block uses a stratified subsample of 80,000 and prints that count. The quantile block is a candidate for the paper. It is not a second copy of a published quantile table: section 5.6 does not contain one.
+Koenker and Bassett (1978) replace the conditional mean with a conditional quantile. The outcome is $\log(1+S_i)$ and the regressors are the stock equation above. The four quantiles are $\tau = 0.25, 0.50, 0.75, 0.90$. When the estimation sample is larger than 20,000 certificates, this block uses a stratified subsample of 20,000 and prints that count. The quantile block is a candidate for the paper. It is not a second copy of a published quantile table: section 5.6 does not contain one.
 
 **How to read.** One row per term and $\tau$. The coefficient is the change in the $\tau$-quantile of log stock associated with a one-unit change in the regressor, other terms held fixed, in this specification. Compare the four columns of a term. A coefficient that changes sign across $\tau$ is a different partial association in the lower and upper parts of the balance distribution. The standard errors are the model default, not HC3.
 
@@ -334,9 +335,9 @@ $$
 \mathrm{ICC} = \frac{\tau^2}{\tau^2 + \pi^2/3},
 $$
 
-as in Goldstein, Browne and Rasbash (2002). The screen is a method-of-moments $\tau^2$: the variance of group payment rates, minus the binomial sampling variance, divided by $[\pi(1-\pi)]^2$. The classical ICC of log stock and of recovery is the unbalanced one-way random-intercept ANOVA. A variational random-intercept logit is fit only when that latent ICC is at least 0.05. The share of groups outside the 99.8 percent funnel is printed beside the ICC and does not select the mixed logit. When the fit converges, the decision uses its ICC. The fit uses at most 30,000 certificates. A second fit adds the payment-equation controls when the null fitted ICC stays at or above 0.05.
+as in Goldstein, Browne and Rasbash (2002). The screen is a method-of-moments $\tau^2$: the variance of group payment rates, minus the binomial sampling variance, divided by $[\pi(1-\pi)]^2$. It is computed on the full estimation sample, separately for Declared and for Assessed, and it is the ICC that selects the mixed logit. The classical ICC of log stock and of recovery is the unbalanced one-way random-intercept ANOVA. A variational random-intercept logit is a supporting estimate. It is fit only when the moment ICC is at least 0.05, on a cluster sample: whole municipalities or divisions are drawn, with at most 30 certificates from each, until 8,000 certificates. A row-wise sample would leave a handful of certificates in each municipality and shrink $\tau^2$. The variational ICC can still be biased when groups are smaller than 30 or when a large group is capped at 30. It does not select the mixed logit. A second fit adds the payment-equation controls when the null variational ICC stays at or above 0.05.
 
-**How to read the funnel.** The horizontal axis is the number of certificates in the group. The vertical axis is the payment rate. Each point is one municipality or one CNAE division, not one certificate. The grey curves are the 99.8 percent limits around the pooled rate. A cloud inside the curves is the dispersion a common rate would produce. A cloud outside them is extra group heterogeneity. Groups under 10 certificates, under 5 firms, or with 1 to 4 payers are not drawn. The same cells are blank in the table. A count of 1 to 4 is not printed.
+**How to read the funnel and the table.** The horizontal axis is the number of certificates in the group. The vertical axis is the payment rate. Each point is one municipality or one CNAE division, not one certificate. The grey curves are the 99.8 percent limits around the pooled rate. The page draws and lists only groups outside those limits, and at most the 50 largest of them in each grouping and segment. The count printed above the table is the number of groups in total, and how many of the publishable ones fall outside. Groups under 10 certificates, under 5 firms, or with 1 to 4 payers are not drawn and are not listed. A count of 1 to 4 is not printed.
 
 ```{python}
 #| label: fig-funnel-municipality
@@ -358,7 +359,9 @@ display(HTML(diag.publish(result["icc"])))
 
 ```{python}
 #| label: tbl-groups
-#| tbl-cap: "Payment rate and log-odds by municipality and by CNAE division. Cells under 10 certificates, under 5 firms, or with 1 to 4 payers are blank."
+#| tbl-cap: "Groups outside the 99.8 percent funnel, at most the 50 largest in each grouping and segment. The count table is every group, not the list below."
+print("Groups in total, groups outside the 99.8 percent limits, and groups shown.")
+display(HTML(diag.publish(result["group_counts"])))
 display(HTML(diag.publish(result["groups"])))
 ```
 
@@ -367,8 +370,9 @@ display(HTML(diag.publish(result["groups"])))
 These cuts are working assumptions. They are not estimates from the papers cited below.
 
 - ΔAIC of 10. Inside a segment, a variable moves from the linear logit to the restricted cubic spline when its ΔAIC reaches 10, or when the spline log-odds on that variable are not monotone. Declared and Assessed are decided separately. A segment below the cut keeps the linear logit.
-- Latent ICC of 0.05. A mixed logit, with a random intercept for municipality or for CNAE division, is fit only when that grouping's ICC reaches 0.05. The variational fit uses at most 8,000 certificates, stratified by the grouping variable, so the 8 GB machine can finish the cell.
-- Funnel limits of 99.8 percent, and a 1 percent share of groups outside those limits. The share is a supporting diagnostic. It does not select the mixed logit.
+- Latent ICC of 0.05, from the method-of-moments screen on the full estimation sample, separately for Declared and for Assessed. That screen selects the mixed logit. It does not depend on the variational subsample.
+- The variational logit is a supporting estimate. It draws whole municipalities or whole CNAE divisions, takes at most 30 certificates from each drawn group, and stops at 8,000 certificates. A sample that spreads the cap across every municipality leaves about five certificates per group and shrinks $\tau^2$. The cluster sample avoids that thinning. Groups smaller than 30 certificates, and the cap of 30 inside a large group, can still bias the variational ICC. That ICC does not select the mixed logit.
+- Funnel limits of 99.8 percent, and a 1 percent share of groups outside those limits. The share is a supporting diagnostic. It does not select the mixed logit. The page lists at most the 50 largest groups outside those limits in each grouping and segment, and states how many groups exist in total.
 - The spline logit is fit on at most 40,000 certificates per segment. The log-odds bins use the full estimation sample. Quantile regression uses at most 20,000 certificates. A second render reads the spline and mixed-logit tables from the local cache when the sample is unchanged. That cache is not part of the page.
 - RESET partial $R^2$ of 0.01, or a rank correlation of 0.20 between the absolute residual and the fitted value. Either one sets the linear stock equation aside in favour of quantile regression.
 - A heatmap bin with fewer than 5 certificates is blank. A group cell with 1 to 4 payers, fewer than 10 certificates, or fewer than 5 firms is blank.
@@ -377,7 +381,7 @@ A $p$-value alone does not choose the specification.
 
 ## Decision
 
-The table applies the Premissas to this render. The payment row states Declared and Assessed separately, and each clause uses that segment's own ΔAIC and curved flag. The package row is the combination those rows support for the paper.
+The table applies the Premissas to this render. The payment row and the heterogeneity row each state Declared and Assessed separately. The payment clause uses that segment's own ΔAIC and curved flag. The heterogeneity clause uses that segment's moment ICC on the full estimation sample. The package row is the combination those rows support for the paper.
 
 ```{python}
 #| label: tbl-decision

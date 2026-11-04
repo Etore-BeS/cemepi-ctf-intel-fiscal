@@ -63,6 +63,7 @@ TABLES = (
     "categories",
     "porte_shape",
     "groups",
+    "group_counts",
     "icc",
     "quantiles",
     "decision",

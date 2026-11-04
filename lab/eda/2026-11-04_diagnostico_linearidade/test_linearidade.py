@@ -226,6 +226,55 @@ def _spline_rows(specs):
     ]
 
 
+def _icc_rows(specs):
+    return [
+        {"segment": segment, "grouping": grouping, "icc": icc}
+        for segment, grouping, icc in specs
+    ]
+
+
+def test_cluster_sample_keeps_groups_together():
+    n_groups, size = 100, 50
+    frame = pd.DataFrame(
+        {
+            "municipality": np.repeat([f"M{i:03d}" for i in range(n_groups)], size),
+            "x": np.arange(n_groups * size),
+        }
+    )
+    out = diag.cluster_sample(frame, "municipality", cap=900, per_group=30, seed=1)
+    counts = out.groupby("municipality").size()
+    assert len(out) <= 900
+    assert counts.max() <= 30
+    assert counts.min() >= 30 or counts.size == 1
+    assert counts.size == 30
+    assert counts.size < n_groups
+
+
+def test_page_lists_only_groups_outside_the_funnel():
+    rows = []
+    for i in range(80):
+        rows.append(
+            {
+                "grouping": "municipality+uf",
+                "segment": "declared",
+                "municipality": f"M{i:03d}",
+                "uf": "SP",
+                "n_cda": 100 + i,
+                "n_firms": 20,
+                "n_paid": 10,
+                "rate": 0.5 if i < 60 else 0.1,
+                "outside_998": i < 60,
+            }
+        )
+    published = pd.DataFrame(rows)
+    shown, counts = diag.groups_for_page(published, published)
+    assert len(shown) == 50
+    assert bool(shown["outside_998"].all())
+    assert counts.loc[counts.segment == "declared", "n_groups"].iloc[0] == 80
+    assert counts.loc[counts.segment == "declared", "n_outside"].iloc[0] == 60
+    assert shown["n_cda"].min() >= shown["n_cda"].max() - 49
+
+
 def test_decision_table_follows_the_working_rules():
     both_linear = _spline_rows(
         [
@@ -244,8 +293,15 @@ def test_decision_table_follows_the_working_rules():
             "fan_stock_trim": 0.04,
             "delta_r2_recovery": 0.002,
             "fan_recovery": 0.03,
-            "icc_municipality": 0.01,
-            "icc_division": 0.02,
+            "icc_by_segment": _icc_rows(
+                [
+                    ("declared", "municipality", 0.01),
+                    ("assessed", "municipality", 0.01),
+                    ("declared", "CNAE division", 0.02),
+                    ("assessed", "CNAE division", 0.02),
+                ]
+            ),
+            "variational_note": "",
             "funnel_municipality": 0.0,
             "funnel_division": 0.0,
             "n_estimation": 1000,
@@ -272,8 +328,15 @@ def test_decision_table_follows_the_working_rules():
             "fan_stock_trim": 0.01,
             "delta_r2_recovery": 0.05,
             "fan_recovery": 0.3,
-            "icc_municipality": 0.12,
-            "icc_division": 0.01,
+            "icc_by_segment": _icc_rows(
+                [
+                    ("declared", "municipality", 0.146),
+                    ("assessed", "municipality", 0.02),
+                    ("declared", "CNAE division", 0.01),
+                    ("assessed", "CNAE division", 0.01),
+                ]
+            ),
+            "variational_note": "municipality variational ICC = 0.046 on n = 8000",
             "funnel_municipality": 0.0,
             "funnel_division": 0.0,
             "n_estimation": 1000,
@@ -308,8 +371,15 @@ def test_decision_table_follows_the_working_rules():
             "fan_stock_trim": 0.01,
             "delta_r2_recovery": 0.001,
             "fan_recovery": 0.01,
-            "icc_municipality": 0.01,
-            "icc_division": 0.014,
+            "icc_by_segment": _icc_rows(
+                [
+                    ("declared", "municipality", 0.01),
+                    ("assessed", "municipality", 0.01),
+                    ("declared", "CNAE division", 0.014),
+                    ("assessed", "CNAE division", 0.014),
+                ]
+            ),
+            "variational_note": "",
             "funnel_municipality": 0.0,
             "funnel_division": 0.20,
             "n_estimation": 1000,

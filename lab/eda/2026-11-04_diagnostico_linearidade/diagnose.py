@@ -46,8 +46,10 @@ QUANTILES = (0.25, 0.5, 0.75, 0.9)
 SAMPLE_CAP = 200_000
 QUANTILE_CAP = 20_000
 MIXED_CAP = 8_000
+CLUSTER_PER_GROUP = 30
+PAGE_GROUP_CAP = 50
 SPLINE_CAP = 40_000
-CACHE_VERSION = "lin45-v3"
+CACHE_VERSION = "lin45-v4"
 MIN_CDA = 10
 MIN_FIRMS = 5
 # Section 5.9: a cell with 1 to 4 payers is not printed.
@@ -190,6 +192,46 @@ def stratified_sample(
         block = grouped.get_group(key if isinstance(key, tuple) else (key,))
         choice = rng.choice(len(block), size=min(k, len(block)), replace=False)
         parts.append(block.iloc[np.sort(choice)])
+    if not parts:
+        return frame.iloc[:0].copy()
+    return pd.concat(parts, axis=0)
+
+
+def cluster_sample(
+    frame: pd.DataFrame,
+    group_col: str,
+    cap: int = MIXED_CAP,
+    per_group: int = CLUSTER_PER_GROUP,
+    seed: int = 20261104,
+) -> pd.DataFrame:
+    """Draw whole groups, at most `per_group` certificates each, until `cap` rows.
+
+    A row-wise sample of every municipality leaves about five certificates in each
+    group and shrinks the random-intercept variance. Keeping the cluster together
+    avoids that thinning. The last cluster may be shortened so the total stays
+    within the cap.
+    """
+    if frame.empty:
+        return frame.copy()
+    rng = np.random.default_rng(seed)
+    names = frame[group_col].drop_duplicates().to_numpy()
+    rng.shuffle(names)
+    grouped = frame.groupby(group_col, dropna=False)
+    parts = []
+    n_rows = 0
+    for name in names:
+        if n_rows >= cap:
+            break
+        block = grouped.get_group(name)
+        if len(block) > per_group:
+            choice = rng.choice(len(block), size=per_group, replace=False)
+            block = block.iloc[np.sort(choice)]
+        room = cap - n_rows
+        if len(block) > room:
+            choice = rng.choice(len(block), size=room, replace=False)
+            block = block.iloc[np.sort(choice)]
+        parts.append(block)
+        n_rows += len(block)
     if not parts:
         return frame.iloc[:0].copy()
     return pd.concat(parts, axis=0)
@@ -687,6 +729,44 @@ def _publishable_groups(table: pd.DataFrame) -> pd.DataFrame:
     return table.loc[~_small_cell_mask(table)].copy()
 
 
+def groups_for_page(
+    published: pd.DataFrame,
+    plot_rows: pd.DataFrame,
+    cap: int = PAGE_GROUP_CAP,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Groups outside the 99.8 percent funnel, at most `cap` largest per grouping and segment.
+
+    The counts cover every group. The returned table is the page list, not the full list.
+    """
+    count_rows = []
+    shown = []
+    if published.empty and plot_rows.empty:
+        empty = published.copy()
+        counts = pd.DataFrame(
+            columns=["grouping", "segment", "n_groups", "n_outside", "n_shown"]
+        )
+        return empty, counts
+    keys = published.groupby(["grouping", "segment"], dropna=False).size()
+    for (grouping, segment), n_groups in keys.items():
+        part = plot_rows.loc[
+            (plot_rows["grouping"] == grouping) & (plot_rows["segment"] == segment)
+        ]
+        outside = part.loc[part["outside_998"].fillna(False).astype(bool)]
+        take = outside.sort_values("n_cda", ascending=False).head(cap)
+        shown.append(take)
+        count_rows.append(
+            {
+                "grouping": grouping,
+                "segment": segment,
+                "n_groups": int(n_groups),
+                "n_outside": len(outside),
+                "n_shown": len(take),
+            }
+        )
+    listed = pd.concat(shown, ignore_index=True) if shown else published.iloc[:0]
+    return listed, pd.DataFrame(count_rows)
+
+
 def funnel_outside_share(frame: pd.DataFrame, keys: list[str]) -> float:
     table = _publishable_groups(_group_raw(frame, keys, "pooled"))
     if table.empty:
@@ -1015,6 +1095,56 @@ def _payment_lines(rows: list[dict]) -> tuple[str, str]:
     return ". ".join(choice_parts) + ".", "; ".join(evidence_parts) + "."
 
 
+def _group_lines(
+    rows: list[dict],
+    funnel_municipality: float,
+    funnel_division: float,
+    variational_note: str,
+) -> tuple[str, str]:
+    """One clause per segment from that segment's full-sample moment ICC."""
+    by_segment: dict[str, list[dict]] = {}
+    for row in rows:
+        by_segment.setdefault(str(row["segment"]), []).append(row)
+    choice_parts = []
+    evidence_parts = []
+    for segment in sorted(by_segment):
+        needed = []
+        for row in by_segment[segment]:
+            icc = float(row["icc"])
+            grouping = str(row["grouping"])
+            evidence_parts.append(f"{segment} {grouping}: moment ICC = {_fmt(icc, 3)}")
+            if np.isfinite(icc) and icc >= ICC_CUT:
+                needed.append(grouping)
+        if needed:
+            choice_parts.append(
+                f"{segment}: Mixed logit with a random intercept for {' and '.join(needed)}"
+            )
+        else:
+            choice_parts.append(f"{segment}: No mixed effects")
+    if not choice_parts:
+        choice = (
+            "No mixed effects. Keep CNAE section fixed effects and cluster "
+            "standard errors by the CNPJ root."
+        )
+    else:
+        choice = (
+            ". ".join(choice_parts)
+            + ". UF is not a grouping factor: the debtors are in São Paulo."
+        )
+    evidence = (
+        "; ".join(evidence_parts)
+        + ". Funnel share outside the 99.8% limits (diagnostic only) = "
+        + f"{_fmt(funnel_municipality, 3)} and {_fmt(funnel_division, 3)}."
+    )
+    if variational_note:
+        evidence += (
+            " Supporting cluster-sample fit, not used for the decision: "
+            + variational_note
+            + ". Groups smaller than about 30 certificates, and the cap of 30 inside a drawn group, can bias this fit."
+        )
+    return choice, evidence
+
+
 def inference_decision(evidence: dict) -> pd.DataFrame:
     """Short decision table. Large-sample p-values are not the rule."""
     payment, payment_evidence = _payment_lines(list(evidence["spline_by_segment"]))
@@ -1055,22 +1185,12 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
             "The payment model remains the logit."
         )
 
-    groups = []
-    if evidence["icc_municipality"] >= ICC_CUT:
-        groups.append("municipality")
-    if evidence["icc_division"] >= ICC_CUT:
-        groups.append("CNAE division")
-    if groups:
-        group_choice = (
-            "Mixed logit with a random intercept for "
-            + " and ".join(groups)
-            + ". UF is not a grouping factor: the debtors are in São Paulo."
-        )
-    else:
-        group_choice = (
-            "No mixed effects. Keep CNAE section fixed effects and cluster "
-            "standard errors by the CNPJ root."
-        )
+    group_choice, group_evidence = _group_lines(
+        list(evidence["icc_by_segment"]),
+        float(evidence["funnel_municipality"]),
+        float(evidence["funnel_division"]),
+        str(evidence.get("variational_note", "")),
+    )
     package = f"For the EAA text: {payment} {balance} {group_choice}"
     rows = [
         (
@@ -1100,13 +1220,7 @@ def inference_decision(evidence: dict) -> pd.DataFrame:
         (
             "Group heterogeneity",
             group_choice,
-            (
-                "Latent ICC municipality = "
-                f"{_fmt(evidence['icc_municipality'], 3)}; CNAE division = "
-                f"{_fmt(evidence['icc_division'], 3)}. "
-                "Funnel share outside the 99.8% limits (diagnostic only) = "
-                f"{_fmt(evidence['funnel_municipality'], 3)} and {_fmt(evidence['funnel_division'], 3)}."
-            ),
+            group_evidence,
         ),
         (
             "Package for the paper",
@@ -1425,11 +1539,12 @@ def block_groups(frame: pd.DataFrame, seed: int = 20261104) -> dict:
     started = time.perf_counter()
     muni_table, muni_plot = group_tables(frame, ["municipality", "uf"])
     div_table, div_plot = group_tables(frame, ["division"])
-    groups = pd.concat([muni_table, div_table], ignore_index=True)
+    published = pd.concat([muni_table, div_table], ignore_index=True)
     plot_groups = pd.concat([muni_plot, div_plot], ignore_index=True)
+    groups, group_counts = groups_for_page(published, plot_groups)
     figures = {
-        "funnel_municipality": funnel_figure(plot_groups, "municipality+uf"),
-        "funnel_division": funnel_figure(plot_groups, "division"),
+        "funnel_municipality": funnel_figure(groups, "municipality+uf"),
+        "funnel_division": funnel_figure(groups, "division"),
     }
     icc_rows: list[dict] = []
     cache_flags = []
@@ -1479,7 +1594,7 @@ def block_groups(frame: pd.DataFrame, seed: int = 20261104) -> dict:
             and row["outcome"] == "paid_flag"
             and row["estimator"] == "moments"
         )
-        capped = stratified_sample(frame, MIXED_CAP, [column], seed)
+        capped = cluster_sample(frame, column, cap=MIXED_CAP, seed=seed)
         sig_cols = [
             "paid_flag",
             column,
@@ -1549,6 +1664,7 @@ def block_groups(frame: pd.DataFrame, seed: int = 20261104) -> dict:
         figure_html(fig)
     return {
         "groups": groups,
+        "group_counts": group_counts,
         "icc": pd.DataFrame(icc_rows),
         "figures": figures,
         "cache": "hit"
@@ -1573,23 +1689,31 @@ def assemble_decision(
             return float("nan")
         return float(found[field])
 
-    def _decision_icc(grouping: str) -> float:
-        fitted_rows = icc.loc[
-            (icc["grouping"] == grouping)
-            & (icc["segment"] == "pooled")
-            & (icc["estimator"] == "variational")
-            & (icc["controls"] == "none")
-            & icc["converged"].eq(True)
-        ]
-        if not fitted_rows.empty and np.isfinite(fitted_rows["icc"].iloc[0]):
-            return float(fitted_rows["icc"].iloc[0])
-        moment_rows = icc.loc[
-            (icc["grouping"] == grouping)
-            & (icc["segment"] == "pooled")
-            & (icc["outcome"] == "paid_flag")
-            & (icc["estimator"] == "moments")
-        ]
-        return float(moment_rows["icc"].iloc[0])
+    moment = icc.loc[
+        (icc["outcome"] == "paid_flag")
+        & (icc["estimator"] == "moments")
+        & icc["segment"].isin(["declared", "assessed"])
+    ]
+    icc_by_segment = [
+        {
+            "segment": str(row.segment),
+            "grouping": "municipality"
+            if row.grouping == "municipality"
+            else "CNAE division",
+            "icc": float(row.icc),
+        }
+        for row in moment.itertuples(index=False)
+    ]
+    support = icc.loc[
+        (icc["estimator"] == "variational")
+        & (icc["controls"] == "none")
+        & (icc["segment"] == "pooled")
+        & icc["converged"].eq(True)
+    ]
+    variational_note = "; ".join(
+        f"{row.grouping} variational ICC = {_fmt(row.icc, 3)} on n = {int(row.n)}"
+        for row in support.itertuples(index=False)
+    )
 
     spline_rows = []
     if spline is not None and not spline.empty:
@@ -1612,8 +1736,8 @@ def assemble_decision(
         "fan_stock_trim": _pull("log_stock", "trim", "fan"),
         "delta_r2_recovery": _pull("recovery", "full", "delta_r2"),
         "fan_recovery": _pull("recovery", "full", "fan"),
-        "icc_municipality": _decision_icc("municipality"),
-        "icc_division": _decision_icc("division"),
+        "icc_by_segment": icc_by_segment,
+        "variational_note": variational_note,
         "funnel_municipality": funnel_muni,
         "funnel_division": funnel_div,
         "n_estimation": n_estimation,
@@ -1666,6 +1790,7 @@ def run_diagnostics(
         "categories": splines["categories"],
         "porte_shape": splines["porte_shape"],
         "groups": groups["groups"],
+        "group_counts": groups["group_counts"],
         "icc": groups["icc"],
         "quantiles": ols["quantiles"],
         "decision": decision,
