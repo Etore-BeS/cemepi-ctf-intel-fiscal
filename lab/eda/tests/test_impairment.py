@@ -372,7 +372,8 @@ def test_logit_is_nested_on_the_payment_outcome_and_hides_identifiers():
     assert "instalment_requested_before" in formulas["M6"]
     assert "protest_before" not in formulas["M6"]
     assert "protest_before" in formulas["M7"]
-    coef, fit = I.fit_nested(frame, PARAMS)
+    coef, fit, solver = I.fit_nested(frame, PARAMS)
+    assert solver in {"lbfgs", "bfgs", "newton"}
     I.assert_public(coef)
     I.assert_public(fit)
     assert set(fit["model"]) == {f"M{i}" for i in range(1, 8)}
@@ -382,6 +383,48 @@ def test_logit_is_nested_on_the_payment_outcome_and_hides_identifiers():
     assert "se_cluster" in coef.columns
     assert "stars" in coef.columns
     assert coef["term"].str.startswith("C(year)").sum() == 0
+
+
+def test_stratified_sample_respects_the_cap():
+    bundle = I.synthetic_bundle()
+    params = I.PgeParams(sample_n=40)
+    _frame, notes = I.estimation_frame(
+        bundle["panel"],
+        bundle["firms"],
+        bundle["instalments"],
+        bundle["protests"],
+        params,
+    )
+    assert notes["n_sampled"] <= notes["n_before_sample"]
+    if notes["n_before_sample"] > 40:
+        assert notes["stratified"] is True
+        assert notes["n_sampled"] <= 40
+        assert notes["strata"] == "year, origin, paid_flag"
+
+
+def test_fit_cache_hits_on_the_second_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("CEMEPI_CACHE", str(tmp_path))
+    bundle = I.synthetic_bundle()
+    coef, fit, notes = I.fit_payment_models(
+        bundle["panel"],
+        bundle["firms"],
+        bundle["instalments"],
+        bundle["protests"],
+        PARAMS,
+    )
+    assert notes["fit_cache"] == "miss"
+    assert notes["solver"] in {"lbfgs", "bfgs", "newton"}
+    assert set(fit["model"]) == {f"M{i}" for i in range(1, 8)}
+    I.assert_public(coef)
+    _, _, again = I.fit_payment_models(
+        bundle["panel"],
+        bundle["firms"],
+        bundle["instalments"],
+        bundle["protests"],
+        PARAMS,
+    )
+    assert again["fit_cache"] == "hit"
+    assert again["n_sampled"] == notes["n_sampled"]
 
 
 def test_synthetic_mode_does_not_open_the_extract(monkeypatch):
@@ -413,6 +456,34 @@ def test_backtest_covers_the_reference_years_and_stops_at_the_window():
     I.assert_public(classes)
     I.assert_public(recovered)
     assert classes.filter(pl.col("class_label") == "guaranteed")["n_cda"].sum() == 0
+    coverage = meta["coverage"]
+    assert set(coverage["ref_year"].to_list()) == set(PARAMS.ref_years)
+    assert coverage.filter(~pl.col("included")).height == 0
+    bases = I.stock_bases(bundle["panel"])
+    assert set(bases["year"].to_list()) <= set(range(I.FIRST_YEAR, I.LAST_YEAR + 1))
+    assert (bases["n_not_in_december"] >= 0).all()
+    assert (bases["stock_not_in_december"] >= -1e-6).all()
+
+
+def test_a_missing_december_snapshot_is_reported_and_left_out():
+    bundle = I.synthetic_bundle()
+    panel = bundle["panel"].with_columns(
+        pl.when(pl.col("year") == 2020)
+        .then(pl.lit(False))
+        .otherwise(pl.col("present_in_december"))
+        .alias("present_in_december")
+    )
+    classes, _, meta = I.backtest_rule(
+        panel, bundle["firms"], bundle["instalments"], PARAMS
+    )
+    assert 2020 not in classes["ref_year"].to_list()
+    row = meta["coverage"].filter(pl.col("ref_year") == 2020).row(0, named=True)
+    assert row["included"] is False
+    assert row["n_cda"] == 0
+    assert "present_in_december" in row["reason"]
+    note = meta["coverage"].filter(pl.col("ref_year") == 2024).row(0, named=True)
+    assert note["included"] is True
+    assert "EQ-05" in note["reason"]
 
 
 def test_lazy_reference_facts_match_the_in_memory_facts():
@@ -841,3 +912,24 @@ def test_real_volume_steps_stay_within_two_gigabytes():
     assert after["age"] > before["age"]
     assert after["backtest"] > before["backtest"]
     assert after["logit"] > before["logit"]
+    import time
+
+    started = time.perf_counter()
+    _coef, _fit, fit_notes = I.fit_payment_models(
+        panel, firms, instalments, protests, PARAMS
+    )
+    elapsed = time.perf_counter() - started
+    print(
+        f"5.9 fit runtime: {elapsed:.1f} s; "
+        f"N {fit_notes['n_sampled']} of {fit_notes['n_before_sample']}; "
+        f"solver {fit_notes['solver']}; cache {fit_notes['fit_cache']}"
+    )
+    assert elapsed < 600
+    assert fit_notes["n_sampled"] <= PARAMS.sample_n
+    assert fit_notes["stratified"] is True
+    again = time.perf_counter()
+    _, _, cached_notes = I.fit_payment_models(
+        panel, firms, instalments, protests, PARAMS
+    )
+    print(f"5.9 cached fit runtime: {time.perf_counter() - again:.1f} s")
+    assert cached_notes["fit_cache"] == "hit"

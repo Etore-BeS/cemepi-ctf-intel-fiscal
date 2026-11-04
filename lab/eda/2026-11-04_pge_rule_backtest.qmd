@@ -40,7 +40,7 @@ When the current collectable, uncollectable and recoverable rule is applied to V
 
 ## Data
 
-The setup cell prints the reference dates, the windows and the definitions of active, inactive and payment history. The population at a reference date is the certificates with positive stock in that December. Payments are GARE amounts. The registry used for active and inactive is the later register printed above. Natural-person branches of the rule are out of scope.
+The setup cell prints the reference dates, the windows and the definitions of active, inactive and payment history. The population at a reference date is the certificates with positive stock in that December. A requested year with no December snapshot is printed with the class table and left out of it. December 2024 is a partial snapshot: the shortfall is a known gap in the DEBITO extract (EQ-05), so its level is not a complete December. Payments are GARE amounts. The registry used for active and inactive is the later register printed above. Natural-person branches of the rule are out of scope.
 
 ## Method
 
@@ -59,11 +59,27 @@ In the recovery chart, the horizontal axis is the reference year and the vertica
 ```{python}
 #| label: tbl-classes
 #| tbl-cap: "Certificates, stock and stock share by class and origin, at each reference date. The guaranteed row is empty."
+import polars as pl
 classes, recovered, meta = I.backtest_rule(panel, firms, instalments, params)
 print(f"Cells pooled by the suppression rule: {meta['n_cells_suppressed']}")
+coverage = meta["coverage"]
+included = coverage.filter(pl.col("included"))["ref_year"].to_list()
+excluded = coverage.filter(~pl.col("included"))["ref_year"].to_list()
+print("Years in the class table: " + ", ".join(str(year) for year in included) + ".")
+if excluded:
+    print("Years requested and left out: " + ", ".join(str(year) for year in excluded) + ".")
+else:
+    print("Every requested reference year has a December snapshot.")
+for row in coverage.iter_rows(named=True):
+    print(
+        f"{row['ref_year']}: {row['reason']} "
+        f"Certificates: {int(row['n_cda']):,}. Stock: {row['stock'] / 1e9:.3f} billion."
+    )
 notes = sorted({n for n in classes["note"].to_list() if n})
 for note in notes:
     print(note)
+from IPython.display import display
+display(I.publish(coverage))
 I.publish(classes)
 ```
 

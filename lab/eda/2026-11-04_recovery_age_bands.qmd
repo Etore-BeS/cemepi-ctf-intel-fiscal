@@ -39,7 +39,7 @@ How does the recovery of VAT (ICMS) certificates vary across the age bands in th
 
 ## Data
 
-The setup cell prints the window, the band edges and the source. The annual rate uses every certificate with positive stock in a year inside the window, including certificates enrolled before the window. Those older certificates are what makes the oldest band observable. The cumulative reading uses only cohorts enrolled inside the window.
+The setup cell prints the window, the band edges and the source. The annual rate uses every certificate with positive stock in a year inside the window, including certificates enrolled before the window. Those older certificates are what makes the oldest band observable. That base is wider than the December snapshot used by the collectable rule and by the December sections: a certificate that had stock during the year and is absent in December stays in the annual rate and out of the December base. The cell under the annual table prints both counts and the difference. The cumulative reading uses only cohorts enrolled inside the window.
 
 Registration status and the division of economic activity come from the same RFB join as the firm section: the manifest hash is checked, and a missing firm or a root-only match keeps its own category.
 
@@ -70,6 +70,26 @@ annual, n_sup = I.annual_recovery(panel, firms)
 print(f"Cells pooled by the suppression rule: {n_sup}")
 print(f"Years in the table run from {int(annual['year'].drop_nulls().min())} to {int(annual['year'].drop_nulls().max())}.")
 I.publish(annual)
+
+```
+
+```{python}
+#| label: tbl-base-gap
+#| tbl-cap: "Positive stock in the year, the December snapshot, and the certificates that are in the year and not in December."
+bases = I.stock_bases(panel)
+print("The annual rate uses every certificate with positive stock in the year.")
+print("The December base keeps certificates present in December with positive stock.")
+print("The difference is not an error in either table.")
+for row in bases.iter_rows(named=True):
+    print(
+        f"{int(row['year'])}: positive stock {int(row['n_positive']):,} certificates, "
+        f"R$ {row['stock_positive'] / 1e9:.3f} billion. "
+        f"December {int(row['n_december']):,} certificates, "
+        f"R$ {row['stock_december'] / 1e9:.3f} billion. "
+        f"In the year and not in December: {int(row['n_not_in_december']):,} certificates, "
+        f"R$ {row['stock_not_in_december'] / 1e9:.3f} billion."
+    )
+I.publish(bases)
 ```
 
 ```{python}

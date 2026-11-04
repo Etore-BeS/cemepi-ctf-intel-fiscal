@@ -40,7 +40,7 @@ Holding the payment-section logit fixed, how do the associations change when ori
 
 ## Data
 
-The sample is the one printed below: certificate-years with positive stock and an observed lag, inside the window, drawn with the lab seed when the frame is larger than the cap. The outcome is any payment in the year. The instalment flags use a request, or a valid break, dated before the year. The protest flag uses a protest date before the year, or records that the protest row has no date. The protest status itself is not a regressor.
+The sample is the one printed below: certificate-years with positive stock and an observed lag, inside the window. When that frame is larger than the cap printed by the setup cell, the fit draws a stratified sample of that size. The strata are the year, the origin and the payment outcome. The seed is the lab seed. The outcome is any payment in the year. The instalment flags use a request, or a valid break, dated before the year. The protest flag uses a protest date before the year, or records that the protest row has no date. The protest status itself is not a regressor.
 
 CNAE enters as the division. A division, a status or a size with fewer firms than the suppression floor is pooled. A pool that stays under the floor is dropped from every model, so the nested models share one sample.
 
@@ -50,7 +50,7 @@ Model 1 is the payment-section logit
 
 $$\Pr(\mathrm{paid\_flag}_{it}=1)=\Lambda(\beta_0+\beta_1\log\mathrm{stock}_{it}+\beta_2\mathrm{age}_{it}+\beta_3\mathrm{rate}_{i,t-1}+\gamma_{t})$$
 
-$\Lambda$ is the logistic function. $\gamma_t$ is a year fixed effect. The odds ratio of a coefficient is $\exp(\hat\beta)$. The nested models add, in order, origin, registration status, CNAE division, size, the two instalment flags, and the dated protest flag. Standard errors are HC1. The column beside them clusters the same coefficient by the firm root. Stars follow the lab rule printed below. McFadden's pseudo-R² is the value statsmodels reports as `prsquared`. AIC and BIC are the values on the fitted object.
+$\Lambda$ is the logistic function. $\gamma_t$ is a year fixed effect. The odds ratio of a coefficient is $\exp(\hat\beta)$. The nested models add, in order, origin, registration status, CNAE division, size, the two instalment flags, and the dated protest flag. The likelihood is maximised with L-BFGS, and with Newton if that fails. Standard errors are HC1. The column beside them is the cluster-robust standard error by the firm root, computed from the same fit. Stars follow the lab rule printed below. McFadden's pseudo-R² is the value statsmodels reports as `prsquared`. AIC and BIC are the values on the fitted object. A second render reads the coefficient tables from the on-disk cache when the sample and the inputs are unchanged.
 
 The probability of non-recovery in the proposal equals one minus this fitted probability only when recovery means any payment in the year. That equivalence is not used as a rating here.
 
@@ -67,7 +67,9 @@ In the figure, the horizontal axis is the term of model 1 and the vertical axis 
 #| tbl-cap: "Nested logits. Pseudo-R², AIC, BIC and the number of certificate-years. Year fixed effects are in the model and out of the coefficient table."
 coef, fit, notes = I.fit_payment_models(panel, firms, instalments, protests, params)
 print(f"Base formula: {notes['formula_m1']}")
-print(f"Rows before the sample cap: {notes['n_before_sample']}. Rows after the cap: {notes['n_sampled']}.")
+print(f"Stratified sample target N: {notes['sample_n']}. Strata: {notes['strata']}. Seed: {notes['seed']}.")
+print(f"Rows before the sample: {notes['n_before_sample']}. Rows in the sample: {notes['n_sampled']}.")
+print(f"Solver: {notes['solver']}. Fit cache: {notes['fit_cache']}. Elapsed seconds: {notes['fit_seconds']}.")
 print(f"Rows dropped because a pooled category stayed under the floor: {notes['n_dropped_blank']}.")
 print(f"Rows in every nested model: {notes['n_estimated']}.")
 print(f"CNAE values longer than the division, truncated: {notes['n_cnae_truncated']}.")
@@ -95,4 +97,4 @@ fig
 
 ## What not to conclude
 
-A coefficient is not a forecast of recovery and not a rating. The outcome is a payment in the year. It is not the event "the credit was not recovered". Registry fields are later than the outcome, so they cannot be used as if they were known at the start of the year. The instalment and protest flags are dated before the year, and they are still choices of the debtor and of the administration. The cluster column does not make the estimates causal. The sample is a draw when the frame exceeds the cap printed above; it is not the population.
+A coefficient is not a forecast of recovery and not a rating. The outcome is a payment in the year. It is not the event "the credit was not recovered". Registry fields are later than the outcome, so they cannot be used as if they were known at the start of the year. The instalment and protest flags are dated before the year, and they are still choices of the debtor and of the administration. The cluster column does not make the estimates causal. The sample is a stratified draw when the frame exceeds the cap printed above; it is not the population.

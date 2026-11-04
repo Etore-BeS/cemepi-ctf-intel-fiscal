@@ -16,6 +16,7 @@ import os
 import warnings
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -136,7 +137,7 @@ class PgeParams:
         "active_old",
     )
     suspended_token: str = "suspens"
-    sample_n: int = 1_000_000
+    sample_n: int = 100_000
     seed: int = SEED
     cluster: bool = True
     outcome: str = "paid_flag"
@@ -177,9 +178,12 @@ def assumptions_text(params: PgeParams, *, synthetic: bool) -> str:
             "enter the sum. The history is VAT (ICMS) only."
         ),
         (
-            f"Q3. Reference dates: 31 December of {refs}. Later recovery is the next "
-            f"calendar year, and the sum from the next year through {params.recovery_through}, "
-            "each divided by the December stock."
+            f"Q3. Reference dates requested: 31 December of {refs}. A year with no "
+            "December snapshot is printed and left out of the tables. December 2024 "
+            "is a partial snapshot because of a known gap in the DEBITO extract "
+            "(EQ-05). Later recovery is the next calendar year, and the sum from "
+            f"the next year through {params.recovery_through}, each divided by the "
+            "December stock."
         ),
         (
             "Q4. Precedence: "
@@ -196,7 +200,10 @@ def assumptions_text(params: PgeParams, *, synthetic: bool) -> str:
         ),
         (
             "Q6. The outcome is any payment in the year, the same outcome as model 1 "
-            "of the payment section. Standard errors are HC1. "
+            "of the payment section. When the eligible frame is larger than "
+            f"{params.sample_n:,} certificate-years, the fit uses a stratified "
+            f"sample of that size (year, origin, and the payment outcome), seed "
+            f"{params.seed}. Standard errors are HC1. "
             + (
                 "Clustered standard errors by CNPJ root are the column beside them."
                 if params.cluster
@@ -483,12 +490,54 @@ def assert_public(df: pl.DataFrame | pd.DataFrame) -> pl.DataFrame | pd.DataFram
     return df
 
 
-def publish(df: pl.DataFrame | pd.DataFrame) -> pd.DataFrame:
-    """Return a public table for the page. Identifiers raise."""
+class PublicTable:
+    """Every row and the full labels. A long table scrolls. Identifiers never arrive here."""
+
+    def __init__(self, frame: pd.DataFrame):
+        self.frame = frame
+
+    def _repr_html_(self) -> str:
+        html = self.frame.to_html(
+            index=False,
+            border=0,
+            escape=True,
+            classes="dataframe",
+        )
+        n = len(self.frame)
+        if n <= 25:
+            return html
+        css = (
+            "<style>.lab-tabela-rolavel{max-height:34em;overflow:auto;"
+            "border:1px solid #d9d9d9;margin-bottom:.25rem}"
+            ".lab-tabela-rolavel thead th{position:sticky;top:0;background:#fff;"
+            "z-index:1}</style>"
+        )
+        return (
+            css
+            + f"<div class='lab-tabela-rolavel'>{html}</div>"
+            + "<p class='lab-sig-legenda' style='font-size:0.8em'>"
+            + f"Full table: {n} rows. Scroll inside the box.</p>"
+        )
+
+    def __repr__(self) -> str:
+        with pd.option_context(
+            "display.max_rows",
+            None,
+            "display.max_columns",
+            None,
+            "display.max_colwidth",
+            None,
+            "display.width",
+            None,
+        ):
+            return repr(self.frame)
+
+
+def publish(df: pl.DataFrame | pd.DataFrame) -> PublicTable:
+    """Return a public table for the page. Identifiers raise. Every row is shown."""
     assert_public(df)
-    if isinstance(df, pl.DataFrame):
-        return df.to_pandas()
-    return df
+    frame = df.to_pandas() if isinstance(df, pl.DataFrame) else df
+    return PublicTable(frame.reset_index(drop=True))
 
 
 def _lazy(df: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
@@ -1738,8 +1787,17 @@ def _backtest_sql(
         # buffer is released first.
         n_parts = 8
         year_paths: list[tuple[int, str]] = []
+        coverage: list[dict[str, Any]] = []
         for year in years:
             _store_year_snap(con, relation, year, params)
+            counted = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(stock), 0) FROM year_snap"
+            ).fetchone()
+            n_cda, stock = int(counted[0]), float(counted[1])
+            coverage.append(_coverage_row(year, n_cda, stock))
+            if n_cda == 0:
+                con.execute("DROP TABLE IF EXISTS year_snap")
+                continue
             year_paths.append((year, _spill_year(con, year, n_parts)))
             con.execute("DROP TABLE IF EXISTS year_snap")
     finally:
@@ -1790,8 +1848,35 @@ def _backtest_sql(
     return (
         pl.concat(classes, how="diagonal_relaxed") if classes else empty_c,
         pl.concat(recovered, how="diagonal_relaxed") if recovered else empty_r,
-        {"n_cells_suppressed": n_sup},
+        {
+            "n_cells_suppressed": n_sup,
+            "coverage": pl.DataFrame(coverage),
+        },
     )
+
+
+def _coverage_row(year: int, n_cda: int, stock: float) -> dict[str, Any]:
+    """One requested reference year. An empty December snapshot is excluded, not hidden."""
+    included = n_cda > 0
+    if not included:
+        reason = (
+            "Excluded. No December snapshot: 0 certificates with "
+            "present_in_december and positive stock."
+        )
+    elif year == 2024:
+        reason = (
+            "Included. December 2024 is partial: a known gap in the DEBITO "
+            "extract (EQ-05). Its level is not a complete December."
+        )
+    else:
+        reason = "Included. December snapshot with positive stock."
+    return {
+        "ref_year": year,
+        "included": included,
+        "n_cda": int(n_cda),
+        "stock": float(stock),
+        "reason": reason,
+    }
 
 
 def backtest_rule(
@@ -1814,6 +1899,7 @@ def backtest_rule(
     )
     classes: list[pl.DataFrame] = []
     recovered: list[pl.DataFrame] = []
+    coverage: list[dict[str, Any]] = []
     n_sup = 0
     for year in years:
         snap = facts.filter(pl.col(f"n_snap_{year}") > 0).select(
@@ -1832,6 +1918,11 @@ def backtest_rule(
             pl.lit(True).alias("in_stock"),
             pl.lit(False).alias("guaranteed"),
         )
+        n_cda = snap.height
+        stock = float(snap["stock"].sum()) if n_cda else 0.0
+        coverage.append(_coverage_row(year, n_cda, stock))
+        if n_cda == 0:
+            continue
         snap = (
             snap.join(firm, on="cnpj", how="left")
             .join(opens.select("id_debito", f"open_{year}"), on="id_debito", how="left")
@@ -1851,7 +1942,10 @@ def backtest_rule(
     return (
         pl.concat(classes, how="diagonal_relaxed") if classes else empty_c,
         pl.concat(recovered, how="diagonal_relaxed") if recovered else empty_r,
-        {"n_cells_suppressed": n_sup},
+        {
+            "n_cells_suppressed": n_sup,
+            "coverage": pl.DataFrame(coverage),
+        },
     )
 
 
@@ -3159,6 +3253,34 @@ def _cumulative_sql(panel: pl.LazyFrame) -> tuple[pl.DataFrame, int] | None:
     return assert_public(_unobserved_band(out)), n_sup
 
 
+def stock_bases(panel: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
+    """Positive-stock year versus the December snapshot, one row per year.
+
+    The annual rate uses the first. The collectable rule uses the second.
+    """
+    positive = pl.col("stock") > 0
+    december = positive & pl.col("present_in_december").fill_null(False)
+    out = _collect(
+        _lazy(panel)
+        .filter((pl.col("year") >= FIRST_YEAR) & (pl.col("year") <= LAST_YEAR))
+        .group_by("year")
+        .agg(
+            pl.col("id_debito").filter(positive).n_unique().alias("n_positive"),
+            pl.col("stock").filter(positive).sum().alias("stock_positive"),
+            pl.col("id_debito").filter(december).n_unique().alias("n_december"),
+            pl.col("stock").filter(december).sum().alias("stock_december"),
+        )
+        .with_columns(
+            (pl.col("n_positive") - pl.col("n_december")).alias("n_not_in_december"),
+            (pl.col("stock_positive") - pl.col("stock_december")).alias(
+                "stock_not_in_december"
+            ),
+        )
+        .sort("year")
+    )
+    return assert_public(out)
+
+
 def annual_recovery(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
@@ -3461,6 +3583,38 @@ def _logit_side_sql(
     return {"req": req, "brk": brk, "prot": protest}
 
 
+def _stratum_allocation(counts: pl.DataFrame, sample_n: int) -> pl.DataFrame:
+    """Largest-remainder allocation. A stratum is not given more rows than it has."""
+    total = int(counts["n"].sum())
+    rows = counts.to_dicts()
+    if total <= sample_n:
+        for row in rows:
+            row["n_keep"] = int(row["n"])
+        return pl.DataFrame(rows)
+    for row in rows:
+        row["n_keep"] = min(int(row["n"]), int(row["n"]) * sample_n // total)
+        row["_frac"] = row["n"] * sample_n / total - row["n_keep"]
+    short = sample_n - sum(int(row["n_keep"]) for row in rows)
+    for row in sorted(
+        rows,
+        key=lambda item: (
+            -item["_frac"],
+            item.get("year") or 0,
+            str(item.get("_origin_key")),
+            item.get("_paid_key") if item.get("_paid_key") is not None else -1,
+        ),
+    ):
+        if short <= 0:
+            break
+        room = int(row["n"]) - int(row["n_keep"])
+        if room <= 0:
+            continue
+        take = min(room, short)
+        row["n_keep"] += take
+        short -= take
+    return pl.DataFrame(rows).drop("_frac")
+
+
 def estimation_frame(
     panel: pl.DataFrame | pl.LazyFrame,
     firms: pl.DataFrame,
@@ -3532,15 +3686,32 @@ def estimation_frame(
     n_before = int(counted["n"][0])
     n_trunc = int(counted["n_cnae_truncated"][0] or 0)
     rows = eligible
-    if n_before > params.sample_n:
-        # Hash sample keeps about sample_n rows. The exact draw is trimmed below.
-        # A full collect of every eligible certificate-year does not fit in 8 GB.
-        span = 2**32
-        keep = max(1, int(span * min(1.0, params.sample_n * 1.25 / n_before)))
-        digest = pl.col("id_debito").hash(seed=params.seed) ^ pl.col("year").hash(
-            seed=params.seed
+    stratified = n_before > params.sample_n
+    if stratified:
+        # Strata are year, origin and the outcome. The draw stays on disk until collect.
+        keyed = eligible.with_columns(
+            pl.col("origin").fill_null("__missing_origin__").alias("_origin_key"),
+            pl.col("paid_flag").fill_null(-1).alias("_paid_key"),
         )
-        rows = eligible.filter((digest % span) < keep)
+        counts = _collect(
+            keyed.group_by("year", "_origin_key", "_paid_key").agg(pl.len().alias("n"))
+        )
+        alloc = _stratum_allocation(counts, params.sample_n)
+        rows = (
+            keyed.join(
+                alloc.lazy().select("year", "_origin_key", "_paid_key", "n", "n_keep"),
+                on=["year", "_origin_key", "_paid_key"],
+                how="inner",
+            )
+            .filter(
+                (
+                    pl.col("id_debito").hash(seed=params.seed)
+                    % pl.col("n").cast(pl.UInt64)
+                )
+                < pl.col("n_keep").cast(pl.UInt64)
+            )
+            .drop("_origin_key", "_paid_key", "n", "n_keep")
+        )
     collected = None
     if _is_lazy(instalments) or _is_lazy(protests):
         base = _collect(
@@ -3575,9 +3746,13 @@ def estimation_frame(
         "sample_n": params.sample_n,
         "seed": params.seed,
         "formula_m1": M1_FORMULA,
+        "stratified": stratified,
+        "strata": "year, origin, paid_flag",
     }
     if collected.height > params.sample_n:
-        collected = collected.sample(n=params.sample_n, seed=params.seed)
+        collected = collected.sort(["id_debito", "year"]).sample(
+            n=params.sample_n, seed=params.seed
+        )
     notes["n_sampled"] = collected.height
     collected, n_cnae = _pool_rare(collected, "cnae_division")
     collected, n_status = _pool_rare(collected, "status")
@@ -3694,45 +3869,57 @@ def nested_formulas(frame: pd.DataFrame) -> list[tuple[str, str]]:
 
 def fit_nested(
     frame: pd.DataFrame, params: PgeParams
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """HC1 coefficients, with clustered standard errors in the columns beside them."""
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    """HC1 coefficients. Clustered standard errors reuse the same fit.
+
+    L-BFGS is tried first. Newton is the fallback. The cluster column is a
+    sandwich on the fitted coefficients, not a second optimisation.
+    """
     import statsmodels.formula.api as smf
 
     formulas = nested_formulas(frame)
     coef_rows: list[dict[str, Any]] = []
     fit_rows: list[dict[str, Any]] = []
+    solver_used = "lbfgs"
 
-    def _fit(formula: str, **kwargs):
-        last = None
-        for method in (None, "bfgs", "lbfgs"):
-            kw = dict(kwargs)
+    def _fit(formula: str):
+        nonlocal solver_used
+        model = smf.logit(formula, data=frame)
+        last: Exception | None = None
+        for method in ("lbfgs", "bfgs", None):
+            kwargs: dict[str, Any] = {"disp": False, "maxiter": 200, "cov_type": "HC1"}
             if method is not None:
-                kw["method"] = method
+                kwargs["method"] = method
             try:
-                return smf.logit(formula, data=frame).fit(disp=False, maxiter=200, **kw)
+                fitted = model.fit(**kwargs)
             except (np.linalg.LinAlgError, ValueError) as exc:
                 last = exc
-        raise last
+                continue
+            solver_used = method or "newton"
+            return fitted
+        raise last if last is not None else RuntimeError("logit did not fit")
 
     for name, formula in formulas:
-        res = _fit(formula, cov_type="HC1")
-        se_c = pd.Series(np.nan, index=res.params.index)
-        p_c = pd.Series(np.nan, index=res.params.index)
+        res = _fit(formula)
+        index = res.params.index
+        se_h = pd.Series(np.asarray(res.bse).ravel(), index=index)
+        p_h = pd.Series(np.asarray(res.pvalues).ravel(), index=index)
+        ci = np.asarray(res.conf_int())
+        se_c = pd.Series(np.nan, index=index)
+        p_c = pd.Series(np.nan, index=index)
         cluster_ok = False
         if params.cluster:
             try:
-                res_c = _fit(
-                    formula,
-                    cov_type="cluster",
-                    cov_kwds={"groups": frame["cnpj_root"]},
-                )
-                se_c = res_c.bse
-                p_c = res_c.pvalues
+                groups = frame.loc[res.model.data.row_labels, "cnpj_root"]
+                res._results._get_robustcov_results(cov_type="cluster", groups=groups)
+                res._results._cache.clear()
+                se_c = pd.Series(np.asarray(res.bse).ravel(), index=index)
+                p_c = pd.Series(np.asarray(res.pvalues).ravel(), index=index)
                 cluster_ok = True
-            except (ValueError, np.linalg.LinAlgError):
+            except (ValueError, np.linalg.LinAlgError, KeyError, IndexError):
                 cluster_ok = False
-        ci = res.conf_int()
-        n_year = int(sum(str(t).startswith("C(year)") for t in res.params.index))
+        place = {term: i for i, term in enumerate(index)}
+        n_year = int(sum(str(term).startswith("C(year)") for term in index))
         fit_rows.append(
             {
                 "model": name,
@@ -3745,7 +3932,7 @@ def fit_nested(
                 "cluster_ok": cluster_ok,
             }
         )
-        for term in res.params.index:
+        for term in index:
             if str(term).startswith("C(year)"):
                 continue
             coef_rows.append(
@@ -3753,14 +3940,14 @@ def fit_nested(
                     "model": name,
                     "term": term,
                     "coef": float(res.params[term]),
-                    "se_hc1": float(res.bse[term]),
-                    "p_hc1": float(res.pvalues[term]),
-                    "stars": stars(float(res.pvalues[term])),
-                    "ci_low": float(ci.loc[term, 0]),
-                    "ci_high": float(ci.loc[term, 1]),
+                    "se_hc1": float(se_h[term]),
+                    "p_hc1": float(p_h[term]),
+                    "stars": stars(float(p_h[term])),
+                    "ci_low": float(ci[place[term], 0]),
+                    "ci_high": float(ci[place[term], 1]),
                     "odds_ratio": _safe_exp(float(res.params[term])),
-                    "or_low": _safe_exp(float(ci.loc[term, 0])),
-                    "or_high": _safe_exp(float(ci.loc[term, 1])),
+                    "or_low": _safe_exp(float(ci[place[term], 0])),
+                    "or_high": _safe_exp(float(ci[place[term], 1])),
                     "se_cluster": float(se_c.get(term, np.nan)),
                     "p_cluster": float(p_c.get(term, np.nan)),
                     "stars_cluster": stars(float(p_c.get(term, np.nan))),
@@ -3768,7 +3955,62 @@ def fit_nested(
             )
     coef = assert_public(pd.DataFrame(coef_rows))
     fit = assert_public(pd.DataFrame(fit_rows))
-    return coef, fit
+    return coef, fit, solver_used
+
+
+def _fit_cache_dir() -> Path:
+    """Coefficient cache. The design matrix is not written."""
+    import tempfile
+
+    base = os.environ.get("CEMEPI_CACHE")
+    root = (
+        Path(base) / "results" / "imp23-fit"
+        if base
+        else Path(tempfile.gettempdir()) / "imp23-fit"
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _fit_cache_key(frame: pd.DataFrame, params: PgeParams) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(M1_FORMULA.encode())
+    digest.update(str(params.sample_n).encode())
+    digest.update(str(params.seed).encode())
+    digest.update(str(params.cluster).encode())
+    ordered = frame.sort_values(["id_debito", "year"], kind="mergesort")
+    for column in ordered.columns:
+        digest.update(column.encode())
+        hashed = pd.util.hash_pandas_object(ordered[column], index=False).to_numpy()
+        digest.update(np.ascontiguousarray(hashed).tobytes())
+    return digest.hexdigest()[:32]
+
+
+def _read_fit_cache(
+    key: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, str] | None:
+    root = _fit_cache_dir()
+    coef_path = root / f"{key}-coef.parquet"
+    fit_path = root / f"{key}-fit.parquet"
+    solver_path = root / f"{key}-solver.txt"
+    if not (coef_path.exists() and fit_path.exists() and solver_path.exists()):
+        return None
+    return (
+        pd.read_parquet(coef_path),
+        pd.read_parquet(fit_path),
+        solver_path.read_text(encoding="utf-8").strip(),
+    )
+
+
+def _write_fit_cache(
+    key: str, coef: pd.DataFrame, fit: pd.DataFrame, solver: str
+) -> None:
+    root = _fit_cache_dir()
+    coef.to_parquet(root / f"{key}-coef.parquet", index=False)
+    fit.to_parquet(root / f"{key}-fit.parquet", index=False)
+    (root / f"{key}-solver.txt").write_text(solver, encoding="utf-8")
 
 
 def fit_payment_models(
@@ -3778,10 +4020,23 @@ def fit_payment_models(
     protests: pl.DataFrame | pl.LazyFrame,
     params: PgeParams,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    import time
+
+    started = time.perf_counter()
     frame, notes = estimation_frame(panel, firms, instalments, protests, params)
     # The micro frame stays inside this function. Only the coefficient tables leave.
-    coef, fit = fit_nested(frame, params)
+    key = _fit_cache_key(frame, params)
+    cached = _read_fit_cache(key)
+    if cached is None:
+        coef, fit, solver = fit_nested(frame, params)
+        _write_fit_cache(key, coef, fit, solver)
+        notes["fit_cache"] = "miss"
+    else:
+        coef, fit, solver = cached
+        notes["fit_cache"] = "hit"
     notes["formula_m1"] = M1_FORMULA
+    notes["solver"] = solver
+    notes["fit_seconds"] = round(time.perf_counter() - started, 3)
     return coef, fit, notes
 
 
