@@ -323,4 +323,16 @@ The set says which other models are still in the race.
 On these twelve cells, only Monday to Friday puts the seasonal naive out of the set and also rejects it in the paired test.
 Even there, the set still contains more than TimesFM.
 
-\discutir{Wilcoxon signed-rank on the same leader-versus-naive losses, from comparison.csv column wsr\_p after the local render. State how many of the 12 cells agree with the Diebold-Mariano call at 5 percent. On Monday to Friday, where TimesFM has the largest skill, state whether the rank test agrees. Where the two tests disagree, including monthly cells with 12 points, state what that does and does not say about relative gains and absolute limits. Do not fill this paragraph before the column exists.}
+The Wilcoxon column of Table~\ref{tab:best} is the signed-rank test of those same leader-versus-naive losses.
+Laboratory Section 4.6 is the source.
+The two calls agree at 5 percent in 10 of the 12 cells.
+They disagree in two cells.
+On Declared for the month, the HLN \(p\)-value is 0.040 and the Wilcoxon \(p\)-value is 0.064.
+On Declared for the calendar day, the HLN \(p\)-value is 0.069 and the Wilcoxon \(p\)-value is 0.026.
+On Monday to Friday, where TimesFM leads all three series, the rank test agrees with the HLN call.
+Both \(p\)-values are below 0.001 in each of those three cells.
+Agreement is a call against the seasonal naive.
+It is not a claim that the leader beats every other model.
+A month has 12 test points and a week has 13, and the rank test has low power on those grains.
+A disagreement on a short block is not a published winner.
+\discutir{what the two disagreements say about relative gains and absolute limits. Laboratory Section 4.6 leaves that reading to the authors.}
