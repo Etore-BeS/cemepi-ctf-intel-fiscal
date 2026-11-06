@@ -1,5 +1,6 @@
 /.quarto/
 /_site/
+/_site_pages/
 # _freeze/ É versionado de propósito: o CI monta o site a partir dele.
 
 **/*.quarto_ipynb

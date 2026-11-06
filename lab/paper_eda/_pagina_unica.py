@@ -39,6 +39,9 @@ BIG_FIG = 1_000_000  # bytes de HTML por figura acima dos quais ela vai para arq
 LAB_PAGES = [
     ("dados/2026-10-26_cnpj_enrich", "1.9", "Firm registry enrichment of debtor CNPJs (RFB, March 2026)", "lab-cnpj-rfb",
      "rfb", "01_dados", "CNPJ-ENRICH"),
+    ("eda/2026-11-04_impairment_variables", "1.10",
+     "Variables of the recoverability (impairment) model: availability in the data",
+     "lab-imp-vars", "ivar", "01_dados", "IMP-23"),
     ("eda/2026-10-23_concentracao_e_liquidacao", "2.8", "Concentration by tax type and by debtor; settlement in BRL",
      "lab-conc", "conc", "02_parte_a", "IMP-09, IMP-10"),
     ("eda/2026-10-23_kmeans_top1", "3.12", "K-means clustering of the top 1% of CDAs and the redrawn Figure 3.5.18",
@@ -47,11 +50,35 @@ LAB_PAGES = [
      "05_parte_b3", "GEO-01"),
     ("dados/2026-10-27_cnpj_firmas", "3.14", "Registration status and economic activity (CNAE) of debtor firms × origin and recovery",
      "lab-cnpj-firmas", "firm", "05_parte_b3", "LAB-CNPJ"),
-    ("eda/2026-11-04_benchmark_wilcoxon", "4.5",
+    ("eda/2026-10-31_cnae_declared_assessed", "3.15",
+     "Declared versus assessed VAT debt by CNAE, age, status and concentration",
+     "lab-cnae-seg", "cseg", "05_parte_b3", "CNAE-SEG"),
+    ("eda/2026-11-04_instalments_protest", "3.16",
+     "Instalment agreements, defaults on them and protest of VAT (ICMS) CDAs",
+     "lab-imp-parc", "parc", "05_parte_b3", "IMP-23"),
+    ("eda/2026-11-04_recovery_age_bands", "3.17",
+     "Recovery curves by age band (≤2, 2–5, 5–10, >10 years) × origin × registration status",
+     "lab-imp-age", "iage", "05_parte_b3", "IMP-23"),
+    ("eda/2026-11-04_pge_rule_backtest", "3.18",
+     "The current PGE collectable/uncollectable/recoverable rule applied to VAT (ICMS) cohorts, and later recovery by class",
+     "lab-imp-rule", "rule", "05_parte_b3", "IMP-23"),
+    # 4.4 is already "Persistence of recovery" (C.4). This diagnostic is the next free number.
+    ("eda/2026-11-04_diagnostico_linearidade", "4.5",
+     "Linearity and group heterogeneity diagnostics for the Declared × Assessed inference",
+     "lab-lin", "lin", "06_parte_c", "AVD-13"),
+    # Next number after the linearity diagnostic. Anchor lab-ben-wsr.
+    ("eda/2026-11-04_benchmark_wilcoxon", "4.6",
      "Paired tests for the forecasting benchmark: Wilcoxon signed-rank beside Diebold-Mariano-HLN",
      "lab-ben-wsr", "bw", "06_parte_c", "BEN-W"),
+    # Next number after the Wilcoxon entry (4.6, #lab-ben-wsr).
+    ("eda/2026-11-04_inferencia_avd", "4.7",
+     "Declared and assessed VAT inference from the section 4.5 specification",
+     "lab-avd-inf", "avd", "06_parte_c", "AVD-14"),
     ("eda/2026-10-23_macro_selic_over_checagem", "5.8", "Overnight Selic rate and check of the macroeconomic correlations",
      "lab-macro", "mac", "07_parte_d", "MAC-03, MAC-07"),
+    ("eda/2026-11-04_pd_logit_extended", "5.9",
+     "Model 1 extended: probability of payment with origin, registration status, CNAE division, size, instalments and protest",
+     "lab-imp-pd", "pdm", "07_parte_d", "IMP-23"),
     ("eda/2026-10-23_eda_completo", "8", "Appendix: the full EDA notebook (faithful conversion, window ending in 2025)",
      "lab-edac", "edac", "APPENDIX", "CTF-03"),
 ]
@@ -193,6 +220,20 @@ EXTRA = {
                 "records), the schema of the DEBITO table without the person columns. The lab shows aggregates only."),
     "s-b-5-24": ("lab-agregados-b524", "Changed in the lab", "Aggregates only: the paper showed the first rows with the hash."),
 }
+# Apontador da 4.2 para a 4.5. Entra só quando o _freeze dessa entrada existe: o alvo #lab-lin
+# é criado pela própria entrada, e sem o render local a âncora não teria destino.
+LIN_POINTER = (
+    "s-c-2",
+    (
+        "lab-lin-pointer",
+        "CDA-level linearity for the declared × assessed inference",
+        (
+            "Section 4.2 tests linearity of the monthly portfolio series against macroeconomic indicators. "
+            "The certificate-level diagnostic that chooses the inference for the declared × assessed paper is "
+            "[4.5 Linearity and group heterogeneity diagnostics](#lab-lin)."
+        ),
+    ),
+)
 STAR_TEXT = ("Significance stars in tables and correlation maps: \\* p ≤ 0.10; \\*\\* p ≤ 0.05; \\*\\*\\* p ≤ 0.01 (no "
              "correction for multiple testing). In tables, each p column gets a “(sig.)” column with the stars next to it, "
              "and rows with p ≤ 0.10 in the first p column are in **bold** (no background colour). The caption above each "
@@ -428,8 +469,6 @@ toc-depth: 4
 toc-expand: true
 toc-location: left
 toc-title: "Contents"
-include-after-body:
-  - _toc_colapsavel.html   # sumário fixo na rolagem, setinha para abrir/fechar cada tópico, figuras na largura do corpo
 format:
   html:
     grid:                  # só nesta página: corpo largo em telas grandes (o grid do Quarto encolhe em telas menores)
@@ -442,6 +481,7 @@ code-summary: "Code"
 resources:
   - paper_eda_figs/*.html
 include-in-header:
+  - _toc_colapsavel.html
   - text: |
 {inc_yaml}
 ---
@@ -468,11 +508,11 @@ GUIDE_MERMAID = """```{=html}
 <div class="cg-wrap" role="navigation" aria-label="Reading guide">
 <div class="cg-main">
 <a class="cg-box" href="#s-0">0 · Computational environment</a><div class="cg-arrow"></div>
-<a class="cg-box" href="#s-1">1 · Data<small>1.8 Lab window · 1.9 Firm registry enrichment (RFB)</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-1">1 · Data<small>1.8 Lab window · 1.9 Firm registry enrichment (RFB) · 1.10 Recoverability variables</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-a">2 · The portfolio across tax types<small>2.8 Concentration by tax type and by debtor</small></a><div class="cg-arrow"></div>
-<a class="cg-box" href="#s-part-b">3 · The VAT (ICMS) portfolio<small>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-b">3 · The VAT (ICMS) portfolio<small>3.12 K-means, top 1% · 3.13 Municipalities · 3.14 Firm status and CNAE · 3.15 Declared vs assessed by CNAE · 3.16 Instalments and protest · 3.17 Recovery by age · 3.18 PGE rule</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-c">4 · Statistical properties</a><div class="cg-arrow"></div>
-<a class="cg-box" href="#s-part-d">5 · Macroeconomic conditions<small>5.8 Overnight Selic and correlation check</small></a><div class="cg-arrow"></div>
+<a class="cg-box" href="#s-part-d">5 · Macroeconomic conditions<small>5.8 Overnight Selic and correlation check · 5.9 Extended payment model</small></a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-part-e">6 · Discussion</a><div class="cg-arrow"></div>
 <a class="cg-box" href="#s-7">7 · Correspondence with the manuscript and the dissertation</a>
 </div>
@@ -486,15 +526,16 @@ GUIDE_MERMAID = """```{=html}
 
 def guide(state: dict) -> str:
     rows = [("0", "s-0", "Paths, memory, caching, seed, figure style and statistical utilities."),
-            ("1", "s-1", "Sources, extracts, panel, monthly and macro series, glossary; **1.8** the lab window (data up to 2025); **1.9** firm registry enrichment."),
+            ("1", "s-1", "Sources, extracts, panel, monthly and macro series, glossary; **1.8** the lab window (data up to 2025); **1.9** firm registry enrichment; **1.10** recoverability variables."),
             ("2", "s-part-a", "All tax types: volume, missing values, grouping, value, age, recovery; **2.8** concentration "
                               "by tax type and by debtor."),
             ("3", "s-part-b", "VAT (ICMS): evolution, debt types, declared × assessed, concentration, top CDAs, age, "
                               "recovery, payments, judicial filing, seasonality, programmes; **3.12** K-means, **3.13** "
-                              "municipalities, **3.14** firm status and CNAE."),
+                              "municipalities, **3.14** firm status and CNAE, **3.15** declared versus assessed by CNAE, "
+                              "**3.16** instalments and protest, **3.17** recovery by age band, **3.18** the PGE rule."),
             ("4", "s-part-c", "Distribution, correlation choice, stationarity, persistence."),
             ("5", "s-part-d", "Monthly, quarterly, annual and panel correlations, models; **5.8** overnight Selic and the "
-                              "correlation check."),
+                              "correlation check; **5.9** the extended payment model."),
             ("6", "s-part-e", "Synthesis, limitations, ethics, future research."),
             ("7", "s-7", "Where each result goes in the manuscript and the dissertation."),
             ("8", "lab-edac", "The full EDA notebook, converted as is, with the window cut at December 2025.")]
@@ -508,7 +549,7 @@ classification of taxes records it under value added taxes (heading 5111). It is
 names of the raw debt types in the data (e.g. *ICMS Declarado*, *ICMS Autuação*) are kept as they appear in the database.
 
 **How the page is organised.** One numbering scheme for the whole page (1, 1.1, 1.1.1, …). Sections 0 to 7 follow the
-paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 2.8, 3.12–3.14, 5.8), each opened by a
+paper; the analyses added in the lab sit inside the section they belong to (1.8, 1.9, 1.10, 2.8, 3.12–3.18, 5.8, 5.9), each opened by a
 **New in the lab** box; section 8 is an appendix. The diagram shows the reading order; click a box to jump to its section (dashed = appendix).
 
 {GUIDE_MERMAID}
@@ -523,6 +564,15 @@ OECD Economics Department Working Papers, No. 1848. https://doi.org/10.1787/2a85
 def novidades(state: dict) -> str:
     stars = state["star_secs"]
     star_links = ", ".join(f"[{t.split(' ')[0]}](#{a})" for a, t in stars[:12]) + (" …" if len(stars) > 12 else "")
+    included = state.get("lab_included", ())
+    inference = ""
+    if "lab-avd-inf" in included and "lab-lin" in included:
+        inference = (
+            "19. **Declared versus assessed inference (section 4.7).** The payment logits and the "
+            "quantile regressions of the balance follow the specification selected in "
+            "[4.5 Linearity and group heterogeneity diagnostics](#lab-lin). "
+            "[4.7 Declared and assessed inference](#lab-avd-inf).\n"
+        )
     return f"""<!-- Gerado por lab/paper_eda/_pagina_unica.py a partir do _freeze das partes. Não editar à mão. -->
 
 {guide(state)}
@@ -564,6 +614,10 @@ that section.
 12. **All lab analyses on this page, inside their sections (CTF-03; 28 Oct 2026).** The entries of `lab/eda/` and
     `lab/dados/` are complete here: [1.9 Firm registry enrichment](#lab-cnpj-rfb) · [2.8 Concentration](#lab-conc) ·
     [3.12 K-means](#lab-km) · [3.13 Municipalities](#lab-cnpj-geo) · [3.14 Firm status and CNAE](#lab-cnpj-firmas) ·
+    [3.15 Declared versus assessed by CNAE](#lab-cnae-seg) ·
+    [1.10 Recoverability variables](#lab-imp-vars) · [3.16 Instalments and protest](#lab-imp-parc) ·
+    [3.17 Recovery by age](#lab-imp-age) · [3.18 PGE rule](#lab-imp-rule) ·
+    [5.9 Extended payment model](#lab-imp-pd) ·
     [5.8 Overnight Selic and correlation check](#lab-macro) · [8 Full EDA notebook](#lab-edac).
 13. **Charts aggregated before publication (DADOS-14).** No figure carries one value per CDA or per debtor: histograms
     become bars with the count per bin (3.5.4, 3.5.5, 3.5.16, 3.8.5 in BRL, 3.9.3), the boxes of 3.2.3 are drawn from
@@ -579,7 +633,18 @@ that section.
     than 5 CNPJs are pooled whole. [3.14](#lab-cnpj-firmas).
 16. **The whole lab in English, one numbering scheme (28 Oct 2026).** Paper sections A to E are now 2 to 6; the lab
     analyses moved into their sections; VAT (ICMS) naming as in the papers. [Reading guide](#guia).
-:::
+17. **Declared versus assessed debt by CNAE 2.3 (CNAE-SEG, 31 Oct 2026).** Size, concentration, payment and recovery
+    of the two segments, with CNAE section and division, debt age, firm age, registry status, size, state and
+    repeated enrolment. The largest 1 percent of certificates holds 75.8 percent of the pooled stock.
+    [3.15](#lab-cnae-seg).
+18. **Recoverability (impairment) building blocks (IMP-23).** Which variables of the recoverability
+    model are in the extract, how instalment requests and protest relate to later payments, how recovery
+    varies on the proposal's age bands, how the current collectable rule classifies VAT (ICMS) certificates
+    (no guarantee table, so the collectable share is understated) and how the payment logit changes when
+    those blocks are added. Association only.
+    [1.10](#lab-imp-vars) · [3.16](#lab-imp-parc) · [3.17](#lab-imp-age) · [3.18](#lab-imp-rule) ·
+    [5.9](#lab-imp-pd).
+{inference}:::
 
 ::: {{.callout-warning title="DEBITO quality (flagged only, nothing corrected)"}}
 - The snapshots of **2018-12** and of **2020-10 to 2020-12** are missing. The 2020 M10–M12 file repeats M04–M06, and
@@ -717,8 +782,18 @@ def lab_section(src: str, num: str, short: str, anchor: str, pfx: str, codes: st
 def lab_blocks(state: dict) -> tuple[dict, list[str]]:
     """Seções do lab agrupadas pela parte do paper depois da qual entram ("APPENDIX" = depois de todas)."""
     by_part, incs = {}, []
+    state["lab_included"] = set()
     for src, num, short, anchor, pfx, part, codes in LAB_PAGES:
+        freeze = LAB / "_freeze" / src / "execute-results" / "html.json"
+        # A 4.5 ainda não tem _freeze neste commit: o render é no Mac. As outras entradas continuam obrigatórias.
+        if src == "eda/2026-11-04_diagnostico_linearidade" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.5 fica de fora até o render local.", file=sys.stderr)
+            continue
+        if src == "eda/2026-11-04_inferencia_avd" and not freeze.exists():
+            print(f"{src}: sem _freeze; a seção 4.7 fica de fora até o render local.", file=sys.stderr)
+            continue
         b, inc = lab_section(src, num, short, anchor, pfx, codes, state)
+        state["lab_included"].add(anchor)
         by_part.setdefault(part, []).append(f"<!-- lab: {src} -->\n\n{b}")
         incs += inc
     return by_part, incs
@@ -782,6 +857,8 @@ def main() -> int:
     state = {"anchors": set(), "star_secs": [], "n_markers": 0, "n_era_sections": 0, "figs": [], "pt2en": {}, "lab_pages": []}
     includes = []
     lab_by_part, lab_inc = lab_blocks(state)
+    if "lab-lin" in state.get("lab_included", ()):
+        EXTRA[LIN_POINTER[0]] = LIN_POINTER[1]
     includes += lab_inc
     bodies = []
     for name in PARTS:

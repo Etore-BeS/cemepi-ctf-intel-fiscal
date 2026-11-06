@@ -1,0 +1,589 @@
+---
+title: "Declared versus assessed VAT debt by CNAE level, age, status and concentration"
+description: "How do size, concentration, payment and recovery differ between declared and assessed VAT (ICMS) debt? December 2025 legal entities, CNAE 2.3, aggregates only."
+date: 2026-10-31
+jupyter: python3
+---
+
+**Data:** December 2025 snapshot of the legal-entity VAT (ICMS) extract. Payments are GARE amounts dated before 1 January 2026. No 2026 debt and no 2026 payment enter. Firm attributes come from the Receita Federal CNPJ registry already linked to these debtors. Activity uses the official IBGE CNAE-Subclasses 2.3 hierarchy (1,331 subclasses).
+**What is shown:** aggregates only. A cell with 1 to 4 firms is left blank in the detailed activity files.
+**Status:** exploration. These are the aggregates used by the declared-versus-assessed manuscript. The computation is `analyze.py` in the folder of the same name. This page reads those outputs and redraws the figures.
+
+::: {.callout-warning title="The firm register is later than the debts"}
+Registration status, CNAE, size, place and firm age describe the firm as the register stands. They are not measured before the debt. A firm may be closed or unfit because of the debt. Recovery is payments before 1 January 2026 divided by the December 2025 stock. It is not an annual hazard.
+:::
+
+```{python}
+#| label: setup
+import copy
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.io as pio
+from plotly.subplots import make_subplots
+from IPython.display import Markdown, display
+
+HERE = Path.cwd() / "2026-10-31_cnae_declared_assessed"
+TAB = HERE / "tables"
+pd.set_option("display.max_colwidth", 80)
+DEC, ASS, GREY, BOTH = "#154C56", "#D55E00", "#8A9399", "#1B1B1B"
+EN = {
+    "A": "Agriculture, forestry and fishing", "B": "Mining and quarrying",
+    "C": "Manufacturing", "D": "Electricity and gas", "E": "Water, sewerage and waste",
+    "F": "Construction", "G": "Trade and repair of motor vehicles",
+    "H": "Transportation and storage", "I": "Accommodation and food",
+    "J": "Information and communication", "K": "Financial and insurance",
+    "L": "Real estate", "M": "Professional, scientific and technical",
+    "N": "Administrative and support services", "O": "Public administration",
+    "P": "Education", "Q": "Health and social work", "R": "Arts, culture and sport",
+    "S": "Other services", "T": "Domestic services", "U": "International organisations",
+    "unmatched": "Unmatched",
+}
+
+def show(fig):
+    """Use the white template without WebGL trace defaults, so the page stays on SVG."""
+    tpl = copy.deepcopy(pio.templates["plotly_white"])
+    tpl.data.scattergl = None
+    tpl.data.scatterpolargl = None
+    fig.layout.template = tpl
+    fig.show()
+
+def nfmt(x, d=0):
+    return f"{x:,.{d}f}"
+
+def pct(x, d=1):
+    return f"{100 * x:.{d}f}"
+
+summary = pd.read_csv(TAB / "segment_summary.csv").set_index("segment")
+valid = pd.read_csv(TAB / "validation_dec2025.csv")
+mw = pd.read_csv(TAB / "tests_mannwhitney.csv")
+chi = pd.read_csv(TAB / "tests_chi2.csv")
+top = pd.read_csv(TAB / "top1_justification.csv").set_index("segment")
+sec = pd.read_csv(TAB / "cnae_section.csv")
+conc = pd.read_csv(TAB / "cnae_section_concentration.csv")
+div = pd.read_csv(TAB / "cnae_division.csv")
+status = pd.read_csv(TAB / "status.csv")
+porte = pd.read_csv(TAB / "porte.csv")
+nature = pd.read_csv(TAB / "legal_nature.csv")
+uf = pd.read_csv(TAB / "uf.csv")
+mun = pd.read_csv(TAB / "municipality_top15.csv")
+rep = pd.read_csv(TAB / "repeated_enrollments.csv")
+overlap = pd.read_json(TAB / "enrollment_overlap.json", typ="series")
+age = pd.read_csv(TAB / "debt_age_bands.csv")
+firm_age = pd.read_csv(TAB / "firm_age_bands.csv")
+D, A = summary.loc["declared"], summary.loc["assessed"]
+two_cda = D.n_cda + A.n_cda
+two_stock = D.stock + A.stock
+```
+
+## Question
+
+How do size, concentration, payment and recovery differ between declared and assessed VAT (ICMS) debt?
+
+Declared is `ICMS Declarado`: tax the firm reported and did not pay. Assessed is `ICMS Autuação` plus `ICMS Autuação Simples Nacional`: tax fixed by an assessment. Fecoep and the GIA amendment stay out of the comparison.
+
+## Measures
+
+Stock is the December 2025 value net of legal fees. The payment rate is the share of certificates with any GARE payment before 1 January 2026. Recovery is those payments divided by the December 2025 stock. Debt age runs from the enrolment date to 31 December 2025. Dates before 1960 are missing. Firm age runs from the establishment opening date. Dates before 1900 are missing. A firm is the 8-digit CNPJ root. A firm has repeated enrolments when it holds two or more certificates in the segment.
+
+The Lorenz curve orders positive-value certificates from smallest to largest. The Gini coefficient is one minus twice the area under that curve. The top 1 percent is the largest ceil(1 percent of N) positive-value certificates. The Mann-Whitney rank-biserial correlation is positive when a random assessed unit tends to exceed a random declared unit. Cramér's V is the effect size of the chi-square test on firm counts. Except for repeated enrolment, each firm is placed in the segment that holds more of its stock. The samples are large, so every p-value is 0 at floating-point precision. The effect size is the result.
+
+## Population check
+
+```{python}
+#| label: tbl-validation
+#| tbl-cap: "December 2025 legal-entity VAT (ICMS) certificates in the extract, against the published laboratory page where that page reports the same row."
+valid_show = valid.copy()
+valid_show["n_cda"] = valid_show.n_cda.map(lambda v: nfmt(v))
+valid_show["stock_bn"] = valid_show.stock_bn.map(lambda v: f"{v:.6f}")
+display(valid_show)
+gap = valid.loc[valid.raw_type == "ICMS (all types)"].iloc[0]
+print(
+    f"Legal-entity total: {nfmt(gap.n_cda)} certificates and R${gap.stock_bn:.3f} billion. "
+    f"The published laboratory page reports {nfmt(gap.published_n)} certificates and R${gap.published_bn:.3f} billion. "
+    f"The gap is {abs(gap.delta_n):.0f} certificates and about R$68,000."
+)
+simp = valid.loc[valid.raw_type == "ICMS Autuação Simples Nacional"].iloc[0]
+print(
+    f"Simples Nacional assessments: {nfmt(simp.n_cda)} certificates and R${simp.stock_bn:.3f} billion, "
+    f"{100 * simp.stock_bn / A.stock * 1e9:.2f} percent of assessed stock, reported in the manuscript as 0.05 percent."
+)
+fec = valid.loc[valid.raw_type == "ICMS Fecoep"].iloc[0]
+gia = valid.loc[valid.raw_type == "ICMS Alteração de GIA"].iloc[0]
+print(
+    f"Fecoep: {nfmt(fec.n_cda)} certificates and R${fec.stock_bn:.3f} billion. "
+    f"GIA amendment: {nfmt(gia.n_cda)} certificates and R${gia.stock_bn:.3f} billion. "
+    "Both stay out of the segment comparison."
+)
+print(
+    f"Establishment match: {nfmt(A.n_estab)} of {nfmt(A.n_cda)} assessed certificates "
+    f"({100 * A.n_estab / A.n_cda:.1f} percent) and {nfmt(D.n_estab)} of {nfmt(D.n_cda)} declared certificates "
+    f"({100 * D.n_estab / D.n_cda:.1f} percent). More than 99 percent in each segment."
+)
+print(
+    "The CNAE 2.3 file has 1,331 subclasses. "
+    f"Placeholder code 8888888 covers {nfmt(A.n_cnae_outside + D.n_cnae_outside)} certificates and is not an activity."
+)
+```
+
+## Size, payment and recovery
+
+Assessed debt is the value. Declared debt is the count. Declared debt is 97.4 percent of the two-segment certificates and 27.2 percent of the two-segment stock. Assessed debt is 72.8 percent of that stock and 2.6 percent of the certificates.
+
+```{python}
+#| label: tbl-profile
+#| tbl-cap: "Declared and assessed VAT (ICMS) debt in December 2025."
+profile = pd.DataFrame({
+    "Measure": [
+        "Certificates", "Firms (CNPJ root)", "Distinct CNPJs", "Stock (R$ billion)",
+        "Median certificate (R$)", "Median firm stock (R$)",
+        "Certificates with any payment (%)", "Recovery, payments / stock (%)",
+        "Median debt age, certificate (years)", "Median debt age, firm (years)",
+        "Stock enrolled more than 10 years (%)",
+        "Median firm age, certificate (years)", "Median firm age, firm (years)",
+        "Stock in firms aged 20 years or more (%)",
+    ],
+    "Declared": [
+        nfmt(D.n_cda), nfmt(D.n_firms), nfmt(D.n_cnpj), f"{D.stock/1e9:.2f}",
+        "7,334", "7,916", "9.1", "4.73", "4.7", "2.1", "39.5", "18.3", "13.4", "66.3",
+    ],
+    "Assessed": [
+        nfmt(A.n_cda), nfmt(A.n_firms), nfmt(A.n_cnpj), f"{A.stock/1e9:.2f}",
+        "578,084", "770,756", "17.4", "0.48", "9.3", "8.9", "43.7", "25.3", "24.1", "76.0",
+    ],
+})
+display(profile)
+print(
+    f"Exact stock: declared R${D.stock/1e9:.2f} billion, assessed R${A.stock/1e9:.2f} billion. "
+    f"Payment rates {pct(D.payment_rate)} percent and {pct(A.payment_rate)} percent. "
+    f"Recovery {pct(D.recovery, 2)} percent and {pct(A.recovery, 2)} percent."
+)
+print(
+    f"Declared share of the two segments: {100 * D.n_cda / two_cda:.1f} percent of certificates "
+    f"and {100 * D.stock / two_stock:.1f} percent of stock. "
+    f"Assessed share: {100 * A.n_cda / two_cda:.1f} percent of certificates "
+    f"and {100 * A.stock / two_stock:.1f} percent of stock."
+)
+```
+
+```{python}
+#| label: tbl-mw
+#| tbl-cap: "Mann-Whitney comparisons. A positive rank-biserial correlation means a random assessed unit tends to exceed a random declared unit. Stock uses positive values. Firm ages are stock-weighted. Every p-value is 0 at floating-point precision."
+mw_show = mw.copy()
+mw_show["rank_biserial"] = mw_show.rank_biserial.map(lambda v: f"{v:.2f}")
+mw_show["n_assessed"] = mw_show.n_assessed.map(nfmt)
+mw_show["n_declared"] = mw_show.n_declared.map(nfmt)
+mw_show["median_assessed"] = mw_show.median_assessed.map(lambda v: nfmt(v, 1))
+mw_show["median_declared"] = mw_show.median_declared.map(lambda v: nfmt(v, 1))
+display(mw_show[["outcome", "unit", "n_assessed", "n_declared", "median_assessed", "median_declared", "rank_biserial"]])
+print(
+    "Manuscript rounding: certificate stock 0.89 (medians R$578,084 and R$7,334); "
+    "firm stock 0.74 (R$770,756 and R$7,916); certificate debt age 0.39 (9.3 and 4.7 years); "
+    "firm debt age 0.55 (8.9 and 2.1 years); certificate firm age 0.30 (25.3 and 18.3 years); "
+    "firm age 0.45 (24.1 and 13.4 years). "
+    "Positive-value counts: 59,294 assessed certificates and 2,254,387 declared certificates."
+)
+```
+
+Some payment is more common on assessed certificates (17.4 percent against 9.1 percent). Reais collected per real of stock are higher for declared debt (4.73 percent against 0.48 percent).
+
+## Concentration and the 1 percent cut
+
+```{python}
+#| label: fig-lorenz
+#| fig-cap: "Lorenz curves of December 2025 stock, positive certificate values. Certificates are ordered from the smallest value to the largest."
+import duckdb
+from dotenv import dotenv_values
+
+def repo_root():
+    for p in [Path.cwd(), *Path.cwd().parents]:
+        if (p / "pyproject.toml").exists() and (p / "lab").exists():
+            return p
+    raise RuntimeError("Repository root not found.")
+
+env = dotenv_values(repo_root() / ".env")
+interim = Path(env["CEMEPI_INTERIM"])
+tmp = Path(env["CNPJ_PIPELINE_WORKDIR"]) / "tmp"
+icms = interim / "icms" / "year=2025" / "*.parquet"
+if not icms.parent.exists():
+    raise RuntimeError("The ICMS extract is not available. Is the external disk mounted?")
+con = duckdb.connect()
+con.execute(f"SET memory_limit='3GB'; SET threads=4; SET temp_directory='{tmp}'; SET preserve_insertion_order=false")
+raw = con.execute(
+    "SELECT ICMS_ORIGIN AS segment, VALOR_SEM_HONORARIOS AS stock "
+    f"FROM read_parquet('{icms}') "
+    "WHERE MES_EXTRACAO = 12 AND ICMS_ORIGIN IN ('declared', 'assessed') AND VALOR_SEM_HONORARIOS > 0"
+).df()
+con.close()
+
+def curve(values):
+    x = np.sort(values.to_numpy())
+    c = np.cumsum(x)
+    idx = np.unique(np.round(np.linspace(0, len(x) - 1, 201)).astype(int))
+    return (idx + 1) / len(x), c[idx] / c[-1]
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="Equality",
+                         line=dict(color=GREY, dash="dash", width=1.4)))
+for label, mask, color in (
+    ("Declared", raw.segment == "declared", DEC),
+    ("Assessed", raw.segment == "assessed", ASS),
+    ("Both", slice(None), BOTH),
+):
+    series = raw.stock if isinstance(mask, slice) else raw.loc[mask, "stock"]
+    p, ell = curve(series)
+    fig.add_trace(go.Scatter(x=p, y=ell, mode="lines", name=label, line=dict(color=color, width=2.4)))
+fig.add_vline(x=0.99, line_color="#C9CED1", line_width=1)
+fig.update_layout(
+    template="plotly_white",
+    font=dict(family="Arial", size=13, color="#1c1c1c"),
+    legend=dict(orientation="h", y=-0.2, x=0),
+    margin=dict(l=60, r=20, t=10, b=60),
+    height=480, paper_bgcolor="white", plot_bgcolor="white",
+)
+fig.update_xaxes(title="Share of certificates, from smallest value to largest", range=[0, 1], tickformat=".0%")
+fig.update_yaxes(title="Share of stock", range=[0, 1], tickformat=".0%")
+show(fig)
+```
+
+The pooled Gini coefficient is 0.946. Inside declared debt it is 0.839. Inside assessed debt it is 0.863.
+
+```{python}
+#| label: tbl-top1
+#| tbl-cap: "Upper tail of the pooled stock, and the same 1 percent cut inside each segment. Positive values only."
+both = top.loc["Both"]
+rows = []
+for label, share_col, n_col in (
+    ("Largest 50 percent", "largest_50.0pct_stock_share", "largest_50.0pct_n"),
+    ("Largest 10 percent", "largest_10.0pct_stock_share", "largest_10.0pct_n"),
+    ("Largest 5 percent", "largest_5.0pct_stock_share", "largest_5.0pct_n"),
+    ("Largest 1 percent", "largest_1.0pct_stock_share", "largest_1.0pct_n"),
+    ("Largest 0.5 percent", "largest_0.5pct_stock_share", "largest_0.5pct_n"),
+    ("Largest 0.1 percent", "largest_0.1pct_stock_share", "largest_0.1pct_n"),
+):
+    rows.append({
+        "Cut": label, "Book": "Pooled",
+        "Certificates": nfmt(both[n_col]),
+        "Share of stock (%)": pct(both[share_col]),
+    })
+for seg, name in (("Declared", "Declared"), ("Assessed", "Assessed")):
+    rows.append({
+        "Cut": "Largest 1 percent", "Book": name,
+        "Certificates": nfmt(top.loc[seg, "top1_n"]),
+        "Share of stock (%)": pct(top.loc[seg, "top1_stock_share"]),
+    })
+display(pd.DataFrame(rows))
+print(
+    f"Pooled top 1 percent: {nfmt(both.top1_n)} certificates, {pct(both.top1_cda_share, 2)} percent of the count, "
+    f"{pct(both.top1_stock_share)} percent of the stock. Gini {both.gini:.3f}. "
+    f"Largest half: {nfmt(both['largest_50.0pct_n'])} certificates hold {pct(both['largest_50.0pct_stock_share'])} percent. "
+    f"Largest 10 percent: {nfmt(both['largest_10.0pct_n'])} certificates, {pct(both['largest_10.0pct_stock_share'])} percent. "
+    f"Largest 5 percent: {nfmt(both['largest_5.0pct_n'])} certificates, {pct(both['largest_5.0pct_stock_share'])} percent. "
+    f"Largest 0.5 percent: {nfmt(both['largest_0.5pct_n'])} certificates, {pct(both['largest_0.5pct_stock_share'])} percent. "
+    f"Largest 0.1 percent: {nfmt(both['largest_0.1pct_n'])} certificates, {pct(both['largest_0.1pct_stock_share'])} percent."
+)
+print(
+    f"Inside declared debt the largest 1 percent is {nfmt(top.loc['Declared', 'top1_n'])} certificates "
+    f"and {pct(top.loc['Declared', 'top1_stock_share'])} percent of declared stock (Gini {top.loc['Declared', 'gini']:.3f}). "
+    f"Inside assessed debt it is {nfmt(top.loc['Assessed', 'top1_n'])} certificates "
+    f"and {pct(top.loc['Assessed', 'top1_stock_share'])} percent of assessed stock (Gini {top.loc['Assessed', 'gini']:.3f})."
+)
+print(
+    "Of the 23,137 certificates in the pooled top 1 percent, 18,230 are assessed and hold 68.8 percent of the pooled stock. "
+    "The other 4,907 are declared and hold 7.1 percent. "
+    "A review list of about 23,000 certificates is the administrative reading of this cut. "
+    "The cut describes where the stock sits. It is not evidence that collecting those certificates would recover the stock."
+)
+```
+
+**Source.** December 2025 snapshot of the legal-entity VAT (ICMS) extract (`VALOR_SEM_HONORARIOS`), declared and assessed segments; CNAE section of the debtor establishment from the March 2026 Federal Revenue (RFB) register, CNAE 2.3 structure, establishment-level matches only. **Representation.** One row per segment × section (manufacturing, trade, transport, information); `n_positive` is the count of certificates (CDAs) with positive stock in that segment and section; the Gini coefficient and the share of the section's stock held by its largest 1 percent of certificates are computed on stock values inside each segment and section. **How to read.** A higher Gini or top-1 percent share means the section's stock sits in fewer certificates; compare the two segments within a section, not sections with the pooled figure.
+
+```{python}
+#| label: tbl-section-concentration
+#| tbl-cap: "Gini coefficient and top 1 percent stock share inside the main CNAE sections."
+keep_sec = ["C", "G", "H", "J"]
+part = conc[conc.code.isin(keep_sec)].copy()
+part["section"] = part.code.map(EN)
+part["gini"] = part.gini.map(lambda v: f"{v:.3f}")
+part["top 1 percent of section stock (%)"] = part.top1_stock_share.map(lambda v: pct(v))
+display(part[["segment", "section", "n_positive", "gini", "top 1 percent of section stock (%)"]])
+print(
+    "Inside trade and manufacturing the largest 1 percent of certificates holds between 35 and 42 percent of that section's stock. "
+    "The Gini coefficients in those sections are about 0.82 to 0.87. "
+    "That is not the pooled 75.8 percent. The pooled figure is the mixture of the two segments."
+)
+```
+
+## Age of the debt and age of the firm
+
+```{python}
+#| label: fig-age
+#| fig-cap: "Share of segment stock by debt age and by firm age, 31 December 2025."
+order_d = ["0 to 1 year", "1 to 3 years", "3 to 5 years", "5 to 10 years", "Over 10 years"]
+order_f = ["Under 2 years", "2 to 5 years", "5 to 10 years", "10 to 20 years", "20 years or more"]
+fig = make_subplots(rows=1, cols=2, subplot_titles=("Debt age", "Firm age"), horizontal_spacing=0.12)
+for frame, order, col in ((age, order_d, 1), (firm_age, order_f, 2)):
+    for segment, color, name in (("declared", DEC, "Declared"), ("assessed", ASS, "Assessed")):
+        part = frame[frame.segment == segment].set_index("band").reindex(order)
+        fig.add_trace(go.Bar(x=order, y=part.share_stock, name=name, marker_color=color,
+                             showlegend=(col == 1)), row=1, col=col)
+fig.update_layout(template="plotly_white", barmode="group", height=460,
+                  legend=dict(orientation="h", y=-0.35, x=0),
+                  margin=dict(l=60, r=20, t=40, b=80))
+fig.update_yaxes(title_text="Share of segment stock", tickformat=".0%", row=1, col=1)
+fig.update_yaxes(tickformat=".0%", row=1, col=2)
+show(fig)
+```
+
+```{python}
+#| label: tbl-age
+#| tbl-cap: "Share of segment stock by age band."
+def age_table(frame, order, kind):
+    out = frame[frame.band.isin(order)].copy()
+    out["kind"] = kind
+    out["share (%)"] = out.share_stock.map(lambda v: pct(v))
+    return out[["kind", "segment", "band", "share (%)"]]
+display(pd.concat([age_table(age, order_d, "Debt age"), age_table(firm_age, order_f, "Firm age")], ignore_index=True))
+print(
+    "Stock older than 10 years: 39.5 percent declared and 43.7 percent assessed. "
+    "Firms aged 20 years or more hold 66.3 percent of declared stock and 76.0 percent of assessed stock."
+)
+```
+
+## Activity
+
+**Source.** December 2025 stock of the legal-entity VAT (ICMS) extract (`VALOR_SEM_HONORARIOS`), declared and assessed segments; CNAE section of the debtor establishment from the March 2026 Federal Revenue (RFB) register, CNAE 2.3, establishment-level matches only. **Representation.** Share of each segment's stock by section (value); one pair of bars for each of the 20 sections in the table (A to T; section U is absent), and only "unmatched" is left out. There is no 1 percent cut, no "All other sections" group, no payment or recovery rate, and no suppression. **How to read.** Bar length is that section's share of the segment's stock. Compare the declared and assessed bars of one section. A short bar is a small share, and the section is still drawn.
+
+```{python}
+#| label: fig-section
+#| fig-cap: "Share of segment stock by CNAE section."
+total = sec.groupby("code").stock.sum().sort_values()
+codes = [c for c in total.index if c != "unmatched"]
+fig = go.Figure()
+for segment, color, name in (("declared", DEC, "Declared"), ("assessed", ASS, "Assessed")):
+    part = sec[sec.segment == segment].set_index("code").reindex(codes)
+    fig.add_trace(go.Bar(
+        y=[EN.get(c, c) for c in codes], x=part.share_stock, orientation="h",
+        name=name, marker_color=color,
+    ))
+fig.update_layout(template="plotly_white", barmode="group", height=640,
+                  legend=dict(orientation="h", y=1.02, x=0),
+                  margin=dict(l=220, r=20, t=30, b=40))
+fig.update_xaxes(title="Share of the segment stock", tickformat=".0%")
+show(fig)
+```
+
+**Source.** As above: December 2025 stock, GARE payments dated before 1 January 2026, CNAE section of the establishment (RFB, March 2026; CNAE 2.3). **Representation.** Shares of each segment's total stock by section (value), plus the share of certificates with any payment (count) and recovery = paid ÷ stock (value), in percent; sections shown have at least 1 percent of either segment's stock, the rest is pooled in "All other sections"; rows with 1 to 4 firms are suppressed. **How to read.** Read down a column to see where a segment's stock sits; compare the declared and assessed columns of a row to see whether a section is weighted towards one origin; payment and recovery are not stock shares.
+
+```{python}
+#| label: tbl-section
+#| tbl-cap: "Main CNAE sections: stock, payment and recovery by segment. Sections with at least 1 percent of either segment's stock."
+want = ["C", "G", "H", "J", "N", "M"]
+rows = []
+for code in want:
+    d = sec[(sec.code == code) & (sec.segment == "declared")].iloc[0]
+    a = sec[(sec.code == code) & (sec.segment == "assessed")].iloc[0]
+    rows.append({
+        "Section": EN[code],
+        "Declared stock (%)": pct(d.share_stock),
+        "Assessed stock (%)": pct(a.share_stock),
+        "Declared payment (%)": pct(d.payment_rate),
+        "Assessed payment (%)": pct(a.payment_rate),
+        "Declared recovery (%)": pct(d.recovery, 2),
+        "Assessed recovery (%)": pct(a.recovery, 2),
+    })
+d_other = 100 - sum(float(r["Declared stock (%)"]) for r in rows)
+a_other = 100 - sum(float(r["Assessed stock (%)"]) for r in rows)
+rows.append({
+    "Section": "All other sections",
+    "Declared stock (%)": f"{d_other:.1f}",
+    "Assessed stock (%)": f"{a_other:.1f}",
+    "Declared payment (%)": "",
+    "Assessed payment (%)": "",
+    "Declared recovery (%)": "",
+    "Assessed recovery (%)": "",
+})
+display(pd.DataFrame(rows))
+print(
+    "Trade is 45.4 percent of assessed stock and 27.6 percent of declared stock. "
+    "Manufacturing is 34.5 percent and 50.8 percent. "
+    "Transport is 4.6 percent and 12.5 percent. "
+    "Information is 6.0 percent and 0.8 percent. "
+    "All other sections are 3.0 percent of declared stock and 3.8 percent of assessed stock."
+)
+```
+
+**Source.** December 2025 certificates and GARE payments before 1 January 2026, by CNAE section (RFB, March 2026). **Representation.** Share of certificates with at least one payment (count-based), sections with at least 2 percent of a segment's stock, one bar per segment. **How to read.** A taller bar means more certificates in that section received any payment; it says nothing about how much of the stock was paid.
+
+```{python}
+#| label: fig-payment
+#| fig-cap: "Share of certificates with any payment, for sections with at least 2 percent of a segment's stock."
+keep = sec.groupby("code").share_stock.max()
+codes = [c for c in keep[keep >= 0.02].sort_values(ascending=False).index if c != "unmatched"]
+short = {"C": "Manufacturing", "G": "Trade", "H": "Transport", "J": "Information", "N": "Admin. support"}
+fig = go.Figure()
+for segment, color, name in (("declared", DEC, "Declared"), ("assessed", ASS, "Assessed")):
+    part = sec[sec.segment == segment].set_index("code").reindex(codes)
+    fig.add_trace(go.Bar(x=[short.get(c, EN.get(c, c)) for c in codes], y=part.payment_rate,
+                         name=name, marker_color=color))
+fig.update_layout(template="plotly_white", barmode="group", height=420,
+                  legend=dict(orientation="h", y=-0.2, x=0),
+                  margin=dict(l=60, r=20, t=10, b=60))
+fig.update_yaxes(title="Share of certificates with a payment", tickformat=".0%")
+show(fig)
+```
+
+**Source.** December 2025 stock and GARE payments before 1 January 2026; CNAE **division** (2 digits) of the debtor establishment from the March 2026 RFB register, CNAE 2.3. **Representation.** Seven selected divisions; stock share of each segment (value) and recovery = paid ÷ stock (value), in percent; English labels are short renderings of the official Portuguese names; the full list of divisions is in `tables/cnae_division.csv`, where rows with 1 to 4 firms are blank. **How to read.** Compare the declared and assessed stock shares of a division to see which origin it weighs on; low recovery with a high stock share marks where the unpaid stock concentrates.
+
+```{python}
+#| label: tbl-division
+#| tbl-cap: "Selected CNAE divisions by share of segment stock. English labels are short renderings of the official Portuguese names."
+labels = {
+    "46": "Wholesale, except vehicles",
+    "47": "Retail trade",
+    "49": "Land transport",
+    "19": "Coke and petroleum products",
+    "10": "Food products",
+    "61": "Telecommunications",
+    "24": "Basic metals",
+}
+rows = []
+div_code = div.code.astype(str)
+for code, label in labels.items():
+    d = div[(div_code == code) & (div.segment == "declared")].iloc[0]
+    a = div[(div_code == code) & (div.segment == "assessed")].iloc[0]
+    rows.append({
+        "Code": code, "Division": label,
+        "Declared stock (%)": pct(d.share_stock),
+        "Assessed stock (%)": pct(a.share_stock),
+        "Declared recovery (%)": pct(d.recovery, 2),
+        "Assessed recovery (%)": pct(a.recovery, 2),
+    })
+display(pd.DataFrame(rows))
+print(
+    "Wholesale trade, except motor vehicles, is 32.0 percent of assessed stock and 14.4 percent of declared stock. "
+    "Telecommunications is 5.5 percent and 0.5 percent. "
+    "Coke and petroleum products are 9.8 percent of declared stock and 1.4 percent of assessed stock. "
+    "Land transport is 11.7 percent and 3.3 percent. "
+    "Retail trade is 12.0 percent of declared stock and 11.8 percent of assessed stock."
+)
+```
+
+## Status, size, legal form and place
+
+```{python}
+#| label: tbl-chi2
+#| tbl-cap: "Firm-level associations between segment and debtor attributes. Cramér's V. Every p-value is 0 at floating-point precision."
+chi_show = chi.copy()
+chi_show["cramers_v"] = chi_show.cramers_v.map(lambda v: f"{v:.2f}")
+chi_show["n_firms"] = chi_show.n_firms.map(nfmt)
+display(chi_show[["attribute", "n_firms", "cramers_v", "note"]])
+```
+
+```{python}
+#| label: fig-status
+#| fig-cap: "Share of segment stock by registry status and by firm size."
+fig = make_subplots(rows=1, cols=2, subplot_titles=("Cadastral status", "Firm size"), horizontal_spacing=0.12)
+for frame, col in ((status, 1), (porte, 2)):
+    keys = [k for k in dict.fromkeys(frame["name"]) if k not in ("Null", "Unknown", "Unknown or not matched")]
+    for segment, color, name in (("declared", DEC, "Declared"), ("assessed", ASS, "Assessed")):
+        part = frame[frame.segment == segment].drop_duplicates("name").set_index("name").reindex(keys)
+        fig.add_trace(go.Bar(x=keys, y=part.share_stock, name=name, marker_color=color,
+                             showlegend=(col == 1)), row=1, col=col)
+fig.update_layout(template="plotly_white", barmode="group", height=460,
+                  legend=dict(orientation="h", y=-0.45, x=0),
+                  margin=dict(l=60, r=20, t=40, b=120))
+fig.update_yaxes(title_text="Share of segment stock", tickformat=".0%", row=1, col=1)
+fig.update_yaxes(tickformat=".0%", row=1, col=2)
+show(fig)
+```
+
+```{python}
+#| label: tbl-status-size
+#| tbl-cap: "Share of segment stock by registry status and by firm size."
+def share_table(frame, kind):
+    out = frame.copy()
+    out["kind"] = kind
+    out["share of stock (%)"] = out.share_stock.map(lambda v: pct(v))
+    return out[["kind", "segment", "name", "share of stock (%)"]]
+display(pd.concat([
+    share_table(status, "Status"),
+    share_table(porte, "Size"),
+], ignore_index=True))
+ltd = nature[nature.code.astype(str) == "2062"][["segment", "name", "share_stock"]]
+print("Limited company (code 206-2), share of stock:")
+for _, row in ltd.iterrows():
+    print(f"  {row.segment}: {pct(row.share_stock)} percent")
+print("Cramér's V for legal nature is 0.12. For registry status it is 0.25. For firm size it is 0.18.")
+print(
+    "Active firms hold 74.4 percent of declared stock and 52.9 percent of assessed stock. "
+    "Closed firms hold 9.7 percent and 24.1 percent. Unfit firms hold 15.2 percent and 21.7 percent. "
+    "Firms outside the micro and small categories (other sizes) hold 74.1 percent of declared stock and 81.6 percent of assessed stock. "
+    "Small firms hold 15.3 percent and 7.6 percent."
+)
+```
+
+```{python}
+#| label: tbl-geo
+#| tbl-cap: "Share of segment stock by state, and the municipalities named in the manuscript."
+uf_show = uf.copy()
+uf_show["share (%)"] = uf_show.share_stock.map(lambda v: pct(v))
+focus = uf_show[uf_show.code.isin(["SP", "RJ"])][["segment", "code", "share (%)"]]
+display(focus)
+named = mun[mun.municipality.isin(["São Paulo", "Rio de Janeiro", "Paulínia"])].copy()
+named["firms"] = named.n_firms.map(lambda v: nfmt(v))
+named["share of segment stock (%)"] = named.share_stock.map(lambda v: pct(v))
+display(named[["segment", "municipality", "uf", "firms", "share of segment stock (%)"]])
+print(
+    "São Paulo state is 95.7 percent of assessed stock and 88.0 percent of declared stock. "
+    "Rio de Janeiro state is 1.5 percent and 8.2 percent. Cramér's V for state is 0.15. "
+    "The city of São Paulo holds 27.2 percent of assessed stock and 22.5 percent of declared stock. "
+    "The city of Rio de Janeiro holds 7.8 percent of declared stock. "
+    "Paulínia, with 215 firms, holds 4.9 percent of assessed stock."
+)
+```
+
+**Rio de Janeiro in declared stock.** Rio de Janeiro is the second state in declared stock. That share comes from a small number of large debtors whose headquarters are in Rio de Janeiro and whose debt in São Paulo is small next to their stock in Rio. Without those debtors, Rio de Janeiro falls to about 0.3 percent of declared stock. The state is the address in the Federal Revenue (RFB) CNPJ registry of the certificate's CNPJ, not a field of the certificate. Whether these debts are ICMS-ST (tax substitution) or DIFAL (the interstate rate difference) owed to São Paulo cannot be tested with the current extract: no field separates them. The question stays open, pending confirmation from PGE.
+
+## Repeated enrolment
+
+```{python}
+#| label: fig-repeated
+#| fig-cap: "Share of segment stock held by firms with one certificate or with two or more."
+fig = go.Figure()
+for segment, color, name in (("declared", DEC, "Declared"), ("assessed", ASS, "Assessed")):
+    part = rep[rep.segment == segment]
+    fig.add_trace(go.Bar(
+        x=part.multiplicity, y=part.share_stock, name=name, marker_color=color,
+        text=[f"{int(n):,} firms" for n in part.n_firms], textposition="outside",
+    ))
+fig.update_layout(template="plotly_white", barmode="group", height=460,
+                  legend=dict(orientation="h", y=-0.2, x=0),
+                  margin=dict(l=60, r=20, t=20, b=60),
+                  yaxis=dict(title="Share of segment stock", tickformat=".0%", range=[0, 1.18]))
+show(fig)
+```
+
+```{python}
+#| label: tbl-repeated
+#| tbl-cap: "Firms with one certificate and firms with two or more certificates, by segment."
+rep_show = rep.copy()
+rep_show["firms"] = rep_show.n_firms.map(nfmt)
+rep_show["share of firms (%)"] = rep_show.share_firms.map(lambda v: pct(v))
+rep_show["share of stock (%)"] = rep_show.share_stock.map(lambda v: pct(v))
+display(rep_show[["segment", "multiplicity", "firms", "share of firms (%)", "share of stock (%)"]])
+print(
+    f"Declared: {nfmt(rep.loc[(rep.segment=='declared') & (rep.multiplicity.str.startswith('Two')), 'n_firms'].iloc[0])} firms "
+    "have two or more certificates. They are 67.4 percent of declared firms and hold 99.2 percent of declared stock. "
+    f"Assessed: {nfmt(rep.loc[(rep.segment=='assessed') & (rep.multiplicity.str.startswith('Two')), 'n_firms'].iloc[0])} firms "
+    "have two or more certificates. They are 31.9 percent of assessed firms and hold 82.3 percent of assessed stock. "
+    f"Cramér's V is 0.26 on {nfmt(chi.loc[chi.attribute=='repeated enrollment', 'n_firms'].iloc[0])} firm-segment rows. "
+    f"Separately, {nfmt(overlap.firms_in_both_segments)} firms hold at least one certificate in each segment. "
+    f"Firms with two or more certificates in either segment, counted once: {nfmt(overlap.firms_two_or_more_cdas_any_segment)}."
+)
+```
+
+## What this does not show
+
+The register is observed after the debts, so closure and unfitness can be consequences. Certificate-level tests describe the portfolio. Certificates of the same firm are not independent, which is why the firm-level effect sizes are reported beside them. The 1 percent cut describes where the stock sits. It does not show that collecting those certificates would recover the stock. The evidence is a December 2025 cross-section, not a follow-up of each firm.

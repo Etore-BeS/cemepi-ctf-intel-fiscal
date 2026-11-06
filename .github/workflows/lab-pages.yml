@@ -1,5 +1,5 @@
-# Publica lab/ no GitHub Pages (docs/ESTRUTURA.md §6). O CI não tem dados, Jupyter nem segredos:
-# o site é montado só a partir do que está no git (fontes + lab/_freeze/).
+# Publica só a página única do EDA no GitHub Pages. O CI não tem dados, Jupyter nem segredos:
+# o HTML sai do que está no git (fontes + lab/_freeze/). A home e os suplementos não entram no artefato.
 name: lab-pages
 
 on:
@@ -63,12 +63,15 @@ jobs:
             test -s "lab/_site/paper_eda/$f" || { echo "::error::falta lab/_site/paper_eda/$f"; exit 1; }
           done
 
-      - name: PII no HTML gerado
-        run: python3 scripts/pii_check.py lab/_site
+      - name: Artefato só com a página do EDA (raiz e /paper_eda/)
+        run: python3 lab/paper_eda/_publish_eda_only.py
+
+      - name: PII no HTML publicado
+        run: python3 scripts/pii_check.py lab/_site_pages
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: lab/_site
+          path: lab/_site_pages
 
   deploy:
     needs: build

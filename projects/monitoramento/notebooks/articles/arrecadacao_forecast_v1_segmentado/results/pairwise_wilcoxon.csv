@@ -304,7 +304,7 @@ autuado,monthly,M3_HGB_tuned,M6_ARF_regressor,12,12,-36.60175828745858,7.0,0.009
 autuado,monthly,M3_HGB_tuned,M8_KRR_laplacian,12,12,-1.5009676573296105,36.0,0.85009765625,0.8926025390625001,M3_HGB_tuned
 autuado,monthly,M3_HGB_tuned,M7_GPR_RBF,12,12,-38.125066380401876,5.0,0.0048828125,0.0244140625,M3_HGB_tuned
 autuado,monthly,M3_HGB_tuned,M5_MLP2_torch,12,12,-94.59355194966932,0.0,0.00048828125,0.003943810096153846,M3_HGB_tuned
-autuado,monthly,M3_HGB_tuned,E2_energy_selector_proxy_ablation,12,3,0.0,0.0,0.25,0.34539473684210525,tie
+autuado,monthly,M3_HGB_tuned,E2_energy_selector_proxy_ablation,12,,0.0,0.0,0.25,0.34539473684210525,tie
 autuado,monthly,M3_HGB_tuned,E4_ScoreGrad,12,12,-52.973469888113186,3.0,0.00244140625,0.015079273897058822,M3_HGB_tuned
 autuado,monthly,M3_HGB_tuned,E3_TimeGrad,12,12,-76.24154225969005,1.0,0.0009765625,0.00732421875,M3_HGB_tuned
 autuado,monthly,M3_HGB_tuned,M9_TimesFM3,12,12,-24.65872376299066,8.0,0.01220703125,0.03662109375,M3_HGB_tuned
@@ -754,7 +754,7 @@ declarado,monthly,M3_HGB_tuned,M6_ARF_regressor,12,12,-15.354299771983282,0.0,0.
 declarado,monthly,M3_HGB_tuned,M8_KRR_laplacian,12,12,-0.9781321437480632,30.0,0.5185546875,0.68060302734375,M3_HGB_tuned
 declarado,monthly,M3_HGB_tuned,M7_GPR_RBF,12,12,-27.11255762094244,0.0,0.00048828125,0.003662109375,M3_HGB_tuned
 declarado,monthly,M3_HGB_tuned,M5_MLP2_torch,12,12,1.1367189527216275,34.0,0.7333984375,0.8370308254076086,M5_MLP2_torch
-declarado,monthly,M3_HGB_tuned,E2_energy_selector_proxy_ablation,12,3,0.0,1.0,0.5,0.68060302734375,tie
+declarado,monthly,M3_HGB_tuned,E2_energy_selector_proxy_ablation,12,,0.0,1.0,0.5,0.68060302734375,tie
 declarado,monthly,M3_HGB_tuned,E4_ScoreGrad,12,12,1.7542349108589477,38.0,0.9697265625,0.9790508563701923,E4_ScoreGrad
 declarado,monthly,M3_HGB_tuned,E3_TimeGrad,12,12,2.306058187092293,22.0,0.20361328125,0.4033848024764151,E3_TimeGrad
 declarado,monthly,M3_HGB_tuned,M9_TimesFM3,12,12,-8.469416774133471,11.0,0.02685546875,0.08811950683593749,M3_HGB_tuned
@@ -859,7 +859,7 @@ declarado,weekly,W_M3_HGB_tuned,W_M6_ARF_regressor,13,13,-10.684727642930163,20.
 declarado,weekly,W_M3_HGB_tuned,W_M8_KRR_rbf,13,13,0.5413151086326558,44.0,0.946044921875,0.9738697725183824,W_M8_KRR_rbf
 declarado,weekly,W_M3_HGB_tuned,W_M7_GPR_RBF_cap200,13,13,-32.33118888224164,13.0,0.021484375,0.064453125,W_M3_HGB_tuned
 declarado,weekly,W_M3_HGB_tuned,W_M5_MLP2_torch,13,13,-15.035150830960042,25.0,0.167724609375,0.2984929488877119,W_M3_HGB_tuned
-declarado,weekly,W_M3_HGB_tuned,W_E2_energy_selector_proxy_ablation,13,1,0.0,0.0,1.0,1.0,tie
+declarado,weekly,W_M3_HGB_tuned,W_E2_energy_selector_proxy_ablation,13,,0.0,0.0,1.0,1.0,tie
 declarado,weekly,W_M3_HGB_tuned,W_E4_ScoreGrad,13,13,-15.35427220110438,35.0,0.497314453125,0.6071862509084303,W_M3_HGB_tuned
 declarado,weekly,W_M3_HGB_tuned,W_E3_TimeGrad,13,13,-43.516593399194726,11.0,0.013427734375,0.061300526494565216,W_M3_HGB_tuned
 declarado,weekly,W_M3_HGB_tuned,W_M9_TimesFM3,13,13,-13.530490401426114,28.0,0.243896484375,0.371146824048913,W_M3_HGB_tuned
@@ -1309,7 +1309,7 @@ total,weekly,W_M3_HGB_tuned,W_M6_ARF_regressor,13,13,-21.54596278891967,24.0,0.1
 total,weekly,W_M3_HGB_tuned,W_M8_KRR_laplacian,13,13,-22.23794248855952,26.0,0.19091796875,0.3712293836805556,W_M3_HGB_tuned
 total,weekly,W_M3_HGB_tuned,W_M7_GPR_RBF_cap200,13,13,-29.402741102396014,24.0,0.146484375,0.3204345703125,W_M3_HGB_tuned
 total,weekly,W_M3_HGB_tuned,W_M5_MLP2_torch,13,13,-11.357329648669491,25.0,0.167724609375,0.3453153722426471,W_M3_HGB_tuned
-total,weekly,W_M3_HGB_tuned,W_E2_energy_selector_proxy_ablation,13,4,0.0,3.0,0.625,0.7497448867626405,tie
+total,weekly,W_M3_HGB_tuned,W_E2_energy_selector_proxy_ablation,13,,0.0,3.0,0.625,0.7497448867626405,tie
 total,weekly,W_M3_HGB_tuned,W_E4_ScoreGrad,13,13,-0.6554734257332129,38.0,0.635498046875,0.7497448867626405,W_M3_HGB_tuned
 total,weekly,W_M3_HGB_tuned,W_E3_TimeGrad,13,13,-35.07466292606171,11.0,0.013427734375,0.1007080078125,W_M3_HGB_tuned
 total,weekly,W_M3_HGB_tuned,W_M9_TimesFM3,13,13,-9.010100308786797,36.0,0.541748046875,0.67718505859375,W_M3_HGB_tuned
