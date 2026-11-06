@@ -1,0 +1,278 @@
+---
+title: "Declared and assessed VAT inference"
+description: "Payment logits and quantile regressions of the balance, using the specification selected in section 4.5."
+date: 2026-11-04
+jupyter: python3
+---
+
+**Data.** December 2025 snapshot (`MES_EXTRACAO = 12`, as of 2025-12-31) of declared and assessed VAT (ICMS) certificates. Payments are GARE amounts dated before 1 January 2026. Firm attributes come from the March 2026 CNPJ register already joined in section 3.15. The unit is the certificate (CDA). The loader is the section 4.5 loader. The estimation table has no debtor name, no debtor CPF and no CNPJ. The firm join uses the CNPJ inside DuckDB, and that key does not leave the query.
+
+**Specification.** Section 4.5 selects the models below. This page fits those models. It does not repeat the diagnostic and it does not choose a different specification.
+
+**Status.** The computation is `analyze.py` in the folder of the same name. Render this page on the machine that has the extract. The cloud copy runs the same functions on synthetic rows and does not read the extract.
+
+::: {.callout-note title="Render on the machine with the disk"}
+The page checks the section 3.15 counts before it fits anything, because it calls the section 4.5 loader. Population totals below are those counts.
+
+```bash
+cd /path/to/cemepi-ctf-intel-fiscal
+uv run --no-sync quarto render lab/eda/2026-11-04_inferencia_avd.qmd --profile partes
+uv run --no-sync python lab/paper_eda/_pagina_unica.py
+```
+
+```fish
+cd /path/to/cemepi-ctf-intel-fiscal
+uv run --no-sync quarto render lab/eda/2026-11-04_inferencia_avd.qmd --profile partes
+uv run --no-sync python lab/paper_eda/_pagina_unica.py
+```
+:::
+
+Section 4.5 is the linearity and group-heterogeneity diagnostic. Section 4.6 is the Wilcoxon benchmark. This page is section 4.7.
+
+```{python}
+#| label: load-sample
+import sys
+from pathlib import Path
+
+import pandas as pd
+from IPython.display import HTML, display
+
+ENTRY = Path.cwd() / "2026-11-04_inferencia_avd"
+if not ENTRY.is_dir():
+    ENTRY = Path.cwd() / "eda" / "2026-11-04_inferencia_avd"
+if not ENTRY.is_dir():
+    raise RuntimeError("The inference folder is not next to this page.")
+sys.path.insert(0, str(ENTRY))
+import analyze
+
+infer = analyze.infer
+pd.set_option("display.max_colwidth", 120)
+sample, pop = analyze.load_estimation_frame()
+frame = infer.prepare(sample)
+del sample
+SEED = 20261104
+```
+
+```{python}
+#| label: payment-declared
+declared = infer.block_payment(frame, "declared", SEED)
+```
+
+```{python}
+#| label: payment-assessed
+assessed = infer.block_payment(frame, "assessed", SEED)
+```
+
+```{python}
+#| label: quantiles
+quantiles = infer.block_quantiles(frame, SEED)
+```
+
+```{python}
+#| label: recovery-comparison
+recovery = infer.block_recovery(frame, SEED)
+```
+
+```{python}
+#| label: curves
+curves = pd.concat([declared["curves"], assessed["curves"]], ignore_index=True)
+figures = infer.figures_from_curves(curves)
+coefficients = pd.concat(
+    [
+        declared["coefficients"],
+        assessed["coefficients"],
+        recovery["coefficients"],
+    ],
+    ignore_index=True,
+)
+variance = pd.concat(
+    [declared["variance"], assessed["variance"]], ignore_index=True
+)
+status = pd.concat([declared["status"], assessed["status"]], ignore_index=True)
+account = pd.concat(
+    [declared["sample_account"], assessed["sample_account"]], ignore_index=True
+)
+seconds = pd.DataFrame(
+    [
+        {"block": "payment_declared_logit", "seconds": declared["seconds_logit"], "n": declared["n"]},
+        {"block": "payment_declared_mixed", "seconds": declared["seconds_mixed"], "n": int(declared["variance"]["n"].iloc[0])},
+        {"block": "payment_assessed_logit", "seconds": assessed["seconds_logit"], "n": assessed["n"]},
+        {"block": "quantiles", "seconds": quantiles["seconds"], "n": quantiles["n"]},
+        {"block": "recovery_comparison", "seconds": recovery["seconds"], "n": len(frame)},
+    ]
+)
+```
+
+## Sample
+
+The population is every declared and assessed certificate in the December 2025 snapshot. DuckDB applies the same filters as section 4.5 and draws a stratified sample of at most 200,000 complete certificates. Strata are segment × firm size × any payment. The memory limit is 900 MB and the spill directory is `/tmp`.
+
+The main payment logit, in each segment, uses at most 40,000 certificates, stratified by any payment. That is the section 4.5 spline cap. The declared municipal complement uses the section 4.5 cluster sample: whole municipalities, at most 30 certificates from each, stopping at 8,000 certificates. Quantile regression uses at most 20,000 certificates inside each segment. A segment smaller than that cap is kept whole. The recovery comparison uses the estimation sample.
+
+A section or firm-size level with fewer than 10 certificates, fewer than 5 firms, or 1 to 4 payers is pooled. A pool that is itself a small cell is dropped and is not a coefficient. A level with no payers, or with only payers, is dropped because it separates the logit. Municipality random effects are not listed.
+
+Section 4.5 fits its assessed spline on every assessed certificate in the estimation sample, because that segment is under 40,000. This logit starts from those same rows. `n_dropped_small_pool` counts certificates removed with a small pool. `n_dropped_separation` counts certificates removed with a separated level. Their sum is the gap versus the section 4.5 assessed spline sample. The render of `7bae7de` had 5,126 assessed certificates in that spline sample and 5,063 in this logit, a gap of 63. Those 63 are this filter. They are not null stock and not null debt age: those rows already leave in the section 4.5 complete-case sample. The table splits the gap on this render.
+
+```{python}
+#| label: tbl-population
+#| tbl-cap: "Population counts from the section 4.5 loader, checked against section 3.15, and the rows used in each block."
+print(
+    f"Declared: {pop['n_declared']:,} certificates, stock R${pop['stock_declared'] / 1e9:.2f} billion. "
+    f"Assessed: {pop['n_assessed']:,} certificates, stock R${pop['stock_assessed'] / 1e9:.2f} billion."
+)
+print(
+    f"Eligible complete cases: {pop['n_eligible']:,}. "
+    f"Estimation sample: {pop['n_sample']:,}."
+)
+display(HTML(infer.diag.publish(seconds)))
+display(HTML(infer.diag.publish(account)))
+```
+
+## Payment logit
+
+Section 4.5 reports a method-of-moments intraclass correlation of 0.061 for Declared municipalities and 0.034 for Assessed municipalities. Those two numbers select the random intercept. This page does not recompute them.
+
+The main model, in each segment, is a fixed-effects logit. Declared:
+
+$$
+\operatorname{logit}\Pr(P_i=1)
+  = s_1(\log(1+S_i)) + s_2(\mathrm{age}_i) + z_i^\top\alpha.
+$$
+
+Assessed:
+
+$$
+\operatorname{logit}\Pr(P_i=1)
+  = \beta\log(1+S_i) + s_2(\mathrm{age}_i) + z_i^\top\alpha.
+$$
+
+$P_i=1$ when the certificate has any GARE payment dated before 1 January 2026. $S_i$ is the December 2025 stock net of legal fees. $\mathrm{age}_i$ is debt age in years. $s_1$ and $s_2$ are restricted cubic splines with 4 degrees of freedom, centered so the basis is not collinear with the intercept (Durrleman and Simon 1989, with the centering constraint). $z_i$ holds CNAE section, with G (trade) as the reference when it is present, and firm size, with Micro (code 01) as the reference when it is present. The same references are in section 4.5.
+
+The fixed-effects table has two rows per term. `HC3` is the MacKinnon and White (1985) 95 percent interval. `cluster` is the same point estimate with the 95 percent interval clustered by the 8-digit CNPJ root. The root is not printed.
+
+The fit table has one row per logit: `n` certificates, `rank` and `n_columns` of the design, `converged` from the maximum-likelihood return, and McFadden's pseudo-$R^2$,
+
+$$
+R^2_{\mathrm{McFadden}} = 1 - \frac{\log L}{\log L_0},
+$$
+
+where $\log L_0$ is the intercept-only log-likelihood.
+
+Declared also has a complement, fit on the cluster sample, with a municipal random intercept $b_{m(i)}$:
+
+$$
+\operatorname{logit}\Pr(P_i=1)
+  = s_1(\log(1+S_i)) + s_2(\mathrm{age}_i) + z_i^\top\alpha + b_{m(i)}.
+$$
+
+For that complement, `se` is the variational posterior standard deviation and `ci_low` / `ci_high` are the approximate posterior interval, the posterior mean plus or minus 1.96 posterior standard deviations. That interval is not a 95 percent confidence interval. The variational fit stores the standard deviations and not their covariance. The random-intercept row is the approximate posterior interval of the municipality standard deviation, $\tau=\exp(\hat\ell)$. The intraclass correlation of the fit is $\tau^2/(\tau^2+\pi^2/3)$ (Goldstein, Browne and Rasbash 2002). It is a property of this complement. It is not the section 4.5 screen. The table does not list a municipality coefficient.
+
+**How to read the coefficient tables.** One row per term and interval. `coef` is the log-odds coefficient. An interval that covers zero is compatible with a zero coefficient in this specification.
+
+```{python}
+#| label: formulas
+print(declared["coefficients"]["formula"].iloc[0])
+print(assessed["coefficients"]["formula"].iloc[0])
+```
+
+```{python}
+#| label: tbl-status
+#| tbl-cap: "Fixed-effects logit: sample size, design rank, convergence, and McFadden pseudo-R²."
+display(HTML(infer.diag.publish(status)))
+```
+
+```{python}
+#| label: tbl-payment
+#| tbl-cap: "Fixed-effects payment logit. HC3 95 percent interval beside the interval clustered by the CNPJ root."
+display(HTML(infer.diag.publish(coefficients.loc[coefficients.model == "logit"])))
+```
+
+```{python}
+#| label: tbl-mixed
+#| tbl-cap: "Declared complement: variational random intercept. ci_low and ci_high are the approximate posterior interval, not a 95 percent confidence interval."
+display(HTML(infer.diag.publish(coefficients.loc[coefficients.model == "mixed_logit"])))
+```
+
+```{python}
+#| label: tbl-variance
+#| tbl-cap: "Declared municipal random intercept. The tau interval is the approximate posterior interval. icc is computed from tau."
+display(HTML(infer.diag.publish(variance)))
+```
+
+## Partial log-odds curves
+
+The curves are from the fixed-effects logits. At a grid value $x$, the vertical coordinate is the linear predictor with that variable set to $x$, minus the linear predictor with that variable set to its median in the fit sample. Other covariates stay at the first fitted row and cancel in the difference.
+
+The grid has 40 points from the 5th to the 95th percentile of the fit sample. The solid line is the point estimate. The dotted lines are the pointwise HC3 95 percent interval, from the full HC3 covariance of the fixed-effects logit. Declared is teal and assessed is orange. No certificate is drawn. The assessed log-stock curve is a straight line because that term is linear. The other three curves are centered splines. The municipal complement is not drawn.
+
+**Limit of the figure.** The vertical axis is a contrast in this specification, on this sample.
+
+```{python}
+#| label: fig-partial-stock
+#| fig-cap: "Partial payment log-odds against log(1+stock). Solid line: point estimate. Dotted lines: pointwise 95 percent interval. The curve is zero at the median."
+figures["partial_log_stock"].show()
+```
+
+```{python}
+#| label: fig-partial-age
+#| fig-cap: "Partial payment log-odds against debt age in years. Solid line: point estimate. Dotted lines: pointwise 95 percent interval. The curve is zero at the median."
+figures["partial_debt_age"].show()
+```
+
+## Quantile regression of the balance
+
+Section 4.5 sets ordinary least squares aside for the stock equation. This page does not fit an OLS of $\log(1+S_i)$. The stock equation is a quantile regression (Koenker and Bassett 1978), fit separately in Declared and in Assessed:
+
+$$
+Q_{\tau}(\log(1+S_i)\mid x_i) = x_i^\top\beta(\tau),
+\qquad \tau\in\{0.25,\,0.50,\,0.75,\,0.90\}.
+$$
+
+$x_i$ is debt age, CNAE section and firm size, with the same references as the payment logit. Log stock is the outcome, so it is not a regressor. The interval is the default 95 percent interval of the quantile regression.
+
+**How to read.** One row per term, segment and $\tau$. The coefficient is the change in the $\tau$ quantile of log stock associated with a one-unit change in the regressor, other terms held fixed, in this specification. The four values of $\tau$ are four rows, not four claims about the shape of the distribution.
+
+```{python}
+#| label: tbl-quantiles
+#| tbl-cap: "Quantile regression of log(1+stock) at τ = 0.25, 0.50, 0.75 and 0.90, by segment. No OLS column."
+display(HTML(infer.diag.publish(quantiles["quantiles"])))
+```
+
+## Recovery as a comparison
+
+Section 4.5 keeps the linear recovery equation as a comparison with the payment logit. The outcome is $R_i=P_i/S_i$. The regressors are log stock, debt age, CNAE section and firm size. The fit is ordinary least squares inside each segment. `HC3` is the MacKinnon and White (1985) interval. `cluster` is the same point estimate with standard errors clustered by the 8-digit CNPJ root. The root is not printed.
+
+**How to read.** One row per term, segment and standard-error type. This table is the linear comparison. It is not the stock equation.
+
+```{python}
+#| label: tbl-recovery
+#| tbl-cap: "OLS of recovery (payments / stock), by segment. HC3 beside standard errors clustered by the CNPJ root. Comparison only."
+display(HTML(infer.diag.publish(recovery["coefficients"])))
+```
+
+## Premissas
+
+These are the working rules of section 4.5, applied here without a new cut.
+
+- The specification is fixed. Both segments use a fixed-effects payment logit as the main model. Declared puts centered splines on log stock and on debt age, because the section 4.5 screen for that segment is 0.061, and adds a municipal random intercept as a complement on the cluster sample. Assessed puts a centered spline on debt age and a linear log-stock term, and no random intercept, because that screen is 0.034.
+- Each spline is `cr(x, df=4, constraints='center')`. The centering constraint removes the column that sums to 1, which is collinear with the intercept. The degrees of freedom stay 4.
+- The fixed-effects logit is kept only when the maximum likelihood converged and the design has full column rank.
+- Sample caps: 200,000 certificates in the estimation sample; 40,000 per segment in the fixed-effects logit; 8,000 in the declared cluster sample, with at most 30 certificates per municipality; 20,000 per segment in the quantile regression. A segment under a cap is kept whole.
+- Quantile levels are $\tau=0.25$, $0.50$, $0.75$ and $0.90$. The stock equation has no OLS column.
+- The recovery OLS is a comparison. It is not a second stock model.
+- A section or firm-size level with fewer than 10 certificates, fewer than 5 firms, or 1 to 4 payers is pooled. A pool that stays under that rule is dropped. A level that separates the logit is dropped. Those two drops are the gap versus the section 4.5 assessed spline sample. Counts of 1 to 4 payers are not printed.
+- Municipality effects in the complement are summarised by $\tau$ and by the intraclass correlation of that fit. They are not listed. The complement interval is an approximate posterior interval.
+- The curve band is the pointwise HC3 95 percent interval from the fixed-effects logit.
+- A second render reads the coefficient and curve tables from the local cache when the fit sample is unchanged. The cache is not part of the page. It is listed in `.gitignore`.
+
+## References
+
+Durrleman, S., and Simon, R. (1989). Flexible regression models with cubic splines. *Statistics in Medicine* 8, 551–561. <https://doi.org/10.1002/sim.4780080504>
+
+Goldstein, H., Browne, W., and Rasbash, J. (2002). Partitioning variation in multilevel models. *Understanding Statistics* 1, 223–231. <https://doi.org/10.1207/S15328031US0104_02>
+
+Koenker, R., and Bassett, G. (1978). Regression quantiles. *Econometrica* 46, 33–50. <https://doi.org/10.2307/1913643>
+
+MacKinnon, J. G., and White, H. (1985). Some heteroskedasticity-consistent covariance matrix estimators with improved finite sample properties. *Journal of Econometrics* 29, 305–325. <https://doi.org/10.1016/0304-4076(85)90158-7>
+
+The list above is also in `docs/references/referencias_grounded.md`. Section 4.5 cites the same sources.

@@ -6,7 +6,11 @@ Site: `https://etore-bes.github.io/cemepi-ctf-intel-fiscal/` (depois do primeiro
 ## Como funciona
 
 1. Você escreve/edita uma entrada em `lab/eda/AAAA-MM-DD_<tema>.qmd` (modelo: `eda/_modelo_entrada.qmd`).
-2. **Renderiza localmente**, com o HD montado: o Quarto executa o código e grava os resultados em `lab/_freeze/`.
+2. **Renderiza localmente**, com o HD montado: `uv run --no-sync quarto render lab/eda/<entrada>.qmd --profile partes`
+   executa o código e grava os resultados em `lab/_freeze/`. Depois, `uv run --no-sync python
+   lab/paper_eda/_pagina_unica.py` põe a entrada na página única (seção "L. Análises do laboratório"; inclua a
+   entrada nova em `LAB_PAGES` de `_pagina_unica.py`). Desde 26/10/2026 (CTF-03) as entradas **não são páginas
+   do site**: todo o conteúdo fica num HTML só, com navegação pelo sumário lateral.
 3. Faz commit da fonte **e** de `lab/_freeze/`, e push na `main`.
 4. O workflow `.github/workflows/lab-pages.yml` confere o freeze, roda o PII check, monta o site **sem executar
    código** e publica no Pages.
@@ -52,15 +56,59 @@ git add lab/ && git commit -m "lab: <tema> (AAAA-MM-DD)" && git push
 
 Atenção:
 
-- Renderize **o projeto** (`quarto render lab`). Renderizar um arquivo solto ou uma subpasta
-  (`quarto render lab/eda/x.qmd`) sempre reexecuta o código desse arquivo. Isso também atualiza
-  o freeze dele, mas não vale como render do site.
+- Renderize **o projeto** (`quarto render lab`) para montar o site. Para executar uma entrada ou parte e
+  atualizar o freeze dela, use `quarto render <arquivo> --profile partes` (sem o perfil, o arquivo fica fora do
+  projeto e o freeze não muda). Apague depois o HTML solto que esse comando deixa em `lab/_site/`.
 - **Não** use `--no-execute`: no Quarto 1.10 ele ignora o `_freeze/` e gera páginas sem figuras
   (testado em 23/10/2026).
 - Dados de entrada mudaram (novo painel, nova extração)? Apague o freeze da entrada
   (`rm -r lab/_freeze/eda/<entrada>`) ou o `_freeze/` inteiro e renderize de novo.
   O `freeze: auto` só olha a fonte, não os dados.
 - Suplementos de artigos (`lab/suplementos/`) usam `freeze: true`: nunca são reexecutados.
+
+## EDA do paper (`lab/paper_eda/`): uma página só
+
+`/paper_eda/` é **uma página só**, `lab/paper_eda/index.qmd`, com sumário lateral e quadro de novidades. Ela não
+executa código: é montada por `_pagina_unica.py` a partir do resultado já executado das 8 partes
+(`lab/_freeze/paper_eda/<parte>/`). As partes (`01_dados.qmd` … `08_parte_e.qmd`) continuam no repositório porque
+o freeze delas é a fonte da página única, mas **não são páginas do site**: ficam fora do `render:` de `_quarto.yml`
+(não use `"*.qmd"` lá: sem `/`, o padrão casa em subpastas e traz as partes de volta).
+
+**Abrir sem servidor (um arquivo só).** Para ler o EDA do paper com duplo clique, sem preview nem servidor:
+
+```fish
+cd ~/Code/cemepi-lab; and uv run --no-sync python lab/paper_eda/_html_unico.py
+open ~/Desktop/EDA_paper_CEMEPI.html     # ou lab/_site/paper_eda/EDA_paper_CEMEPI.html
+```
+
+O `_html_unico.py` remonta a página do `_freeze`, renderiza só ela (não tem código, nada é executado) e embute
+CSS, JS, plotly.js, MathJax, fontes e as 4 figuras pesadas num único HTML (cerca de 22 MB) que abre via `file://`
+sem internet. Na primeira vez ele baixa os arquivos da CDN e guarda em `~/.cache/cemepi-lab/cdn/`. Esse arquivo não
+é publicado (o CI não roda este script).
+
+**Assinatura do `macro.duckdb` (desde 26/10/2026).** A chave do cache inclui tamanho e data do `cemepi.duckdb` e do
+`macro.duckdb`. A série SGS 4189 entrou no `macro.duckdb` em 26/10/2026 sem mudar nenhuma das outras 16 séries
+(conferido por EXCEPT ALL contra o backup), e o lab não lê a 4189 do banco. Para reaproveitar o cache, exporte antes de
+executar qualquer parte ou entrada (o CI não precisa disso, porque não executa):
+
+```fish
+set -x CEMEPI_MACRO_FP_PIN 798720:1790442383   # assinatura do macro.duckdb anterior à 4189
+```
+
+Reexecutar uma parte (só quando a fonte dela mudar; o código roda e usa o cache do HD):
+
+```fish
+cd ~/Code/cemepi-lab
+uv run --no-sync python lab/paper_eda/_gerar_paginas.py        # regera as partes a partir do notebook (só leitura)
+uv run --no-sync quarto render lab/paper_eda/04_parte_b2.qmd --profile partes   # executa a parte e atualiza lab/_freeze/paper_eda/04_parte_b2/
+# (sem --profile partes a parte é renderizada como arquivo solto, fora do projeto, e o _freeze NÃO muda)
+uv run --no-sync python lab/paper_eda/_pagina_unica.py         # remonta lab/paper_eda/index.qmd (avisa se um freeze estiver velho)
+rm -f lab/_site/paper_eda/0*.html                              # o render solto da parte deixa um HTML que não é página do site
+uv run --no-sync quarto render lab                             # site inteiro, sem reexecutar nada
+uv run --no-sync python scripts/check_freeze.py --project lab
+```
+
+Ver localmente: `uv run --no-sync quarto preview lab --no-render` e abra `http://localhost:<porta>/paper_eda/`.
 
 ## Converter o `EDA_completo.ipynb` atual
 

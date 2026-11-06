@@ -1,0 +1,66 @@
+---
+title: "Variables of the recoverability (impairment) model: availability in the data"
+description: "Which variables of the recoverability model are available, partial, missing or out of scope in the VAT (ICMS) legal-entity extract?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Status:** exploration. This entry does not query the extract.
+
+::: {.callout-warning title="Availability is not a recovery rate"}
+The table records whether a variable can be built from the current extract. It does not measure how much is collected.
+:::
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+
+def _boot() -> None:
+    here = Path.cwd().resolve()
+    for cand in (here, here / "eda", here / "lab" / "eda", *list(here.parents)[:6]):
+        if (cand / "_impairment.py").exists():
+            if str(cand) not in sys.path:
+                sys.path.insert(0, str(cand))
+            return
+    raise RuntimeError("Helper module _impairment.py is not on the working path.")
+
+_boot()
+import os
+import _impairment as I
+
+params = I.PgeParams()
+synthetic = os.environ.get("IMP23_SYNTHETIC") == "1"
+print(I.assumptions_text(params, synthetic=synthetic))
+print(I.cited_material_note())
+```
+
+## Question
+
+Which variables of the recoverability model are available in the VAT (ICMS) legal-entity extract, which are only partly available, and which are missing?
+
+## Data
+
+No query. The rows are the proposal's variable list, translated and coded in the helper. The citation of the source material is printed by the setup cell.
+
+## Method
+
+Each variable takes one status: available, partial, missing, or not applicable. Partial means the field exists and it is a proxy, or the lab does not load it in the form the proposal uses. Not applicable means the variable belongs to natural persons, which this lab does not analyse.
+
+## How to read
+
+One row is one variable. Read the status column as an availability label. Read the caveat column for the limit of that field. Do not read a status as a share of stock or as a rate of recovery.
+
+```{python}
+#| label: tbl-variables
+#| tbl-cap: "Variables of the recoverability model and their availability in the VAT (ICMS) legal-entity extract."
+table = I.variable_table()
+counts = table.group_by("status").len().sort("status")
+print("Count of variables by status:")
+print(counts)
+I.publish(table)
+```
+
+## What not to conclude
+
+A variable marked available is not evidence that the credit is recovered. A missing guarantee table means any later classification understates the collectable class. Registry fields describe the firm at the register date printed above, which is later than the debts. The two percentages cited from the seminar material are not recomputed on this page.

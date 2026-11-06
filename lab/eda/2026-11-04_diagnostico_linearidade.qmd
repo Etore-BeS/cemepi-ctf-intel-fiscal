@@ -1,0 +1,406 @@
+---
+title: "Linearity and group heterogeneity diagnostics for the Declared × Assessed inference"
+description: "Which inference does the December 2025 certificate cross-section support: a linear logit, a spline logit, quantile regression of the balance, or a mixed logit?"
+date: 2026-11-04
+jupyter: python3
+---
+
+**Data.** December 2025 snapshot (`MES_EXTRACAO = 12`, as of 2025-12-31) of declared and assessed VAT (ICMS) certificates. Payments are GARE amounts dated before 1 January 2026. Firm attributes come from the March 2026 CNPJ register already joined in section 3.15. The unit is the certificate (CDA).
+
+**Question.** The declared × assessed paper needs one inference before the EAA deadline of 1 December 2026. This page fits the candidate specifications on the same sample and ends with the specification the diagnostics support.
+
+**Status.** The computation is `analyze.py` in the folder of the same name. Render this page on the machine that has the extract. The cloud copy runs the same functions on synthetic rows and does not read the extract.
+
+::: {.callout-note title="Render on the machine with the disk"}
+The page checks the section 3.15 counts before it fits anything. Population totals below are those counts, not a second extract.
+
+```bash
+cd /path/to/cemepi-ctf-intel-fiscal
+uv run --no-sync quarto render lab/eda/2026-11-04_diagnostico_linearidade.qmd --profile partes
+uv run --no-sync python lab/paper_eda/_pagina_unica.py
+```
+
+```fish
+cd /path/to/cemepi-ctf-intel-fiscal
+uv run --no-sync quarto render lab/eda/2026-11-04_diagnostico_linearidade.qmd --profile partes
+uv run --no-sync python lab/paper_eda/_pagina_unica.py
+```
+:::
+
+Section 4.4 of the single lab page is already Persistence of recovery. This diagnostic is section 4.5. Section 4.2 remains the monthly series against macroeconomic indicators.
+
+```{python}
+#| label: load-sample
+import sys
+from pathlib import Path
+
+import pandas as pd
+from IPython.display import HTML, display
+
+ENTRY = Path.cwd() / "2026-11-04_diagnostico_linearidade"
+if not ENTRY.is_dir():
+    ENTRY = Path.cwd() / "eda" / "2026-11-04_diagnostico_linearidade"
+if not ENTRY.is_dir():
+    raise RuntimeError("The diagnostic folder is not next to this page.")
+sys.path.insert(0, str(ENTRY))
+import analyze
+
+diag = analyze.diagnose
+pd.set_option("display.max_colwidth", 120)
+sample, pop = analyze.load_estimation_frame()
+frame = diag.prepare(sample)
+del sample
+meta = {
+    "n_before": pop["n_eligible"],
+    "n_after": pop["n_sample"],
+    "n_trim": None,
+    "uf_sp_share": float(frame["uf"].astype(str).str.upper().eq("SP").mean()),
+    "stock_formula": diag.model_formula("log_stock", frame),
+    "recovery_formula": diag.model_formula("recovery", frame),
+}
+result = {"population": pop, "meta": meta, "figures": {}}
+```
+
+```{python}
+#| label: ols-reset
+ols = diag.block_ols_reset(frame, "full", with_quantiles=True)
+result["coefficients"] = ols["coefficients"]
+result["reset"] = ols["reset"]
+result["quantiles"] = ols["quantiles"]
+result["figures"].update(ols["figures"])
+result["_checks"] = ols["checks"]
+```
+
+```{python}
+#| label: splines
+splines = diag.block_splines(frame)
+result["spline"] = splines["spline"]
+result["bins"] = splines["bins"]
+result["categories"] = splines["categories"]
+result["porte_shape"] = splines["porte_shape"]
+result["figures"].update(splines["figures"])
+print(f"spline cache: {splines['cache']}")
+```
+
+```{python}
+#| label: icc-mixed
+groups = diag.block_groups(frame)
+result["groups"] = groups["groups"]
+result["group_counts"] = groups["group_counts"]
+result["icc"] = groups["icc"]
+result["figures"].update(groups["figures"])
+print(f"mixed cache: {groups['cache']}")
+```
+
+```{python}
+#| label: top1
+top = diag.block_ols_reset(diag.without_top_share(frame).reset_index(drop=True), "trim")
+meta["n_trim"] = top["n"]
+result["coefficients"] = pd.concat([result["coefficients"], top["coefficients"]], ignore_index=True)
+result["reset"] = pd.concat([result["reset"], top["reset"]], ignore_index=True)
+result["figures"].update(top["figures"])
+result["decision"] = diag.assemble_decision(
+    {"checks": result["_checks"], "coefficients": result["coefficients"]},
+    splines,
+    groups,
+    top,
+    meta["n_after"],
+)
+```
+
+## Sample
+
+The population is every declared and assessed certificate in the December 2025 snapshot. The fits use a stratified sample of at most 200,000 complete cases. Strata are segment × firm size × any payment. DuckDB spills to `/tmp` with a 900 MB memory limit. The sensitivity sample drops the largest 1 percent of that estimation sample by stock, `ceil(0.01 × n)` certificates.
+
+A cell with fewer than 10 certificates or fewer than 5 firms is left blank. Municipality rows carry the municipality name and the UF only.
+
+```{python}
+#| label: tbl-population
+#| tbl-cap: "Population counts checked against section 3.15 segment_summary.csv, and the estimation sample."
+print(
+    f"Declared: {pop['n_declared']:,} certificates, stock R${pop['stock_declared'] / 1e9:.2f} billion. "
+    f"Assessed: {pop['n_assessed']:,} certificates, stock R${pop['stock_assessed'] / 1e9:.2f} billion."
+)
+print(
+    f"Eligible complete cases: {pop['n_eligible']:,}. "
+    f"Estimation sample: {pop['n_sample']:,}. "
+    f"After dropping the top 1 percent: {meta['n_trim']:,}."
+)
+print(f"Share of the estimation sample with UF = SP: {meta['uf_sp_share']:.3f}.")
+```
+
+## Outcomes and regressors
+
+Two outcomes, both ordinary least squares with HC3 standard errors (MacKinnon and White 1985) and, as a second column, standard errors clustered by the 8-digit CNPJ root.
+
+Stock, the main outcome:
+
+$$
+\log(1 + S_i) = x_i^\top\beta + \varepsilon_i
+$$
+
+Recovery, the second outcome:
+
+$$
+R_i = P_i / S_i = x_i^\top\gamma + u_i
+$$
+
+$S_i$ is the December 2025 stock net of legal fees. $P_i$ is the sum of GARE payments dated before 1 January 2026. $\log(1+S_i)$ is defined for every positive stock.
+
+Section 5.6.1, on the certificate-year panel, is
+
+$$
+\operatorname{logit}\Pr(Y_{it}=1) = \alpha + \beta_1\log S_{it} + \beta_2\mathrm{age}_{it} + \beta_3 r_{i,t-1} + \delta_t.
+$$
+
+This page is one cross-section, so the year effect $\delta_t$ and the lagged recovery $r_{i,t-1}$ are not in the design. Debt age is that model's age, in years, unlogged. Log stock is the stock outcome, and it is a regressor of recovery and of the payment logit. The added regressors are segment (declared as the reference), CNAE section (G, trade, as the reference when it is present) and firm size (Micro, code 01, as the reference when it is present).
+
+```{python}
+#| label: formulas
+print(meta["stock_formula"])
+print(meta["recovery_formula"])
+```
+
+## Linear estimates
+
+**How to read the coefficient tables.** One row per term. `coef_full` and `se_full` are the estimation sample. `coef_trim` and `se_trim` drop the top 1 percent by stock. The HC3 table is the one used for the decision. The cluster table is the same point estimates with a different standard error. An interval that covers zero is compatible with no partial association at this specification. The $R^2$ is the share of variance of the outcome linearly associated with $x$, in this sample. It is not an out-of-sample fit, and it is not a structural elasticity.
+
+```{python}
+#| label: tbl-stock-hc3
+#| tbl-cap: "OLS of log(1+stock). HC3 standard errors. Full estimation sample beside the sample without the top 1 percent."
+display(HTML(diag.publish(diag.side_by_side(result["coefficients"], "log_stock", "HC3"))))
+```
+
+```{python}
+#| label: tbl-recovery-hc3
+#| tbl-cap: "OLS of recovery (payments / stock). HC3 standard errors. Full estimation sample beside the sample without the top 1 percent."
+display(HTML(diag.publish(diag.side_by_side(result["coefficients"], "recovery", "HC3"))))
+```
+
+```{python}
+#| label: tbl-coefficients-long
+#| tbl-cap: "Every coefficient, both outcomes, both samples, HC3 and cluster standard errors."
+display(HTML(diag.publish(result["coefficients"])))
+```
+
+## Residual plots
+
+**How to read.** The colour in the residual plot is the number of certificates in a bin. The horizontal axis is the centre of a fitted-value bin and the vertical axis is the centre of a residual bin. Counts are computed in Python. A bin with fewer than 5 certificates is blank, so no certificate value is sent to the page. The grey line is a residual of zero. A fan means the occupied bins spread as the fitted value grows. A bend means the occupied bins leave the zero line.
+
+In the observed-against-fitted plot both axes are bin centres, in the outcome's units. The dashed line is the 45-degree line, the locus where the fitted value equals the observed value. Occupied bins that leave that line are a curved conditional mean. Bins that spread away from the line are heteroskedasticity, which HC3 already targets. The decision treats a Spearman correlation of at least 0.20 between the absolute residual and the fitted value, computed on the certificates and not drawn, as a material fan.
+
+The normal quantile plot has 40 theoretical normal quantiles on the horizontal axis and the matching quantiles of the residual distribution on the vertical axis. It is not a point per certificate. The dashed line goes through the quartiles of those 40 quantiles. Departure from that line is a departure from a normal residual, which does not by itself reject a linear mean.
+
+The first figure of each pair is the full estimation sample. The second drops the top 1 percent by stock.
+
+```{python}
+#| label: fig-stock-residual
+#| fig-cap: "Residuals of log(1+stock) against the fitted value. Full estimation sample, then the sample without the top 1 percent."
+diag.figure_html(result["figures"]["log_stock_full_residual_vs_fitted"])
+result["figures"]["log_stock_full_residual_vs_fitted"].show()
+diag.figure_html(result["figures"]["log_stock_trim_residual_vs_fitted"])
+result["figures"]["log_stock_trim_residual_vs_fitted"].show()
+```
+
+```{python}
+#| label: fig-stock-actual
+#| fig-cap: "Observed log(1+stock) against the fitted value, with the 45-degree line. Full estimation sample, then the sample without the top 1 percent."
+result["figures"]["log_stock_full_actual_vs_fitted"].show()
+result["figures"]["log_stock_trim_actual_vs_fitted"].show()
+```
+
+```{python}
+#| label: fig-stock-qq
+#| fig-cap: "Forty quantiles of the log-stock residuals against normal quantiles. Full estimation sample, then the sample without the top 1 percent."
+result["figures"]["log_stock_full_qq"].show()
+result["figures"]["log_stock_trim_qq"].show()
+```
+
+```{python}
+#| label: fig-stock-age
+#| fig-cap: "Log-stock residuals against debt age in years. Full estimation sample, then the sample without the top 1 percent."
+result["figures"]["log_stock_full_residual_vs_debt_age"].show()
+result["figures"]["log_stock_trim_residual_vs_debt_age"].show()
+```
+
+```{python}
+#| label: fig-recovery-residual
+#| fig-cap: "Residuals of recovery against the fitted value. Full estimation sample, then the sample without the top 1 percent."
+result["figures"]["recovery_full_residual_vs_fitted"].show()
+result["figures"]["recovery_trim_residual_vs_fitted"].show()
+```
+
+```{python}
+#| label: fig-recovery-actual
+#| fig-cap: "Observed recovery against the fitted value, with the 45-degree line. Full estimation sample, then the sample without the top 1 percent."
+result["figures"]["recovery_full_actual_vs_fitted"].show()
+result["figures"]["recovery_trim_actual_vs_fitted"].show()
+```
+
+```{python}
+#| label: fig-recovery-qq
+#| fig-cap: "Normal quantile plot of the recovery residuals."
+result["figures"]["recovery_full_qq"].show()
+result["figures"]["recovery_trim_qq"].show()
+```
+
+```{python}
+#| label: fig-recovery-regressors
+#| fig-cap: "Recovery residuals against debt age and against log stock."
+result["figures"]["recovery_full_residual_vs_debt_age"].show()
+result["figures"]["recovery_full_residual_vs_log_stock"].show()
+```
+
+## RESET and Harvey–Collier
+
+Ramsey's RESET (1969) adds the square and the cube of the fitted values to the linear equation and tests those two terms with an $F$ statistic (`power=3`, `use_f=True`). The HC3 variant uses the same added terms with a heteroskedasticity-consistent covariance (White 1980; MacKinnon and White 1985). The Harvey–Collier statistic is the one already used in section 4.2: a test that the mean of the recursive residuals is zero.
+
+The partial $R^2$ is the gain in $R^2$ from those two powers. At this sample size a small $p$-value is cheap. The decision uses a partial $R^2$ of at least 0.01, or a rank correlation of at least 0.20 between the absolute residual and the fitted value. Both cuts are working assumptions, listed under Premissas.
+
+**How to read.** One row per outcome, sample and segment. `pooled` uses both segments. `declared` and `assessed` drop the segment indicator and refit inside the segment. `reset_p` is the classical $F$ test. `reset_p_hc3` is the HC3 version. `harvey_p` is the Harvey–Collier $p$-value, missing when the recursion is not defined.
+
+```{python}
+#| label: tbl-reset
+#| tbl-cap: "RESET and Harvey–Collier statistics for both outcomes, both samples, pooled and by segment."
+display(HTML(diag.publish(result["reset"])))
+```
+
+## Payment log-odds, bins and splines
+
+The binary outcome is any payment, $P_i > 0$, the same definition as section 3.15. Inside each segment, log stock and debt age are cut into 20 quantile bins. The empirical log-odds in a bin with $k$ payers out of $n$ certificates is the Haldane–Anscombe estimator
+
+$$
+\hat\lambda = \log\frac{k+1/2}{n-k+1/2}, \qquad
+\mathrm{se}(\hat\lambda) = \sqrt{\frac{1}{k+1/2}+\frac{1}{n-k+1/2}}.
+$$
+
+The interval is $\hat\lambda \pm 1.96\,\mathrm{se}(\hat\lambda)$. It stays finite when $k=0$ and when $k=n$.
+
+On the same certificates, two logits are fit for each variable, separately in Declared and in Assessed: a straight line in that variable, and a restricted cubic spline with 4 degrees of freedom (Durrleman and Simon 1989, via `cr()`). The likelihood-ratio statistic compares the two maximised log-likelihoods. ΔAIC is the linear AIC minus the spline AIC, so a positive value favours the spline. For that segment and that variable, the spline is used when ΔAIC is at least 10 or the spline log-odds are not monotone on the 5th-to-95th percentile grid. A segment whose ΔAIC stays below 10 and whose spline is monotone keeps the linear logit. Firm size and registration status are categories: the log-odds are reported by level, and the only shape question for size is whether Micro, Small and Other sizes rise in that order. A level with 1 to 4 payers is left blank.
+
+**How to read the figure.** The horizontal axis is the midpoint of the quantile bin (the average of the bin edges). The vertical axis is the payment log-odds. Dots are the bin estimates, with the 95 percent interval. A dotted line is the linear logit. A solid line is the spline logit. Declared is teal and assessed is orange. A line that turns while the dots turn with it is curvature of the payment log-odds. A line that turns while the dots stay flat is the spline using degrees of freedom the bins do not support. Bins with fewer than 10 certificates or 5 firms are omitted.
+
+```{python}
+#| label: fig-logodds-stock
+#| fig-cap: "Empirical payment log-odds by quantile of log(1+stock), with a linear logit and a restricted cubic spline."
+result["figures"]["logodds_log_stock"].show()
+```
+
+```{python}
+#| label: fig-logodds-age
+#| fig-cap: "Empirical payment log-odds by quantile of debt age in years, with a linear logit and a restricted cubic spline."
+result["figures"]["logodds_debt_age"].show()
+```
+
+```{python}
+#| label: tbl-spline
+#| tbl-cap: "Linear logit against a 4-df restricted cubic spline, by segment. delta_aic is AIC(linear) − AIC(spline)."
+display(HTML(diag.publish(result["spline"])))
+```
+
+```{python}
+#| label: tbl-categories
+#| tbl-cap: "Payment log-odds by firm size and by registration status (active = code 02, other = every other code)."
+display(HTML(diag.publish(result["categories"])))
+display(HTML(diag.publish(result["porte_shape"])))
+```
+
+## Quantile regression of the balance
+
+Koenker and Bassett (1978) replace the conditional mean with a conditional quantile. The outcome is $\log(1+S_i)$ and the regressors are the stock equation above. The four quantiles are $\tau = 0.25, 0.50, 0.75, 0.90$. When the estimation sample is larger than 20,000 certificates, this block uses a stratified subsample of 20,000 and prints that count. The quantile block is a candidate for the paper. It is not a second copy of a published quantile table: section 5.6 does not contain one.
+
+**How to read.** One row per term and $\tau$. The coefficient is the change in the $\tau$-quantile of log stock associated with a one-unit change in the regressor, other terms held fixed, in this specification. Compare the four columns of a term. A coefficient that changes sign across $\tau$ is a different partial association in the lower and upper parts of the balance distribution. The standard errors are the model default, not HC3.
+
+```{python}
+#| label: tbl-quantiles
+#| tbl-cap: "Quantile regression of log(1+stock) at τ = 0.25, 0.50, 0.75 and 0.90."
+display(HTML(diag.publish(result["quantiles"])))
+```
+
+## Group heterogeneity
+
+Two groupings are summarised: the CNAE division (two digits) and the municipality. The UF is not a grouping factor. The debtors sit in São Paulo, so the state has almost no variation; the share with UF = SP is printed with the sample.
+
+For each group the table reports the number of certificates, the number of firms, the payment rate and the Haldane–Anscombe log-odds. The funnel compares each group's rate to the binomial limits around the pooled rate $\pi$,
+
+$$
+\pi \pm z\sqrt{\pi(1-\pi)/n},
+$$
+
+with $z = 1.96$ (95 percent) and $z = \Phi^{-1}(0.999)$ (99.8 percent). Limits are the sampling noise of a common rate. A point outside the 99.8 percent limit is more dispersed than that noise.
+
+The latent intraclass correlation for a binary outcome is
+
+$$
+\mathrm{ICC} = \frac{\tau^2}{\tau^2 + \pi^2/3},
+$$
+
+as in Goldstein, Browne and Rasbash (2002). The screen is a method-of-moments $\tau^2$: the variance of group payment rates, minus the binomial sampling variance, divided by $[\pi(1-\pi)]^2$. It is computed on the full estimation sample, separately for Declared and for Assessed, and it is the ICC that selects the mixed logit. The classical ICC of log stock and of recovery is the unbalanced one-way random-intercept ANOVA. A variational random-intercept logit is a supporting estimate. It is fit only when the moment ICC is at least 0.05, on a cluster sample: whole municipalities or divisions are drawn, with at most 30 certificates from each, until 8,000 certificates. A row-wise sample would leave a handful of certificates in each municipality and shrink $\tau^2$. The variational ICC can still be biased when groups are smaller than 30 or when a large group is capped at 30. It does not select the mixed logit. A second fit adds the payment-equation controls when the null variational ICC stays at or above 0.05.
+
+**How to read the funnel and the table.** The horizontal axis is the number of certificates in the group. The vertical axis is the payment rate. Each point is one municipality or one CNAE division, not one certificate. The grey curves are the 99.8 percent limits around the pooled rate. The page draws and lists only groups outside those limits, and at most the 50 largest of them in each grouping and segment. The count printed above the table is the number of groups in total, and how many of the publishable ones fall outside. Groups under 10 certificates, under 5 firms, or with 1 to 4 payers are not drawn and are not listed. A count of 1 to 4 is not printed.
+
+```{python}
+#| label: fig-funnel-municipality
+#| fig-cap: "Payment rate against group size, municipalities. Grey curves are the 99.8 percent binomial limits around the pooled rate."
+result["figures"]["funnel_municipality"].show()
+```
+
+```{python}
+#| label: fig-funnel-division
+#| fig-cap: "Payment rate against group size, CNAE divisions. Grey curves are the 99.8 percent binomial limits around the pooled rate."
+result["figures"]["funnel_division"].show()
+```
+
+```{python}
+#| label: tbl-icc
+#| tbl-cap: "Intraclass correlations. estimator = moments or anova is the screen. estimator = variational is the random-intercept logit, present only when the screen crosses the working rule."
+display(HTML(diag.publish(result["icc"])))
+```
+
+```{python}
+#| label: tbl-groups
+#| tbl-cap: "Groups outside the 99.8 percent funnel, at most the 50 largest in each grouping and segment. The count table is every group, not the list below."
+print("Groups in total, groups outside the 99.8 percent limits, and groups shown.")
+display(HTML(diag.publish(result["group_counts"])))
+display(HTML(diag.publish(result["groups"])))
+```
+
+## Premissas
+
+These cuts are working assumptions. They are not estimates from the papers cited below.
+
+- ΔAIC of 10. Inside a segment, a variable moves from the linear logit to the restricted cubic spline when its ΔAIC reaches 10, or when the spline log-odds on that variable are not monotone. Declared and Assessed are decided separately. A segment below the cut keeps the linear logit.
+- Latent ICC of 0.05, from the method-of-moments screen on the full estimation sample, separately for Declared and for Assessed. That screen selects the mixed logit. It does not depend on the variational subsample.
+- The variational logit is a supporting estimate. It draws whole municipalities or whole CNAE divisions, takes at most 30 certificates from each drawn group, and stops at 8,000 certificates. A sample that spreads the cap across every municipality leaves about five certificates per group and shrinks $\tau^2$. The cluster sample avoids that thinning. Groups smaller than 30 certificates, and the cap of 30 inside a large group, can still bias the variational ICC. That ICC does not select the mixed logit.
+- Funnel limits of 99.8 percent, and a 1 percent share of groups outside those limits. The share is a supporting diagnostic. It does not select the mixed logit. The page lists at most the 50 largest groups outside those limits in each grouping and segment, and states how many groups exist in total.
+- The spline logit is fit on at most 40,000 certificates per segment. The log-odds bins use the full estimation sample. Quantile regression uses at most 20,000 certificates. A second render reads the spline and mixed-logit tables from the local cache when the sample is unchanged. That cache is not part of the page.
+- RESET partial $R^2$ of 0.01, or a rank correlation of 0.20 between the absolute residual and the fitted value. Either one sets the linear stock equation aside in favour of quantile regression.
+- A heatmap bin with fewer than 5 certificates is blank. A group cell with 1 to 4 payers, fewer than 10 certificates, or fewer than 5 firms is blank.
+
+A $p$-value alone does not choose the specification.
+
+## Decision
+
+The table applies the Premissas to this render. The payment row and the heterogeneity row each state Declared and Assessed separately. The payment clause uses that segment's own ΔAIC and curved flag. The heterogeneity clause uses that segment's moment ICC on the full estimation sample. The package row is the combination those rows support for the paper.
+
+```{python}
+#| label: tbl-decision
+#| tbl-cap: "Inference supported by this render. The evidence column is computed on the estimation sample above."
+display(HTML(diag.publish(result["decision"])))
+```
+
+## References
+
+Ramsey, J. B. (1969). Tests for specification errors in classical linear least-squares regression analysis. *Journal of the Royal Statistical Society, Series B* 31, 350–371. <https://doi.org/10.1111/j.2517-6161.1969.tb00796.x>
+
+White, H. (1980). A heteroskedasticity-consistent covariance matrix estimator and a direct test for heteroskedasticity. *Econometrica* 48, 817–838. <https://doi.org/10.2307/1912934>
+
+MacKinnon, J. G., and White, H. (1985). Some heteroskedasticity-consistent covariance matrix estimators with improved finite sample properties. *Journal of Econometrics* 29, 305–325. <https://doi.org/10.1016/0304-4076(85)90158-7>
+
+Durrleman, S., and Simon, R. (1989). Flexible regression models with cubic splines. *Statistics in Medicine* 8, 551–561. <https://doi.org/10.1002/sim.4780080504>
+
+Goldstein, H., Browne, W., and Rasbash, J. (2002). Partitioning variation in multilevel models. *Understanding Statistics* 1, 223–231. <https://doi.org/10.1207/S15328031US0104_02>
+
+Koenker, R., and Bassett, G. (1978). Regression quantiles. *Econometrica* 46, 33–50. <https://doi.org/10.2307/1913643>
+
+The Harvey–Collier statistic is the one in section 4.2. The list above is also in `docs/references/referencias_grounded.md`.

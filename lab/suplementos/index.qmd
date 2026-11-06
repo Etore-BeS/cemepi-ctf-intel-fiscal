@@ -1,12 +1,12 @@
 ---
-title: "Suplementos de artigos"
-description: "Material suplementar congelado de cada artigo submetido."
+title: "Article supplements"
+description: "Frozen supplementary material for each submitted article."
 ---
 
 
-Cada suplemento é uma cópia congelada do EDA do artigo, gerada na tag de submissão
-(`<slug>-submit-AAAAMMDD`). Ele não muda quando o laboratório muda.
+Each supplement is a frozen copy of the article's EDA, generated at the submission tag
+(`<slug>-submit-YYYYMMDD`). It does not change when the lab changes.
 
-| Artigo | Versão | Onde |
+| Article | Version | Where |
 |---|---|---|
-| Paper EDA v1 (ICMS inscrito, estoque e recuperação) | 15/10/2026 | <https://etore-bes.github.io/paper-eda-cemepi/> (repositório `paper-eda-cemepi`, congelado) |
+| Paper EDA v1 (enrolled VAT (ICMS) debt, stock and recovery) | 15 Oct 2026 | <https://etore-bes.github.io/paper-eda-cemepi/> (repository `paper-eda-cemepi`, frozen) |

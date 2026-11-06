@@ -1,0 +1,210 @@
+---
+title: "Concentration of the stock by tax type and by debtor; time to exit in BRL"
+description: "How much of the stock is in a few CDAs and a few debtors, by tax type, in December 2025? How much money leaves the portfolio, and when?"
+date: 2026-10-23
+jupyter: python3
+---
+
+**Data:** Inteligência Fiscal dump (PGE-SP), `extracao=2026-03`. Concentration: **December 2025** snapshot of the `DEBITO` table, all types. Time to exit: the legal-entity-only VAT (ICMS) extract of paper EDA v1 (subsection 1.3) and the CDA × year panel (subsection 1.4), with payments up to 31/12/2025.
+**Time window:** nothing from 2026 enters the analyses or the charts (decision of 23/10/2026). The March 2026 snapshot used in the paper was replaced by the December 2025 one.
+**Status:** exploration. Not an article result.
+
+```{python}
+#| label: setup
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd()))
+import numpy as np
+import polars as pl
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import pandas as pd
+pd.set_option("display.max_colwidth", None)
+import _lab_base as B
+
+SNAP = (B.LAST_FULL_YEAR, 12)
+SNAP_KEY = SNAP[0] * 100 + SNAP[1]
+# Display labels for the tax groups (the data keys stay as in the dump)
+LBL = {"ICMS": "VAT (ICMS)", "IPVA": "IPVA", "ITCMD": "ITCMD", "TAXAS": "Fees (TAXAS)"}
+```
+
+## Question
+
+1. **Concentration (by type and by debtor):** in each tax group (VAT (ICMS), IPVA, ITCMD and fees), what share of the stock is in the largest CDAs and the largest debtors?
+2. **Time to exit (the paper's 3.8.5, now in BRL):** how much value leaves the portfolio after some payment, and how many years after enrolment?
+
+## Method
+
+- **Concentration curve (inverted Lorenz).** The units (CDAs or debtors) are sorted from largest to smallest. The curve shows the cumulative share of the stock held by the largest *x*%.
+- **Gini coefficient:** $G = 1 - 2\int_0^1 L(p)\,dp$, where $L(p)$ is the Lorenz curve (share of the total in the smallest $p$ units). It ranges from 0 (all equal) to 1 (everything in one unit). It is the same `lorenz` function as in paper EDA v1 (subsection 0.6).
+- **Top shares:** the share of the stock in the largest 0.1%, 1% and 10% of units. The number of units that add up to half the stock is also reported.
+- **Debtor** is the CNPJ root (8 digits), used only inside the computation. Nothing here shows an individual CNPJ, name or CDA. Debtors without a CNPJ (natural persons, mostly in IPVA and ITCMD) do **not** enter the debtor level. This lab does not read CPF, and the table states how much of each group's stock is covered.
+- **Tax groups:** same rule as the full EDA, in the order IPVA > VAT (ICMS) > ITCMD (includes the ITBI on donations and causa mortis) > fees.
+
+```{python}
+#| label: dados-foto
+BUCKET_SQL = """CASE WHEN UPPER(TIPO_DEBITO) LIKE '%IPVA%' THEN 'IPVA'
+     WHEN UPPER(TIPO_DEBITO) LIKE '%ICMS%' THEN 'ICMS'
+     WHEN UPPER(TIPO_DEBITO) LIKE '%ITCMD%'
+          OR (UPPER(TIPO_DEBITO) LIKE '%ITBI%' AND (UPPER(TIPO_DEBITO) LIKE '%DOA%' OR UPPER(TIPO_DEBITO) LIKE '%CAUSA MORTIS%')) THEN 'ITCMD'
+     ELSE 'TAXAS' END"""
+FOTO_SQL = f"""
+SELECT ID_DEBITO, TIPO_DEBITO, {BUCKET_SQL} AS grupo,
+       TRY_CAST(VALOR_SEM_HONORARIOS AS DOUBLE) AS valor,
+       NULLIF(LEFT(REGEXP_REPLACE(COALESCE(CNPJ_DEVEDOR, ''), '[^0-9]', '', 'g'), 8), '') AS raiz
+FROM DEBITO
+WHERE ANO_EXTRACAO = {SNAP[0]} AND MES_EXTRACAO = {SNAP[1]}
+"""
+foto_raw = B.collect(B.query("lab.conc:foto", FOTO_SQL, params={"snapshot": f"{SNAP[0]}-{SNAP[1]:02d}"}))
+n_linhas, n_ids = foto_raw.height, foto_raw["ID_DEBITO"].n_unique()
+# Uma linha por CDA na foto; se houver repetição, fica o maior valor (conservador para a concentração).
+foto = (foto_raw.sort("valor", descending=True, nulls_last=True).unique("ID_DEBITO", keep="first")
+        .filter(pl.col("valor").is_not_null() & (pl.col("valor") > 0)))
+GRUPOS = ["ICMS", "IPVA", "ITCMD", "TAXAS"]
+qualidade = pl.DataFrame({
+    "item": ["rows in the snapshot", "distinct CDAs", "repeated rows per CDA", "CDAs with null or ≤ 0 value (excluded)",
+             "CDAs used"],
+    "value": [n_linhas, n_ids, n_linhas - n_ids, n_ids - foto.height, foto.height]})
+qualidade.to_pandas()
+```
+
+**How to read the table above:** it is the check of the December 2025 snapshot before any computation. Repeated rows and null or non-positive values are left out of the computation.
+
+## Result
+
+### Concentration by tax group
+
+```{python}
+#| label: tbl-concentracao
+#| tbl-cap: "Concentration of the stock by tax group, December 2025 snapshot. CDA: each CDA is a unit. Debtor: sum by CNPJ root, only for debtors with a CNPJ."
+def resumo(valores: np.ndarray, grupo: str, nivel: str, cobertura: float | None = None) -> dict:
+    share, cum, gini = B.lorenz(valores)
+    k50 = int(np.searchsorted(cum, 0.5)) + 1
+    ts = B.top_shares(valores)
+    return {"group": LBL.get(grupo, grupo), "level": nivel, "units": int(valores.size), "stock_BRL_bn": float(valores.sum() / 1e9),
+            "Gini": gini, "top_0.1%": 100 * ts["top_0.1pct"], "top_1%": 100 * ts["top_1pct"], "top_10%": 100 * ts["top_10pct"],
+            "units_for_50%": k50, "%_units_for_50%": 100 * k50 / valores.size,
+            "%_stock_with_CNPJ": cobertura}
+
+linhas, curvas = [], {}
+for g in GRUPOS:
+    d = foto.filter(pl.col("grupo") == g)
+    v = d["valor"].to_numpy()
+    linhas.append(resumo(v, g, "CDA"))
+    curvas[(g, "CDA")] = B.lorenz(v)[:2]
+    pj = d.filter(pl.col("raiz").is_not_null())
+    cob = 100 * pj["valor"].sum() / d["valor"].sum()
+    dv = pj.group_by("raiz").agg(pl.col("valor").sum())["valor"].to_numpy()
+    if dv.size >= 100:
+        linhas.append(resumo(dv, g, "Debtor (CNPJ root)", cob))
+        curvas[(g, "Devedor")] = B.lorenz(dv)[:2]
+    else:
+        linhas.append({"group": LBL[g], "level": "Debtor (CNPJ root)", "units": int(dv.size), "%_stock_with_CNPJ": cob})
+conc = pl.DataFrame(linhas, infer_schema_length=None)
+conc.to_pandas().round(3)
+```
+
+**How to read:** each row is a group and a level. "top 1%" is the share of the stock in the largest 1% of units. "%_stock_with_CNPJ" says how much of the group's stock has a debtor with a CNPJ and therefore enters the debtor level.
+**What not to conclude:** in the groups where CNPJ coverage is low (IPVA and ITCMD), the debtor level describes only firms, not the whole group. High concentration says nothing about the chance of recovery.
+
+```{python}
+#| label: fig-lorenz-tipo
+#| fig-cap: "Concentration curves by tax group, December 2025. Left: CDAs. Right: debtors with a CNPJ (root). x-axis on a log scale."
+fig = make_subplots(rows=1, cols=2, subplot_titles=("CDA", "Debtor (CNPJ root)"), horizontal_spacing=0.1)
+for col, nivel in ((1, "CDA"), (2, "Devedor")):
+    for i, g in enumerate(GRUPOS):
+        if (g, nivel) not in curvas:
+            continue
+        share, cum = curvas[(g, nivel)]
+        idx = np.unique(np.geomspace(1, share.size, 300).astype(int)) - 1
+        fig.add_trace(go.Scatter(x=share[idx] * 100, y=cum[idx] * 100, mode="lines", name=LBL[g], legendgroup=g,
+                                 showlegend=col == 1, line=dict(color=B.color(i), dash=B.DASHES[i % 5])), 1, col)
+    fig.update_xaxes(type="log", title_text="% of units, largest to smallest (log)", row=1, col=col)
+fig.update_yaxes(title_text="cumulative % of the stock", range=[0, 100], row=1, col=1)
+fig.update_layout(height=430)
+fig.show()
+```
+
+**How to read:** the higher and further left the curve rises, the more concentrated the stock. The gap between the CDA curve and the debtor curve shows how much summing by firm concentrates it further.
+
+### Concentration within VAT (ICMS), by raw type
+
+```{python}
+#| label: tbl-concentracao-icms
+#| tbl-cap: "Concentration by raw VAT (ICMS) type, December 2025 (CDA and debtor with a CNPJ). Raw type names are kept as in the data."
+linhas_icms = []
+icms = foto.filter(pl.col("grupo") == "ICMS")
+for (t,), d in icms.group_by("TIPO_DEBITO"):
+    if d.height < 100:
+        continue
+    linhas_icms.append(resumo(d["valor"].to_numpy(), t, "CDA"))
+    pj = d.filter(pl.col("raiz").is_not_null())
+    dv = pj.group_by("raiz").agg(pl.col("valor").sum())["valor"].to_numpy()
+    if dv.size >= 100:
+        linhas_icms.append(resumo(dv, t, "Debtor (CNPJ root)", 100 * pj["valor"].sum() / d["valor"].sum()))
+pl.DataFrame(linhas_icms, infer_schema_length=None).sort("stock_BRL_bn", descending=True).to_pandas().round(3)
+```
+
+**What not to conclude:** types with fewer than 100 CDAs are left out of the table, because top shares make no sense with so few units.
+
+### Time to exit, in BRL (3.8.5)
+
+**Definition (the same as the paper's).** Settlement is not recorded in the dump. A CDA is therefore treated as "exited after paying" when it stops appearing in the monthly snapshots after receiving at least one payment (GARE). Here, the exit must have happened by December 2025 (last snapshot in which it appears before 12/2025) and only payments up to 31/12/2025 count.
+**What changed relative to the paper:** the vertical axis is now **value in BRL**. The bars show the enrolled value (the largest value without fees the CDA had in the snapshots) and the value paid by GARE for these CDAs, by year of age at exit. The CDA count is in the lower panel.
+
+```{python}
+#| label: fig-b85-reais
+#| fig-cap: "VAT (ICMS) CDAs (legal entities) that left the portfolio after some payment, up to December 2025: enrolled value and paid value (BRL billion) by years between enrolment and exit. Below, number of CDAs."
+fim = pl.date(B.LAST_FULL_YEAR + 1, 1, 1)
+pag = B.collect(B.scan_gare().filter(pl.col("DATA_ARRECADACAO_GARE") < fim)
+                .group_by("ID_DEBITO").agg(pl.col("VALOR_RECEITA").sum().alias("pago"),
+                                           pl.col("DATA_ARRECADACAO_GARE").min().alias("primeiro_pag")))
+attrs = B.collect(B.attributes.select("ID_DEBITO", "DATA_INSCRICAO", "last_snapshot", "max_value", "ICMS_ORIGIN"))
+saiu = (attrs.join(pag, on="ID_DEBITO", how="inner")
+        .filter((pl.col("last_snapshot") < SNAP_KEY) & pl.col("DATA_INSCRICAO").is_not_null())
+        .with_columns(((pl.date(pl.col("last_snapshot") // 100, pl.col("last_snapshot") % 100, 1) - pl.col("DATA_INSCRICAO"))
+                       .dt.total_days() / 365.25).alias("anos_ate_saida"))
+        .filter(pl.col("anos_ate_saida") >= 0)
+        .with_columns(pl.col("anos_ate_saida").floor().clip(0, 20).cast(pl.Int32).alias("faixa")))
+hist = (saiu.group_by("faixa").agg(pl.len().alias("cdas"), (pl.col("max_value").sum() / 1e9).alias("inscrito_bi"),
+                                    (pl.col("pago").sum() / 1e9).alias("pago_bi")).sort("faixa"))
+rot = [f"{f}" if f < 20 else "20+" for f in hist["faixa"]]
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.68, 0.32], vertical_spacing=0.06)
+fig.add_trace(go.Bar(x=rot, y=hist["inscrito_bi"], name="Enrolled value (BRL bn)", marker_color=B.CEMEPI["deep_teal"]), 1, 1)
+fig.add_trace(go.Bar(x=rot, y=hist["pago_bi"], name="Value paid by GARE (BRL bn)", marker_color=B.CEMEPI["sand"]), 1, 1)
+fig.add_trace(go.Bar(x=rot, y=hist["cdas"], name="CDAs", marker_color=B.CEMEPI["grey"], showlegend=True), 2, 1)
+fig.update_yaxes(title_text="BRL billion", row=1, col=1)
+fig.update_yaxes(title_text="CDAs", row=2, col=1)
+fig.update_xaxes(title_text="Years between enrolment and exit (20+ = 20 or more)", row=2, col=1)
+fig.update_layout(barmode="group", height=560)
+fig.show()
+```
+
+```{python}
+#| label: tbl-b85-resumo
+#| tbl-cap: "Summary of exits after payment (VAT (ICMS), legal entities, up to December 2025)."
+tot = saiu.select(pl.len().alias("cdas"), (pl.col("max_value").sum() / 1e9).alias("enrolled_BRL_bn"),
+                  (pl.col("pago").sum() / 1e9).alias("paid_BRL_bn"),
+                  pl.col("anos_ate_saida").median().alias("median_years_(CDAs)"))
+w = saiu.sort("anos_ate_saida").with_columns((pl.col("max_value").cum_sum() / pl.col("max_value").sum()).alias("cum"))
+med_valor = float(w.filter(pl.col("cum") >= 0.5)["anos_ate_saida"][0])
+tot.with_columns(pl.lit(med_valor).alias("median_years_(BRL-weighted)"),
+                 (100 * pl.col("paid_BRL_bn") / pl.col("enrolled_BRL_bn")).alias("paid/enrolled_%")).to_pandas().round(3)
+```
+
+**How to read:** compare the dark bars (how much was enrolled) with the light ones (how much was paid) at each age. A BRL-weighted median different from the median by CDA shows that large CDAs exit at a different pace from small ones.
+**What not to conclude:**
+
+- An exit can also be a cancellation, an instalment plan terminated and re-enrolled, or a change of number. Payment by GARE can be partial. So the paid value stays below the enrolled value and the age at exit is an upper bound on the time to settlement.
+- Snapshots exist only from 2016. An old CDA that exited before then does not appear, which pulls the distribution towards recent exits.
+- The enrolled value is nominal (not inflation-adjusted), as in the dump.
+
+## What not to conclude (general)
+
+Everything is descriptive and from a single snapshot. There is no causal claim and no comparison of efficiency across taxes.
+
+```{python}
+#| label: cache
+#| echo: false
+B.cache_summary().to_pandas()
+```

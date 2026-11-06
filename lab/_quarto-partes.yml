@@ -1,0 +1,9 @@
+# Perfil "partes": só para EXECUTAR localmente uma parte do EDA do paper ou uma entrada do lab e atualizar o _freeze.
+# Nenhuma delas é página do site (ver _quarto.yml); fora do render do projeto, o Quarto as trata como arquivo solto e
+# não grava o _freeze. Uso:  quarto render lab/paper_eda/02_parte_a.qmd --profile partes
+#                           quarto render lab/eda/2026-10-23_kmeans_top1.qmd --profile partes
+project:
+  render:
+    - "paper_eda/0*.qmd"
+    - "eda/*.qmd"
+    - "dados/*.qmd"

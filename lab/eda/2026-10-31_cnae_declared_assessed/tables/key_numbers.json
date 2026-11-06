@@ -1,0 +1,356 @@
+{
+  "as_of": "2025-12-31",
+  "payments_before": "2026-01-01",
+  "cnae23_subclasses": 1331,
+  "cnae23_sha256": "96853a62e65a200ddb54b28bc7e8ad22fc7a0306cd3f21c21e63f1b934dc06ac",
+  "validation": [
+    {
+      "raw_type": "ICMS Altera\u00e7\u00e3o de GIA",
+      "n_cda": 36,
+      "stock_bn": 0.009339,
+      "published_n": 36.0,
+      "published_bn": 0.009339,
+      "delta_n": 0.0,
+      "delta_bn": 0.0
+    },
+    {
+      "raw_type": "ICMS Autua\u00e7\u00e3o",
+      "n_cda": 58724,
+      "stock_bn": 311.253361,
+      "published_n": 58725.0,
+      "published_bn": 311.253429,
+      "delta_n": -1.0,
+      "delta_bn": -6.799999999884676e-05
+    },
+    {
+      "raw_type": "ICMS Autua\u00e7\u00e3o Simples Nacional",
+      "n_cda": 818,
+      "stock_bn": 0.14503,
+      "published_n": NaN,
+      "published_bn": NaN,
+      "delta_n": NaN,
+      "delta_bn": NaN
+    },
+    {
+      "raw_type": "ICMS Declarado",
+      "n_cda": 2257189,
+      "stock_bn": 116.424184,
+      "published_n": NaN,
+      "published_bn": NaN,
+      "delta_n": NaN,
+      "delta_bn": NaN
+    },
+    {
+      "raw_type": "ICMS Fecoep",
+      "n_cda": 8510,
+      "stock_bn": 0.048362,
+      "published_n": NaN,
+      "published_bn": NaN,
+      "delta_n": NaN,
+      "delta_bn": NaN
+    },
+    {
+      "raw_type": "ICMS (all types)",
+      "n_cda": 2325277,
+      "stock_bn": 427.880276,
+      "published_n": 2325280.0,
+      "published_bn": 427.880344,
+      "delta_n": -3.0,
+      "delta_bn": -6.799999999884676e-05
+    }
+  ],
+  "segment_summary": [
+    {
+      "segment": "assessed",
+      "n_cda": 59542,
+      "n_cnpj": 33324,
+      "n_firms": 30005,
+      "stock": 311398391642.14594,
+      "stock_positive": 311398391642.14594,
+      "paid": 1492769467.609999,
+      "n_paid": 10370,
+      "n_age_over_10": 27937,
+      "stock_age_over_10": 136227936413.12036,
+      "stock_age_known": 311398391642.14594,
+      "median_debt_age": 9.270362765229295,
+      "median_firm_age": 25.311430527036276,
+      "n_estab": 59020,
+      "n_cnae_outside": 83,
+      "payment_rate": 0.1741627758556985,
+      "recovery": 0.004793761007364052,
+      "stock_share_over_10": 0.4374715479252421
+    },
+    {
+      "segment": "declared",
+      "n_cda": 2257189,
+      "n_cnpj": 194932,
+      "n_firms": 177682,
+      "stock": 116424184243.9787,
+      "stock_positive": 116424184243.9787,
+      "paid": 5502511400.780012,
+      "n_paid": 204407,
+      "n_age_over_10": 471215,
+      "stock_age_over_10": 45998652647.320076,
+      "stock_age_known": 116424184243.9787,
+      "median_debt_age": 4.687200547570157,
+      "median_firm_age": 18.305270362765228,
+      "n_estab": 2256655,
+      "n_cnae_outside": 725,
+      "payment_rate": 0.09055821200617228,
+      "recovery": 0.04726261503579824,
+      "stock_share_over_10": 0.39509533990743045
+    }
+  ],
+  "top1": [
+    {
+      "segment": "Declared",
+      "n_positive": 2254387,
+      "gini": 0.8392076210565347,
+      "top1_n": 22544,
+      "top1_cda_share": 0.010000057665343173,
+      "top1_stock_share": 0.39520058382439643,
+      "largest_50.0pct_stock_share": 0.9806967319328569,
+      "largest_50.0pct_n": 1127194,
+      "largest_20.0pct_stock_share": 0.8652268182708669,
+      "largest_20.0pct_n": 450878,
+      "largest_10.0pct_stock_share": 0.7433544840542439,
+      "largest_10.0pct_n": 225439,
+      "largest_5.0pct_stock_share": 0.6222096246585958,
+      "largest_5.0pct_n": 112720,
+      "largest_1.0pct_stock_share": 0.39520058382439643,
+      "largest_1.0pct_n": 22544,
+      "largest_0.5pct_stock_share": 0.3247184426175166,
+      "largest_0.5pct_n": 11272,
+      "largest_0.1pct_stock_share": 0.21401702098289238,
+      "largest_0.1pct_n": 2255
+    },
+    {
+      "segment": "Assessed",
+      "n_positive": 59294,
+      "gini": 0.8625613902143792,
+      "top1_n": 593,
+      "top1_cda_share": 0.010001011906769657,
+      "top1_stock_share": 0.39880804835159606,
+      "largest_50.0pct_stock_share": 0.9811502738756246,
+      "largest_50.0pct_n": 29647,
+      "largest_20.0pct_stock_share": 0.8978732640571824,
+      "largest_20.0pct_n": 11859,
+      "largest_10.0pct_stock_share": 0.7988532292360817,
+      "largest_10.0pct_n": 5930,
+      "largest_5.0pct_stock_share": 0.6801418722614401,
+      "largest_5.0pct_n": 2965,
+      "largest_1.0pct_stock_share": 0.39880804835159606,
+      "largest_1.0pct_n": 593,
+      "largest_0.5pct_stock_share": 0.298085132444875,
+      "largest_0.5pct_n": 297,
+      "largest_0.1pct_stock_share": 0.1258734104962378,
+      "largest_0.1pct_n": 60
+    },
+    {
+      "segment": "Both",
+      "n_positive": 2313681,
+      "gini": 0.9455943928862156,
+      "top1_n": 23137,
+      "top1_cda_share": 0.010000082120223143,
+      "top1_stock_share": 0.7583515096589406,
+      "largest_50.0pct_stock_share": 0.9942264257651448,
+      "largest_50.0pct_n": 1156841,
+      "largest_20.0pct_stock_share": 0.9585011170999042,
+      "largest_20.0pct_n": 462737,
+      "largest_10.0pct_stock_share": 0.9187166043381222,
+      "largest_10.0pct_n": 231369,
+      "largest_5.0pct_stock_share": 0.875202108507951,
+      "largest_5.0pct_n": 115685,
+      "largest_1.0pct_stock_share": 0.7583515096589406,
+      "largest_1.0pct_n": 23137,
+      "largest_0.5pct_stock_share": 0.6913699447706316,
+      "largest_0.5pct_n": 11569,
+      "largest_0.1pct_stock_share": 0.4850375405390326,
+      "largest_0.1pct_n": 2314
+    }
+  ],
+  "mannwhitney": [
+    {
+      "outcome": "stock",
+      "unit": "CDA",
+      "n_assessed": 59294,
+      "n_declared": 2254387,
+      "median_assessed": 578083.885,
+      "median_declared": 7334.12,
+      "U_assessed": 126399896011.5,
+      "rank_biserial": 0.891200142328237,
+      "p_value": 0.0
+    },
+    {
+      "outcome": "debt_age_years",
+      "unit": "CDA",
+      "n_assessed": 59542,
+      "n_declared": 2257189,
+      "median_assessed": 9.270362765229295,
+      "median_declared": 4.687200547570157,
+      "U_assessed": 93621566275.0,
+      "rank_biserial": 0.39320349306506963,
+      "p_value": 0.0
+    },
+    {
+      "outcome": "firm_age_years",
+      "unit": "CDA",
+      "n_assessed": 59020,
+      "n_declared": 2256655,
+      "median_assessed": 25.311430527036276,
+      "median_declared": 18.305270362765228,
+      "U_assessed": 86684369733.0,
+      "rank_biserial": 0.30168655066706895,
+      "p_value": 0.0
+    },
+    {
+      "outcome": "firm_stock",
+      "unit": "CNPJ root, within segment",
+      "n_assessed": 30005,
+      "n_declared": 177682,
+      "median_assessed": 770755.54,
+      "median_declared": 7916.125,
+      "U_assessed": 4632051169.5,
+      "rank_biserial": 0.7376659011111224,
+      "p_value": 0.0
+    },
+    {
+      "outcome": "firm_debt_age_years",
+      "unit": "CNPJ root, within segment",
+      "n_assessed": 29855,
+      "n_declared": 177600,
+      "median_assessed": 8.877273324883243,
+      "median_declared": 2.1089218182676954,
+      "U_assessed": 4122005603.5,
+      "rank_biserial": 0.5548143366738032,
+      "p_value": 0.0
+    },
+    {
+      "outcome": "firm_age_years",
+      "unit": "CNPJ root, within segment",
+      "n_assessed": 29578,
+      "n_declared": 177418,
+      "median_assessed": 24.11498973305955,
+      "median_declared": 13.412731006160165,
+      "U_assessed": 3795964835.5,
+      "rank_biserial": 0.44672402111846066,
+      "p_value": 0.0
+    }
+  ],
+  "chi2": [
+    {
+      "attribute": "CNAE section",
+      "n_firms": 195759,
+      "n_levels": 20,
+      "chi2": 2067.550753326762,
+      "dof": 19,
+      "p_value": 0.0,
+      "cramers_v": 0.10277020449411307,
+      "note": "Dominant section inside the dominant segment."
+    },
+    {
+      "attribute": "cadastral status",
+      "n_firms": 195759,
+      "n_levels": 6,
+      "chi2": 12345.388185922213,
+      "dof": 5,
+      "p_value": 0.0,
+      "cramers_v": 0.25112590002865426,
+      "note": "Code of the establishment that holds the stock."
+    },
+    {
+      "attribute": "firm size",
+      "n_firms": 195759,
+      "n_levels": 4,
+      "chi2": 6344.428712513385,
+      "dof": 3,
+      "p_value": 0.0,
+      "cramers_v": 0.1800260663409845,
+      "note": "Receita Federal size code."
+    },
+    {
+      "attribute": "UF",
+      "n_firms": 195759,
+      "n_levels": 20,
+      "chi2": 4125.50245530518,
+      "dof": 19,
+      "p_value": 0.0,
+      "cramers_v": 0.1451702270393468,
+      "note": "State of the establishment that holds the stock."
+    },
+    {
+      "attribute": "repeated enrollment",
+      "n_firms": 207687,
+      "n_levels": 2,
+      "chi2": 13822.955223214893,
+      "dof": 1,
+      "p_value": 0.0,
+      "cramers_v": 0.25798579512435776,
+      "note": "Two or more CDAs versus one, inside the segment."
+    },
+    {
+      "attribute": "legal nature",
+      "n_firms": 195759,
+      "n_levels": 9,
+      "chi2": 2719.1828998236015,
+      "dof": 8,
+      "p_value": 0.0,
+      "cramers_v": 0.1178578030523288,
+      "note": "Top 8 natures by firm count, plus other."
+    }
+  ],
+  "overlap": {
+    "firms_in_both_segments": 11928,
+    "firms_declared_only": 165754,
+    "firms_assessed_only": 18077,
+    "firms_two_or_more_cdas_any_segment": 125305,
+    "firms_two_or_more_enrol_dates": 111076
+  },
+  "repeated": [
+    {
+      "segment": "assessed",
+      "multiplicity": "One CDA",
+      "n_firms": 20440,
+      "n_cda": 20440,
+      "stock": 55057287034.38,
+      "paid": 362280973.83,
+      "share_stock": 0.17680658767708418,
+      "share_firms": 0.6812197967005499,
+      "payment_rate_firm": 0.20782778864970647
+    },
+    {
+      "segment": "assessed",
+      "multiplicity": "Two or more CDAs",
+      "n_firms": 9565,
+      "n_cda": 39102,
+      "stock": 256341104607.76553,
+      "paid": 1130488493.78,
+      "share_stock": 0.8231934123229159,
+      "share_firms": 0.3187802032994501,
+      "payment_rate_firm": 0.32608468374281235
+    },
+    {
+      "segment": "declared",
+      "multiplicity": "One CDA",
+      "n_firms": 57849,
+      "n_cda": 57849,
+      "stock": 927683852.72,
+      "paid": 57821557.5,
+      "share_stock": 0.0079681370219089,
+      "share_firms": 0.3255760290856699,
+      "payment_rate_firm": 0.07049387197704368
+    },
+    {
+      "segment": "declared",
+      "multiplicity": "Two or more CDAs",
+      "n_firms": 119833,
+      "n_cda": 2199340,
+      "stock": 115496500391.26001,
+      "paid": 5444689843.28,
+      "share_stock": 0.9920318629780911,
+      "share_firms": 0.67442397091433,
+      "payment_rate_firm": 0.31342785376315374
+    }
+  ],
+  "seconds": 73.7
+}

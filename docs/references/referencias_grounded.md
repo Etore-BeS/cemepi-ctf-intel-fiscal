@@ -102,6 +102,23 @@ Até existir tabela de garantia, qualquer “score de garantia” seria **invál
 
 ---
 
+## E — Linearidade do AVD (lab 4.5)
+
+Citações usadas no diagnóstico de 04/11/2026. Os DOI foram conferidos no Crossref nessa data. Os limiares de decisão (ΔAIC 10, ICC 0,05) não vêm destes papers.
+
+- Ramsey, J. B. (1969). Tests for specification errors in classical linear least-squares regression analysis. *Journal of the Royal Statistical Society, Series B* 31, 350–371. https://doi.org/10.1111/j.2517-6161.1969.tb00796.x
+- White, H. (1980). A heteroskedasticity-consistent covariance matrix estimator and a direct test for heteroskedasticity. *Econometrica* 48, 817–838. https://doi.org/10.2307/1912934
+- MacKinnon, J. G., & White, H. (1985). Some heteroskedasticity-consistent covariance matrix estimators with improved finite sample properties. *Journal of Econometrics* 29, 305–325. https://doi.org/10.1016/0304-4076(85)90158-7
+- Durrleman, S., & Simon, R. (1989). Flexible regression models with cubic splines. *Statistics in Medicine* 8, 551–561. https://doi.org/10.1002/sim.4780080504
+- Goldstein, H., Browne, W., & Rasbash, J. (2002). Partitioning variation in multilevel models. *Understanding Statistics* 1, 223–231. https://doi.org/10.1207/S15328031US0104_02
+- Koenker, R., & Bassett, G. (1978). Regression quantiles. *Econometrica* 46, 33–50. https://doi.org/10.2307/1913643
+
+O teste de Harvey–Collier entra como na seção 4.2 do laboratório, sem citação nova.
+
+## F — Inferência do AVD (lab 4.7)
+
+A seção 4.7 ajusta a especificação impressa na seção 4.5. As citações são as da seção E acima: spline cúbica restrita (Durrleman e Simon 1989), ICC latente (Goldstein, Browne e Rasbash 2002), regressão quantílica (Koenker e Bassett 1978) e erros HC3 (MacKinnon e White 1985). Não há citação nova. Os ICC 0,061 (declarado) e 0,034 (autuado) são a triagem de momentos da seção 4.5, não uma estimativa nova.
+
 ## Síntese para os 4 projetos
 
 | Frente | Seguro agora | Evitar reivindicar |
