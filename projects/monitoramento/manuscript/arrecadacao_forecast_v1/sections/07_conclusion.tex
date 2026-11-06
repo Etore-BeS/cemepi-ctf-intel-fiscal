@@ -1,36 +1,15 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-The lowest test sMAPE depends on the grain.
-Pooling the four ranks into one winner would contradict Table~\ref{tab:top3}.
+The lowest test sMAPE depends on the series and on the grain.
+On the month the leader is boosting for the total and for Assessed, and SARIMAX for Declared.
+On the week the leader is a linear model, the confidence set stays wide, and the seasonal naive remains inside it.
+On the calendar day the forest leads the total and Declared, and the paired test does not reject the seasonal naive at 5 percent.
+On Monday to Friday, TimesFM leads all three series, the paired test rejects the seasonal naive, and the confidence set still keeps other models.
 
-On the monthly panel, E2 has the lowest test sMAPE, about 10.9.
-Boosting (about 13.3) and the lag-12 naive (about 13.5) are close behind.
-E1 does not lead that grain.
-E2 switches on absolute disagreement.
-E1 switches on an energy threshold.
-The two rules are not the same model.
+The seasonal naive remains the reference on each grain.
+A low sMAPE can still miss a peak, as the monthly total does in April.
+E1 has no score in this run, and E2 is not the lowest sMAPE.
+Publishing one name for every grain would contradict Table~\ref{tab:best}.
 
-On calendar-daily A, TimesFM has the lowest test sMAPE, about 59.8.
-Most other models have negative skill against the lag-7 naive.
-Zeros from weekends and empty slips are inside that score.
-sMAPE on days with positive collection is a side description.
-It is not Ranking A.
-
-On business-daily B, TimesFM again has the lowest test sMAPE, about 52.4.
-Boosting and least squares follow.
-Many positive skill scores on B are skill against lag 5.
-Lag 5 is a weak reference on this series.
-National holidays were kept, and no model received a holiday indicator.
-
-On the weekly series, TimesFM has the lowest test sMAPE, about 17.2, and skill about 0.41 against the lag-52 naive.
-Ridge and least squares are next.
-
-The seasonal naive remains the reference forecast on each grain.
-E1 is the rule that can abstain by energy.
-Reading E1 requires coverage next to sMAPE, and this extract does not put coverage in the rank tables.
-E2 is the disagreement switch.
-TimesFM has the lowest test sMAPE on A, on B, and on the weekly series.
-It does not have the lowest test sMAPE on the monthly panel.
-
-Later work on the same extract should publish E1 coverage with the sMAPE tables, add a holiday indicator on grain B, and keep each grain's own seasonal naive as the skill reference.
+\discutir{the recommendation the authors want to leave with the reader: one model per grain, the seasonal naive as a floor, and caution before naming a single winner}

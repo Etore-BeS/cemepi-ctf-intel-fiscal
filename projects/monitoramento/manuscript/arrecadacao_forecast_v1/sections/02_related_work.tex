@@ -24,36 +24,28 @@ It does not replace the sMAPE rank.
 
 \paragraph{Tax forecasting.}
 RAMuST is a transformer for industry-level corporate income tax~\citep{you2025ramust}.
-It was presented at the NeurIPS 2025 Workshop on Generative AI in Finance.
 It mixes monthly macro series with a yearly regime variable.
-Our target is collection on debt that is already enrolled.
-We observe a stock series and GARE totals.
-We do not observe a macro or industry panel.
-We therefore compare existing forecasters.
+Our target is collection on debt that is already enrolled, from a stock series and GARE totals, not a macro or industry panel.
+We compare existing forecasters.
 We do not propose a mixed-frequency architecture.
+\discutir{the literature on tax-collection forecasting beyond RAMuST: what is missing, and what this paper does not claim to fill}
 
-\paragraph{Deep forecasters we cite, and those we fit.}
-TimesNet maps a series to a two-dimensional grid of within-period and across-period variation, then applies a vision backbone~\citep{wu2023timesnet}.
-We use TimesNet as the backbone of E1.
-PatchTST cuts each series into patches and runs a shared transformer on those patches~\citep{nie2023patchtst}.
-PatchTST is context for that design.
-We do not fit PatchTST.
-TimesFM is a pretrained decoder-only forecaster~\citep{das2024timesfm}.
-Zero-shot means we do not update its weights on our series.
-The weights we load are the later TimesFM 3.0 release~\citep{jain2026timesfm3}.
-TimeGrad forecasts by a conditional denoising diffusion process~\citep{rasul2021timegrad}.
-Score-based models estimate the gradient of the log-density and sample with Langevin steps~\citep{song2019score}.
-Our E3 and E4 models are small univariate versions of those two ideas.
-They are trained on the collection series.
-They are not the original multivariate code.
-
-\paragraph{Two different meanings of ``selective.''}
-SelectiveNet adds a reject option to a classifier so that some cases are not predicted~\citep{geifman2019selectivenet}.
-TEM brings a reject option to forecasting.
-An encoder--decoder point forecast is paired with an energy, and high-energy forecasts can be rejected~\citep{brusokas2025tem}.
-Selective learning for deep forecasting is a training rule, not a reject option~\citep{fu2025selective}.
-It drops uncertain or anomalous time steps from the training loss.
-It still emits a forecast at every test time.
-E1 is the TEM reject option at test time.
+\paragraph{Deep forecasters and a reject option.}
+TimesFM is a pretrained decoder-only forecaster used here without weight updates~\citep{das2024timesfm}.
+E1 uses a TimesNet backbone inside selective TEM, which pairs a point forecast with an energy and can reject that forecast~\citep{wu2023timesnet,brusokas2025tem,geifman2019selectivenet}.
+E3 and E4 are small univariate versions of TimeGrad and of score-based Langevin sampling~\citep{rasul2021timegrad,song2019score}.
+PatchTST is context for that design and is not fit~\citep{nie2023patchtst}.
+Selective learning drops uncertain training steps and still emits a forecast at every test time~\citep{fu2025selective}.
 E2 is not TEM.
-E2 only compares a boosting forecast with the seasonal naive.
+It only compares a boosting forecast with the seasonal naive.
+The formulas are in Appendix~\ref{app:models}.
+
+\paragraph{Tests of a forecast rank.}
+Diebold and Mariano test equal predictive accuracy from a loss differential~\citep{diebold1995comparing}.
+Harvey, Leybourne and Newbold correct that statistic for a short sample~\citep{harvey1997testing}.
+Wilcoxon ranks the paired differentials~\citep{wilcoxon1945individual}.
+Benjamini and Hochberg control the false discovery rate when every pair in a cell is tested~\citep{benjamini1995fdr}.
+The pairwise signed-rank counts are in Table~\ref{tab:wilcoxon-pairs}.
+Hansen, Lunde and Nason build a set of models that survive a sequence of equivalence tests~\citep{hansen2011mcs}.
+These tests do not choose the rank.
+The rank remains test sMAPE.

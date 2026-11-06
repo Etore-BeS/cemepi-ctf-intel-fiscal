@@ -1,0 +1,41 @@
+{
+  "total": {
+    "daily_n": 3650,
+    "daily_start": "2016-01-04",
+    "daily_end": "2025-12-31",
+    "daily_zeros": 1138,
+    "business_n": 2608,
+    "weekly_n": 521,
+    "weekly_end": "2025-12-28",
+    "monthly_n": 120,
+    "monthly_start": "2016-01-01",
+    "monthly_end": "2025-12-01",
+    "collection_sum": 27247166796.09919
+  },
+  "declarado": {
+    "daily_n": 3650,
+    "daily_start": "2016-01-04",
+    "daily_end": "2025-12-31",
+    "daily_zeros": 1140,
+    "business_n": 2608,
+    "weekly_n": 521,
+    "weekly_end": "2025-12-28",
+    "monthly_n": 120,
+    "monthly_start": "2016-01-01",
+    "monthly_end": "2025-12-01",
+    "collection_sum": 17609327808.216778
+  },
+  "autuado": {
+    "daily_n": 3650,
+    "daily_start": "2016-01-04",
+    "daily_end": "2025-12-31",
+    "daily_zeros": 1141,
+    "business_n": 2608,
+    "weekly_n": 521,
+    "weekly_end": "2025-12-28",
+    "monthly_n": 120,
+    "monthly_start": "2016-01-01",
+    "monthly_end": "2025-12-01",
+    "collection_sum": 9601128065.692411
+  }
+}
