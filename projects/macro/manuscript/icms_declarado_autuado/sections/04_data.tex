@@ -17,6 +17,7 @@ The December 2025 extract of legal-entity \vat{} debt contains 2,325,277 certifi
 The project's published laboratory page reports 2,325,280 certificates and the same stock at the published precision.
 The gap is three certificates and about \brl{}68,000.
 We use the extract.
+The descriptive comparison of declared and assessed debt is laboratory section 3.15 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-cnae-seg}).
 Inside it, declared debt is 2,257,189 certificates and \brl{}116.42 billion.
 Assessed debt is 59,542 certificates and \brl{}311.40 billion, of which the Simples Nacional assessments are 818 certificates and \brl{}0.145 billion, or 0.05~percent of assessed stock.
 Fecoep is 8,510 certificates and \brl{}0.048 billion.
@@ -132,4 +133,81 @@ The repeated-enrolment test is the exception: a firm is counted once in each seg
 Levels that would leave a cell below five firms are pooled before the test.
 $V$ near 0.1 is a small association and $V$ near 0.3 is a moderate one.
 We use those conventional markers only as a reading aid.
-\textbf{[DISCUTIR E ESCREVER: modelo econom\'etrico simplificado. O escopo do paper \'e descritivo; decidir se entra um modelo (com equa\c{c}\~ao, betas e testes de pressupostos) ou se fica fora.]}
+
+\subsection{Inference after the linearity diagnostic}\label{sec:inference}
+
+The comparisons in Section~\ref{sec:comparisons} do not choose a regression.
+Laboratory section 4.5 fits the candidate specifications on one stratified sample and records which specification its cuts support (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-lin}).
+Laboratory section 4.7 fits that specification and does not choose another (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-avd-inf}).
+The population is the December 2025 cross-section above.
+Firm attributes are those already joined for section 3.15, from the March 2026 CNPJ register.
+The estimation table has no debtor name, no individual tax number and no CNPJ.
+
+Eligible complete cases number 2,313,681.
+The fits use a stratified sample of 200,000 certificates.
+Strata are segment, firm size and any payment.
+Of that sample, 194,874 certificates are declared and 5,126 are assessed.
+The share with state code SP is 0.850.
+A sensitivity sample for the stock equation drops the largest 1~percent of the estimation sample and leaves 198,000 certificates.
+
+The stock screen is ordinary least squares of
+\begin{equation}
+\log(1 + S_i) = x_i^{\top}\beta + \varepsilon_i,
+\label{eq:stock}
+\end{equation}
+with HC3 standard errors \citep{white1980,mackinnon1985}.
+The regressors are debt age, segment, CNAE section and firm size.
+The recovery screen is
+\begin{equation}
+R_i = P_i / S_i = x_i^{\top}\gamma + u_i,
+\label{eq:recovery}
+\end{equation}
+with log stock added to those regressors.
+Declared is the reference segment, trade (section G) is the reference activity, and micro (size code 01) is the reference size.
+Ramsey's RESET adds the square and the cube of the fitted values \citep{ramsey1969}.
+The decision does not use the $p$-value.
+It sets the linear stock equation aside when the partial $R^2$ of those powers is at least 0.01, or when the Spearman rank correlation between the absolute residual and the fitted value is at least 0.20 \citep{spearman1904}.
+Either cut selects quantile regression of $\log(1+S_i)$ and leaves ordinary least squares out of the stock equation \citep{koenker1978}.
+
+The payment screen compares, inside each segment, a linear logit with a restricted cubic spline of 4 degrees of freedom \citep{durrleman1989}.
+$\Delta$AIC is the linear AIC minus the spline AIC.
+The spline replaces the line when $\Delta$AIC is at least 10, or when the spline log-odds are not monotone from the 5th to the 95th percentile.
+Declared and assessed are decided separately.
+A method-of-moments intraclass correlation selects a mixed logit when it is at least 0.05, separately in each segment \citep{goldstein2002}.
+The grouping factors are municipality and CNAE division.
+The state is not a grouping factor, because the debtors are in S\~ao Paulo.
+These cuts are working assumptions of the laboratory page.
+They are not estimates taken from the papers cited here.
+A $p$-value alone does not choose the specification.
+
+Section 4.7 then fits the selected payment equations.
+In declared debt,
+\begin{equation}
+\operatorname{logit}\Pr(P_i=1)
+  = s_1(\log(1+S_i)) + s_2(\mathrm{age}_i) + z_i^{\top}\alpha,
+\label{eq:logit-dec}
+\end{equation}
+with centered restricted cubic splines on log stock and on debt age.
+In assessed debt the log-stock term stays linear,
+\begin{equation}
+\operatorname{logit}\Pr(P_i=1)
+  = \beta\log(1+S_i) + s_2(\mathrm{age}_i) + z_i^{\top}\alpha.
+\label{eq:logit-ass}
+\end{equation}
+$P_i=1$ when the certificate has any GARE payment dated before 1~January 2026.
+$z_i$ holds CNAE section and firm size, with the same references as the screen.
+The reported interval on the fixed-effects logit is the HC3 95~percent interval.
+The same point estimate is also computed with standard errors clustered by the eight-digit CNPJ root.
+The root is not printed.
+Declared debt has a complement on a cluster sample: whole municipalities, at most 30 certificates from each, stopping at 8,000 certificates, with a municipal random intercept.
+The interval on that complement is an approximate posterior interval.
+It is not a confidence interval.
+The stock equation is a quantile regression at $\tau = 0.25$, $0.50$, $0.75$ and $0.90$, fit separately in each segment, with no ordinary least squares column.
+The linear recovery equation remains only as a comparison with the payment logit.
+
+The payment logit uses at most 40,000 certificates in a segment, stratified by any payment.
+Quantile regression uses at most 20,000 certificates in a segment.
+A segment under the cap is kept whole.
+A section or size level with fewer than 10 certificates, fewer than 5 firms, or 1 to 4 payers is pooled.
+A level that separates the logit is dropped.
+Counts of 1 to 4 payers are not printed.

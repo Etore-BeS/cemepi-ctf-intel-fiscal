@@ -3,8 +3,10 @@
 Full manuscript for the EAA 2027 Annual Congress, in English.
 Authors stay on this preprint. Drop the author block for the later double-blind submission.
 
-The text, tables and figures use the laboratory aggregates in commit `926a605`
-(`lab/cnae-declared-assessed`). `numeros.tex` is the number bank of the previous draft and is not compiled.
+The descriptive aggregates are laboratory section 3.15.
+The inference is laboratory sections 4.5 and 4.7.
+The published page is `https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/`.
+`numeros.tex` is the number bank of the previous draft and is not compiled.
 
 ## Compile
 

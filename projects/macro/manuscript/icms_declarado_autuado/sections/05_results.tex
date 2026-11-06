@@ -2,6 +2,8 @@
 
 \textbf{[DISCUTIR E ESCREVER: cada tabela com uma infer\^encia; tirar do texto os n\'umeros que j\'a est\~ao nas tabelas.]}
 
+The descriptive tables and figures in this section are the aggregates in laboratory section 3.15 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-cnae-seg}).
+
 \subsection{Size, payment and recovery}\label{sec:size}
 
 Assessed debt is the value. Declared debt is the count.
@@ -328,3 +330,108 @@ English labels are short renderings of the official Portuguese names \citep{ibge
 \includegraphics[width=0.92\textwidth]{figures/fig_repeated.png}
 \caption{Share of segment stock held by firms with one certificate or with two or more.}\label{fig:repeated}
 \end{figure}
+
+\subsection{Selected specification and fitted associations}\label{sec:fitted}
+
+Laboratory section 4.5 applies the pre-stated cuts to the estimation sample of 200,000 certificates (Section~\ref{sec:inference}).
+For any payment, assessed debt keeps a linear log-stock term.
+$\Delta$AIC is $-1.78$, and the spline log-odds are monotone.
+Assessed debt uses a spline on debt age.
+$\Delta$AIC is $25.06$, and the spline log-odds are not monotone.
+Declared debt uses a spline on log stock ($\Delta$AIC $= 133.60$) and a spline on debt age ($\Delta$AIC $= 741.16$).
+For the balance, the partial $R^2$ of the RESET powers is 0.016, which meets the cut of 0.01.
+The rank correlation between the absolute residual and the fitted value is 0.19.
+After the largest 1~percent of the estimation sample is dropped, the partial $R^2$ is 0.017.
+The linear stock equation is set aside, and quantile regression is the stock equation.
+For recovery, the partial $R^2$ is 0.004 and the rank correlation is 0.52, which meets the cut of 0.20.
+The linear recovery equation is kept only as a comparison.
+The moment intraclass correlation is 0.061 for declared municipalities and 0.014 for declared CNAE divisions.
+It is 0.034 for assessed municipalities and 0.015 for assessed CNAE divisions.
+A municipal random intercept therefore enters only for declared debt.
+The share of groups outside the 99.8~percent funnel limits is 0.184 and 0.206.
+That share does not select the mixed logit.
+
+Laboratory section 4.7 fits those equations.
+Both payment logits converge, and both designs have full column rank.
+The declared logit uses 39,972 certificates.
+That count is a cap of 40,000, minus 7 certificates dropped with a small pool and 21 dropped with a separated level.
+McFadden's pseudo-$R^2$ is 0.061.
+The assessed logit uses 5,063 certificates, from 5,126 in the estimation sample, after 34 leave with a small pool and 29 leave with a separated level.
+McFadden's pseudo-$R^2$ is 0.038.
+The assessed log-stock coefficient is $-0.194$.
+The HC3 interval runs from $-0.235$ to $-0.154$, so it excludes zero.
+The spline basis coefficients are not slopes.
+The partial log-odds curves are in that laboratory section.
+The declared municipal complement uses 7,919 certificates in 670 municipalities.
+The municipality standard deviation is 0.676, with an approximate posterior interval from 0.640 to 0.713.
+The intraclass correlation of that fit is 0.122.
+It is a property of the complement.
+It is not the 0.061 screen that selected the intercept.
+
+Table~\ref{tab:quantile} reports the debt-age coefficient in the quantile regression of log stock.
+The coefficient is the change in that quantile of log stock associated with one further year of debt age, with CNAE section and firm size held fixed.
+The four values of $\tau$ are four rows.
+They are not a claim about the shape of the distribution.
+The assessed fit uses 5,092 certificates.
+The declared fit uses 19,995.
+
+\begin{table}[t]
+\centering
+\caption{Debt-age coefficient in the quantile regression of $\log(1+\text{stock})$.}\label{tab:quantile}
+\begin{tabular}{llrrr}
+\toprule
+Segment & $\tau$ & Coefficient & Interval & Certificates \\
+\midrule
+Assessed & 0.25 & $-0.015$ & $-0.026$ to $-0.004$ & 5,092 \\
+Assessed & 0.50 & $-0.017$ & $-0.027$ to $-0.008$ & 5,092 \\
+Assessed & 0.75 & $-0.022$ & $-0.032$ to $-0.011$ & 5,092 \\
+Assessed & 0.90 & $-0.020$ & $-0.032$ to $-0.008$ & 5,092 \\
+Declared & 0.25 & 0.213 & 0.203 to 0.223 & 19,995 \\
+Declared & 0.50 & 0.140 & 0.133 to 0.147 & 19,995 \\
+Declared & 0.75 & 0.091 & 0.085 to 0.098 & 19,995 \\
+Declared & 0.90 & 0.069 & 0.062 to 0.076 & 19,995 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.4em}
+\begin{minipage}{0.95\textwidth}
+\footnotesize
+Notes: Rounded from laboratory section 4.7.
+The interval is the default 95~percent interval of the quantile regression, not an HC3 interval.
+There is no ordinary least squares column.
+\end{minipage}
+\end{table}
+
+Table~\ref{tab:recoveryfit} reports the linear recovery comparison.
+The outcome is the certificate ratio of payments to the December stock.
+It is not the segment recovery rate in Table~\ref{tab:profile}.
+On assessed debt the $R^2$ is 0.019 ($n = 5{,}092$).
+On declared debt the $R^2$ is 0.0014 ($n = 194{,}709$).
+The section and size coefficients of every equation are in laboratory section 4.7 and are not repeated here.
+
+\begin{table}[t]
+\centering
+\caption{Linear recovery comparison, HC3 intervals.}\label{tab:recoveryfit}
+\begin{tabular}{llrrr}
+\toprule
+Segment & Term & Coefficient & HC3 interval & Certificates \\
+\midrule
+Assessed & Log stock & $-0.031$ & $-0.042$ to $-0.019$ & 5,092 \\
+Assessed & Debt age (years) & $-0.0031$ & $-0.0047$ to $-0.0015$ & 5,092 \\
+Declared & Log stock & $-0.777$ & $-1.028$ to $-0.525$ & 194,709 \\
+Declared & Debt age (years) & 0.125 & 0.079 to 0.172 & 194,709 \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.4em}
+\begin{minipage}{0.95\textwidth}
+\footnotesize
+Notes: Rounded from laboratory section 4.7.
+Ordinary least squares of payments divided by stock, inside each segment.
+This equation is a comparison with the payment logit.
+It is not the stock equation.
+The assessed $R^2$ is 0.019 and the declared $R^2$ is 0.0014.
+\end{minipage}
+\end{table}
+
+\textbf{[DISCUTIR E ESCREVER: quais coeficientes de se\c{c}\~ao CNAE e de porte entram no texto, e a leitura dos termos de idade e de saldo. A se\c{c}\~ao 4.7 publica a tabela completa e n\~ao traz essa leitura.]}

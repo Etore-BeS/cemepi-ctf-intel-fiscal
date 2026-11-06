@@ -12,7 +12,7 @@ Assessed debt is tax fixed by an assessment.
 Both are enrolled in the \emph{d\'ivida ativa}.
 They do not have the same size, the same age, or the same relation between payment and the remaining balance.
 
-The research question is descriptive, and it is aimed at compliance studies.
+The first question is descriptive, and it is aimed at compliance studies.
 How do size, concentration, payment and recovery differ between declared and assessed debts?
 If the differences are large, a study that pools the enrolled stock will mix a mass of small declared certificates with a much smaller set of large assessed certificates.
 A value-weighted moment will then describe a different object from a count-weighted moment.
@@ -30,6 +30,8 @@ It is produced by assessed debt, which is 72.8~percent of the two-segment stock 
 Of the 23,137 certificates in the pooled top 1~percent, 18,230 are assessed.
 Payment and recovery do not rank the segments in the same order.
 Some payment is more common on assessed certificates (17.4~percent against 9.1~percent), but payments are 0.48~percent of the assessed stock and 4.73~percent of the declared stock.
+The second question is which partial associations of payment and of the balance this cross-section supports.
+A linearity and group-heterogeneity diagnostic selects the specification, and the selected models are then fit.
 
 The paper makes two contributions, and a narrower methodological point that is only as strong as the cutoff we document.
 The theoretical contribution is a gap in the compliance literature.
@@ -43,14 +45,15 @@ Declared debt is a different operational problem: many small certificates, usual
 We do not estimate the effect of working that list.
 The methodological point is limited on purpose.
 We do not offer a new estimator.
-We show why a round 1~percent cutoff is not arbitrary in this portfolio, and why the same cutoff does not have the same content inside each segment.
+The partial associations use a logit, restricted cubic splines and quantile regression, in the form the diagnostic selects.
+We also show why a round 1~percent cutoff is not arbitrary in this portfolio, and why the same cutoff does not have the same content inside each segment.
 The justification is the shape of the Lorenz curve and the fact that the resulting list is a set of certificates the administration can actually review.
 
 The paper proceeds as follows.
 Section~\ref{sec:background} sets out the institutional path from the VAT to the enrolled certificate, and locates ICMS against the European VAT only as framing.
 Section~\ref{sec:literature} places the question in the compliance and enforcement literature and states descriptive expectations, not hypotheses.
-Section~\ref{sec:data} describes the data and the measures, including the registry-timing caveat and the definition of recovery.
-Section~\ref{sec:results} reports the comparisons.
+Section~\ref{sec:data} describes the data, the measures and the inference design, including the registry-timing caveat and the definition of recovery.
+Section~\ref{sec:results} reports the comparisons and the selected models.
 Section~\ref{sec:discussion} interprets them.
 Section~\ref{sec:conclusion} concludes.
 A notebook that rebuilds the aggregates will be added as supplementary material.
