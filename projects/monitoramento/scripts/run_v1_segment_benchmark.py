@@ -1,7 +1,7 @@
 """Run the closed v1 M0–M9 / E1–E4 protocol on one ICMS series and grain.
 
 Model bodies are the code cells of
-``notebooks/articles/arrecadacao_forecast_paper_v1.ipynb``.
+``notebooks/articles/arrecadacao_forecast_v1.ipynb``.
 They are executed unchanged. Hyperparameters are selected again on the
 validation block of the series being scored.
 

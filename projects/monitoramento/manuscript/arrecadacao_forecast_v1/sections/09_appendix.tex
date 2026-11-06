@@ -267,15 +267,13 @@ These panels replace a single overcrowded line plot.
 Each cell tests every unordered pair of models that have a finite test forecast.
 The family is the cell.
 Adjusted \(p\)-values use Benjamini--Hochberg.
-Pairwise results are in the project laboratory, Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+Table~\ref{tab:wilcoxon-pairs} counts those pairs.
 
 Of the 1,350 unordered pairs, 437 have a Benjamini--Hochberg \(p\)-value below 0.05.
-That is the total in laboratory Section 4.6.
-The same section does not count how many cells have an sMAPE leader that beats every rival.
+Table~\ref{tab:wilcoxon-pairs} splits that total by series and grain.
 Agreement with the Diebold-Mariano test remains a call against the seasonal naive.
-\discutir{whether the text should say that Table~\ref{tab:wilcoxon-pairs} marks Leader beats all as no in every cell. Laboratory Section 4.6 does not print that column.}
+\discutir{whether the text should say that Table~\ref{tab:wilcoxon-pairs} marks Leader beats all as no in every cell.}
 
-\IfFileExists{tables/tab_wilcoxon_pairs.tex}{%
 \begin{table}[ht]
   \caption{Pairwise Wilcoxon signed-rank tests inside each cell.
   Pairs is the number of unordered pairs.
@@ -286,10 +284,6 @@ Agreement with the Diebold-Mariano test remains a call against the seasonal naiv
   \scriptsize
   \input{tables/tab_wilcoxon_pairs}
 \end{table}
-}{%
-The summary table is not in this draft.
-Rebuild it from the saved forecasts before reading a count from it.
-}
 
 \section{Model definitions}
 \label{app:models}

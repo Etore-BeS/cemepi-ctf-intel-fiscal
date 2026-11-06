@@ -35,13 +35,13 @@ The threshold $\tau$ in those rules is chosen in step~3.
       font=\normalsize,
       node distance=5.5mm and 3mm,
       wide/.style={draw, rounded corners=2pt, align=center,
-                   inner sep=5pt, minimum width=124mm, fill=cemepiteal!12,
+                   inner sep=5pt, minimum width=124mm, fill=inkteal!12,
                    line width=0.5pt},
       grain/.style={draw, rounded corners=2pt, align=center,
                     inner sep=3.5pt, text width=28mm, minimum height=16mm,
-                    fill=cemepiteal!22, line width=0.5pt},
+                    fill=inkteal!22, line width=0.5pt},
       stage/.style={draw, rounded corners=2pt, align=center,
-                    inner sep=5pt, fill=cemepiteal!30, line width=0.5pt},
+                    inner sep=5pt, fill=inkteal!30, line width=0.5pt},
       rule/.style={draw, rounded corners=2pt, align=center,
                    inner sep=4pt, text width=56mm, fill=white,
                    line width=0.4pt, font=\normalsize},
@@ -90,7 +90,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \node[wide, below=8mm of s2] (sel) {Select by validation sMAPE};
     \node[wide, below=of sel] (refit) {Refit on train $+$ validation};
     \node[wide, below=of refit] (fc) {Forecast the test block};
-    \node[wide, fill=cemepiteal!45, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
+    \node[wide, fill=inkteal!45, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
     \node[wide, below=of rank] (skill)
       {Secondary: skill score vs seasonal naive};
 
@@ -281,14 +281,13 @@ A negative statistic means the best model has lower loss than the seasonal naive
 As a rank-based complement to the Diebold-Mariano test, we apply the Wilcoxon signed-rank test~\citep{wilcoxon1945individual} to the same per-period sMAPE loss differentials on the test block.
 First, the best model is compared with the seasonal naive of the same grain, as in the Diebold-Mariano test.
 Second, every pair of models in a cell is compared, and the $p$-values within each cell are adjusted with the Benjamini--Hochberg procedure~\citep{benjamini1995fdr}.
-The same adjustment is the one in \path{lab/paper_eda/_prelude.py} (\texttt{fdr\_bh}).
 The test is two-sided.
 It uses the exact null distribution when there are no ties and the normal approximation otherwise.
 It assumes that the differentials are independent and symmetric around their median.
 Forecast errors can be autocorrelated, and with 12 or 13 test points the rank test has low power.
 It is a robustness check.
 It does not replace the Diebold-Mariano test or the model confidence set.
-Pairwise results are in the project laboratory, Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+The pairwise signed-rank counts are in Table~\ref{tab:wilcoxon-pairs}.
 
 The model confidence set uses level 0.10~\citep{hansen2011mcs}.
 The statistic is the largest $t$ of a model against the average loss of the other models.
@@ -300,17 +299,12 @@ A model leaves the set when the equivalence test rejects.
 \label{sec:repro}
 
 This paper states the series, the splits, the scores, and the decision rules.
-The model bodies are the v1 notebook
-\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_paper_v1.ipynb}.
-The segment run is
-\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_v1_segmentado.ipynb}.
-The saved forecasts are under
-\path{projects/monitoramento/notebooks/articles/arrecadacao_forecast_v1_segmentado/results/}.
+The model bodies and the segment run are in the supplementary material.
 E1 calls the published TEM code.
 That vendor tree is not in this worktree, so E1 has no score.
 M9 uses the public weights \texttt{google/timesfm-3.0-pytorch}.
-The Wilcoxon display is laboratory Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
-That page reads the committed comparison tables.
-It does not refit a model.
-The repository paths for the notebooks and the saved forecasts are above.
-Every number in Section~\ref{sec:results} that does not depend on the signed-rank test is read from those saved tables.
+Table~\ref{tab:best} reports the signed-rank test of each leader against the seasonal naive.
+Table~\ref{tab:wilcoxon-pairs} reports the pairwise signed-rank counts.
+Those tables are read from the saved comparison.
+They do not refit a model.
+Every number in Section~\ref{sec:results} is read from the saved comparison tables.

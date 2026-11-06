@@ -6,7 +6,7 @@ The rank is test sMAPE.
 Lower is better.
 The skill score is higher when the model beats the seasonal naive of that grain.
 The HLN column is the two-sided p-value of the leader against that naive.
-The signed-rank comparison of that pair is in laboratory Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+The signed-rank comparison of that pair is the Wilcoxon column of Table~\ref{tab:best}.
 The model confidence set uses level 0.10.
 
 \subsection{The lowest sMAPE is not the same model}
@@ -27,7 +27,8 @@ E1 has no row.
   \caption{Lowest test sMAPE on each series and grain.
   Skill is \(1 - \mathrm{sMAPE}/\mathrm{sMAPE}_{\mathrm{naive}}\) against the seasonal naive of that grain.
   HLN \(p\) is the two-sided Diebold-Mariano test of that leader against the same naive, with the small-sample correction.
-  The signed-rank test of that same pair, and the pairs among the other models, are in laboratory Section 4.6.
+  The Wilcoxon column is the signed-rank test of that same pair.
+  The pairs among the other models are in Table~\ref{tab:wilcoxon-pairs}.
   A p-value below 0.05 is discussed in the text.
   It is not a second rank.}
   \label{tab:best}
@@ -261,7 +262,7 @@ Appendix~\ref{app:bars} draws the skill of every model.
 The zero line in those figures is the seasonal naive.
 
 The HLN column tests one pair: the sMAPE leader against the seasonal naive.
-Pairwise results are in the project laboratory, Section 4.6 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-ben-wsr}).
+The pairs among the other models are in Table~\ref{tab:wilcoxon-pairs}.
 The loss is the summand inside sMAPE, so the test uses the same score as the rank.
 A small p-value means the paired losses are not compatible with equal accuracy.
 Five cells reject at the 5 percent level: the monthly total (0.022), monthly Declared (0.040), and all three Monday to Friday series (each below 0.001).
@@ -324,7 +325,6 @@ On these twelve cells, only Monday to Friday puts the seasonal naive out of the 
 Even there, the set still contains more than TimesFM.
 
 The Wilcoxon column of Table~\ref{tab:best} is the signed-rank test of those same leader-versus-naive losses.
-Laboratory Section 4.6 is the source.
 The two calls agree at 5 percent in 10 of the 12 cells.
 They disagree in two cells.
 On Declared for the month, the HLN \(p\)-value is 0.040 and the Wilcoxon \(p\)-value is 0.064.
@@ -335,4 +335,4 @@ Agreement is a call against the seasonal naive.
 It is not a claim that the leader beats every other model.
 A month has 12 test points and a week has 13, and the rank test has low power on those grains.
 A disagreement on a short block is not a published winner.
-\discutir{what the two disagreements say about relative gains and absolute limits. Laboratory Section 4.6 leaves that reading to the authors.}
+\discutir{what the two disagreements say about relative gains and absolute limits.}
