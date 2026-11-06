@@ -14,11 +14,10 @@ No name, no individual tax number and no certificate identifier leaves the compu
 Cells with one to four firms are left blank in the detailed activity files that sit behind the paper.
 
 The December 2025 extract of legal-entity \vat{} debt contains 2,325,277 certificates and \brl{}427.880 billion.
-The project's published laboratory page reports 2,325,280 certificates and the same stock at the published precision.
+A count of the same extract, at the same stock precision, is 2,325,280 certificates.
 The gap is three certificates and about \brl{}68,000.
 We use the extract.
-The descriptive comparison of declared and assessed debt is laboratory section 3.15 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-cnae-seg}).
-Inside it, declared debt is 2,257,189 certificates and \brl{}116.42 billion.
+Declared debt is 2,257,189 certificates and \brl{}116.42 billion.
 Assessed debt is 59,542 certificates and \brl{}311.40 billion, of which the Simples Nacional assessments are 818 certificates and \brl{}0.145 billion, or 0.05~percent of assessed stock.
 Fecoep is 8,510 certificates and \brl{}0.048 billion.
 The GIA amendment is 36 certificates and \brl{}0.009 billion.
@@ -137,10 +136,10 @@ We use those conventional markers only as a reading aid.
 \subsection{Inference after the linearity diagnostic}\label{sec:inference}
 
 The comparisons in Section~\ref{sec:comparisons} do not choose a regression.
-Laboratory section 4.5 fits the candidate specifications on one stratified sample and records which specification its cuts support (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-lin}).
-Laboratory section 4.7 fits that specification and does not choose another (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-avd-inf}).
+The candidate specifications are fit on one stratified sample, and the cuts below record which specification that sample supports.
+The selected specification is then fit, and no other specification is chosen.
 The population is the December 2025 cross-section above.
-Firm attributes are those already joined for section 3.15, from the March 2026 CNPJ register.
+Firm attributes are those joined from the March 2026 CNPJ register.
 The estimation table has no debtor name, no individual tax number and no CNPJ.
 
 Eligible complete cases number 2,313,681.
@@ -176,11 +175,11 @@ Declared and assessed are decided separately.
 A method-of-moments intraclass correlation selects a mixed logit when it is at least 0.05, separately in each segment \citep{goldstein2002}.
 The grouping factors are municipality and CNAE division.
 The state is not a grouping factor, because the debtors are in S\~ao Paulo.
-These cuts are working assumptions of the laboratory page.
+These cuts are working assumptions.
 They are not estimates taken from the papers cited here.
 A $p$-value alone does not choose the specification.
 
-Section 4.7 then fits the selected payment equations.
+The selected payment equations are then fit.
 In declared debt,
 \begin{equation}
 \operatorname{logit}\Pr(P_i=1)

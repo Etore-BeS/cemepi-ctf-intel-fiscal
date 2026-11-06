@@ -2,8 +2,6 @@
 
 \textbf{[DISCUTIR E ESCREVER: cada tabela com uma infer\^encia; tirar do texto os n\'umeros que j\'a est\~ao nas tabelas.]}
 
-The descriptive tables and figures in this section are the aggregates in laboratory section 3.15 (\url{https://etore-bes.github.io/cemepi-ctf-intel-fiscal/paper_eda/#lab-cnae-seg}).
-
 \subsection{Size, payment and recovery}\label{sec:size}
 
 Assessed debt is the value. Declared debt is the count.
@@ -333,7 +331,7 @@ English labels are short renderings of the official Portuguese names \citep{ibge
 
 \subsection{Selected specification and fitted associations}\label{sec:fitted}
 
-Laboratory section 4.5 applies the pre-stated cuts to the estimation sample of 200,000 certificates (Section~\ref{sec:inference}).
+The pre-stated cuts are applied to the estimation sample of 200,000 certificates (Section~\ref{sec:inference}).
 For any payment, assessed debt keeps a linear log-stock term.
 $\Delta$AIC is $-1.78$, and the spline log-odds are monotone.
 Assessed debt uses a spline on debt age.
@@ -351,7 +349,7 @@ A municipal random intercept therefore enters only for declared debt.
 The share of groups outside the 99.8~percent funnel limits is 0.184 and 0.206.
 That share does not select the mixed logit.
 
-Laboratory section 4.7 fits those equations.
+Those equations are fit on this cross-section.
 Both payment logits converge, and both designs have full column rank.
 The declared logit uses 39,972 certificates.
 That count is a cap of 40,000, minus 7 certificates dropped with a small pool and 21 dropped with a separated level.
@@ -361,7 +359,23 @@ McFadden's pseudo-$R^2$ is 0.038.
 The assessed log-stock coefficient is $-0.194$.
 The HC3 interval runs from $-0.235$ to $-0.154$, so it excludes zero.
 The spline basis coefficients are not slopes.
-The partial log-odds curves are in that laboratory section.
+Figure~\ref{fig:partialstock} and Figure~\ref{fig:partialage} show the partial log-odds.
+The vertical coordinate is the linear predictor at a grid value minus the linear predictor at the median of the fit sample.
+The assessed log-stock curve is linear.
+The other curves are centered splines.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{figures/fig_partial_log_stock.png}
+\caption{Partial payment log-odds against $\log(1+\text{stock})$. Solid lines are the point estimate. Dotted lines are the pointwise 95~percent interval. The curve is zero at the median of the fit sample.}\label{fig:partialstock}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.88\textwidth]{figures/fig_partial_debt_age.png}
+\caption{Partial payment log-odds against debt age in years. Solid lines are the point estimate. Dotted lines are the pointwise 95~percent interval. The curve is zero at the median of the fit sample.}\label{fig:partialage}
+\end{figure}
+
 The declared municipal complement uses 7,919 certificates in 670 municipalities.
 The municipality standard deviation is 0.676, with an approximate posterior interval from 0.640 to 0.713.
 The intraclass correlation of that fit is 0.122.
@@ -396,7 +410,7 @@ Declared & 0.90 & 0.069 & 0.062 to 0.076 & 19,995 \\
 \vspace{0.4em}
 \begin{minipage}{0.95\textwidth}
 \footnotesize
-Notes: Rounded from laboratory section 4.7.
+Notes: Rounded to the precision shown.
 The interval is the default 95~percent interval of the quantile regression, not an HC3 interval.
 There is no ordinary least squares column.
 \end{minipage}
@@ -407,7 +421,6 @@ The outcome is the certificate ratio of payments to the December stock.
 It is not the segment recovery rate in Table~\ref{tab:profile}.
 On assessed debt the $R^2$ is 0.019 ($n = 5{,}092$).
 On declared debt the $R^2$ is 0.0014 ($n = 194{,}709$).
-The section and size coefficients of every equation are in laboratory section 4.7 and are not repeated here.
 
 \begin{table}[t]
 \centering
@@ -426,7 +439,7 @@ Declared & Debt age (years) & 0.125 & 0.079 to 0.172 & 194,709 \\
 \vspace{0.4em}
 \begin{minipage}{0.95\textwidth}
 \footnotesize
-Notes: Rounded from laboratory section 4.7.
+Notes: Rounded to the precision shown.
 Ordinary least squares of payments divided by stock, inside each segment.
 This equation is a comparison with the payment logit.
 It is not the stock equation.
@@ -434,4 +447,12 @@ The assessed $R^2$ is 0.019 and the declared $R^2$ is 0.0014.
 \end{minipage}
 \end{table}
 
-\textbf{[DISCUTIR E ESCREVER: quais coeficientes de se\c{c}\~ao CNAE e de porte entram no texto, e a leitura dos termos de idade e de saldo. A se\c{c}\~ao 4.7 publica a tabela completa e n\~ao traz essa leitura.]}
+\clearpage
+Table~\ref{tab:secsize-payment}, Table~\ref{tab:secsize-mixed}, Table~\ref{tab:secsize-quantile} and Table~\ref{tab:secsize-recovery} report the section and size coefficients.
+
+\input{tables/tab_secsize_payment}
+\input{tables/tab_secsize_mixed}
+\input{tables/tab_secsize_quantile}
+\input{tables/tab_secsize_recovery}
+
+\textbf{[DISCUTIR E ESCREVER: quais coeficientes de se\c{c}\~ao CNAE e de porte entram no texto, e a leitura dos termos de idade e de saldo.]}
