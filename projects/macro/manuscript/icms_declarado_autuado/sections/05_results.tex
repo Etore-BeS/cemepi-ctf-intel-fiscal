@@ -466,3 +466,57 @@ Table~\ref{tab:secsize-payment}, Table~\ref{tab:secsize-mixed}, Table~\ref{tab:s
 \input{tables/tab_secsize_recovery}
 
 \textbf{[DISCUTIR E ESCREVER: quais coeficientes de se\c{c}\~ao CNAE e de porte entram no texto, e a leitura dos termos de idade e de saldo.]}
+
+\subsection{Origin, payment occurrence and the paid-to-balance ratio}\label{sec:origin-models}
+
+Table~\ref{tab:logit-ame} reports the average marginal effect of assessed origin on the probability of any payment.
+The unit is percentage points.
+Declared origin is the reference.
+The main interval uses standard errors clustered by the eight-digit CNPJ root.
+The HC3 interval is the robustness column.
+The controls are log stock, debt age, enrolment-year indicators, CNAE section, firm size and firm age.
+Figure~\ref{fig:logit-ame} plots the same effect under both variance estimators.
+The horizontal axis is the effect in percentage points.
+The vertical axis distinguishes the cluster interval from the HC3 interval.
+The marker is the point estimate and the bar is the 95 percent interval.
+Read the figure as the partial association from the origin logit in this cross-section.
+
+\textbf{[DISCUTIR E ESCREVER: interpretar o efeito marginal medio da origem sobre a ocorrencia de pagamento]}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_logit_origin_ame.png}
+\caption{Average marginal effect of assessed origin on any payment, in percentage points. Declared origin is the reference. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator.}\label{fig:logit-ame}
+\end{figure}
+
+Table~\ref{tab:within-firm} reports the within-firm difference in the probability of any payment.
+The sample is firms that hold at least one declared certificate and at least one assessed certificate.
+The descriptive overlap is 11,928 firms.
+The estimate is a linear probability model with a firm fixed effect, in percentage points.
+The main interval is clustered by the firm.
+The HC3 interval is the robustness column.
+Figure~\ref{fig:within-firm} uses the same axes as Figure~\ref{fig:logit-ame}, with the within-firm difference on the horizontal axis.
+
+\textbf{[DISCUTIR E ESCREVER: interpretar a comparacao dentro da empresa]}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_within_firm.png}
+\caption{Within-firm difference in the probability of any payment, in percentage points. The sample is firms with both origins. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator.}\label{fig:within-firm}
+\end{figure}
+
+Table~\ref{tab:recovery-pct} reports the estimated percentage difference in expected payments per real of stock.
+Assessed origin is compared with declared origin.
+The main interval is clustered by the eight-digit root.
+The HC3 interval is the robustness column.
+The quantile regression of log stock in Table~\ref{tab:quantile} remains the stock equation.
+Figure~\ref{fig:recovery-pct} plots the percentage difference.
+Its horizontal axis is the percentage difference and its vertical axis distinguishes the two variance estimators.
+
+\textbf{[DISCUTIR E ESCREVER: interpretar as diferencas percentuais do pago sobre o saldo]}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.72\textwidth]{figures/fig_recovery_pct.png}
+\caption{Percentage difference in expected payments per real of stock, assessed origin relative to declared origin. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator. The quantile regression of log stock is a separate equation.}\label{fig:recovery-pct}
+\end{figure}

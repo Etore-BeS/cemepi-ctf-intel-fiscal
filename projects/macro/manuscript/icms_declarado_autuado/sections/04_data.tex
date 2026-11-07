@@ -207,6 +207,8 @@ In assessed debt the log-stock term stays linear,
 $P_i=1$ when the certificate has any GARE payment dated before 1~January 2026.
 $z_i$ holds CNAE section and firm size, with the same references as the screen.
 The reported interval on the fixed-effects logit is the HC3 95~percent interval.
+The same point estimate is also computed with standard errors clustered by the eight-digit CNPJ root.
+The root is not printed.
 Declared debt has a complement on a cluster sample: whole municipalities, at most 30 certificates from each, stopping at 8,000 certificates, with a municipal random intercept.
 The interval on that complement is an approximate posterior interval.
 It is not a confidence interval.
@@ -219,6 +221,40 @@ A section or size level with fewer than 10 certificates, fewer than 5 firms, or 
 A level that separates the logit is dropped.
 Counts of 1 to 4 payers are not printed.
 
+The origin logit puts declared and assessed certificates in one equation.
+Declared debt is the reference.
+The outcome is any payment.
+The average marginal effect of assessed origin is the mean, over certificates, of the change in the fitted probability when the assessed indicator moves from 0 to 1 and the other covariates stay as observed.
+Multiplying by 100 expresses the effect in percentage points.
+Where the certificate is the unit, the main standard error is clustered by the eight-digit CNPJ root, because a firm can hold many certificates.
+The HC3 interval is the robustness column \citep{mackinnon1985}.
+The root is not printed.
+The controls are log stock, debt age, firm age, an indicator for a missing opening date, an indicator for each enrolment year, CNAE section and firm size.
+Enrolment-year indicators are the cohort controls.
+Section, size and firm age are the firm characteristics recorded on the register.
+The register is observed after the debts and after the payments, so these controls have the timing caveat stated above.
+Trade (section G) is the reference activity and micro (size code 01) is the reference size when those levels are in the sample.
+A level with fewer than five firms is pooled.
+Counts of 1 to 4 are not printed.
+Table~\ref{tab:logit-ame} reports the average marginal effect.
+Figure~\ref{fig:logit-ame} plots the same effect.
+
+\input{tables/tab_logit_origin_ame}
+
+The paid-to-balance outcome uses the payment amount with the stock as the exposure.
+\begin{equation}
+E[P_i \mid x_i] = S_i \exp(x_i^{\top}\theta).
+\label{eq:ppml}
+\end{equation}
+The regressors are assessed origin, debt age, firm age, the missing-opening indicator, enrolment year, CNAE section and firm size.
+The assessed coefficient is a difference in the log of expected payments per real of stock.
+The estimated percentage difference is $100(\exp(\hat\theta_A)-1)$.
+The 95 percent interval transforms the ends of the coefficient interval in the same way.
+The main standard error is clustered by the eight-digit root, and the HC3 interval is the robustness column.
+The quantile regression of $\log(1+S_i)$ remains the stock equation, at $\tau = 0.25$, $0.50$, $0.75$ and $0.90$, fit separately in each segment \citep{koenker1978,koenker2001quantile}.
+Table~\ref{tab:recovery-pct} reports the percentage difference.
+Figure~\ref{fig:recovery-pct} plots it.
+
 \subsection{Heterogeneity Analyses}\label{sec:heterogeneity}
 
 The same percentage is not equally informative inside each segment.
@@ -228,11 +264,31 @@ The repeated-enrolment count and that overlap count answer different questions.
 The first is about the book inside one door.
 The second is about overlap.
 
+The within-firm sample is the set of firms that hold at least one declared certificate and at least one assessed certificate.
+The descriptive overlap is 11,928 firms.
+The comparison is a linear probability model with a firm fixed effect.
+Subtracting the firm mean from the outcome and from the certificate-level regressors removes the firm effect.
+The coefficient on assessed origin is the within-firm difference in the probability of any payment.
+Multiplying by 100 expresses that difference in percentage points.
+Log stock, debt age and the enrolment year remain when they vary inside the firm.
+A firm characteristic that is constant inside the firm is absorbed by the firm effect.
+A conditional logit estimates a log-odds ratio after conditioning on the number of payments inside the firm.
+The probability difference is the quantity reported here, so the linear probability model is the within-firm estimator.
+A separate intercept for every firm is a poor match when a firm contributes few certificates.
+The main standard error is clustered by the firm.
+The HC3 interval on the within regression is the robustness column.
+Table~\ref{tab:within-firm} reports the estimate.
+Figure~\ref{fig:within-firm} plots it.
+
+\input{tables/tab_within_firm_logit}
+
 \textbf{[DISCUTIR E ESCREVER: mecanismos condicionados a dados de protesto, ajuizamento e situacao processual]}
 
 \subsection{Robustness Tests}\label{sec:robustness}
 
 A sensitivity sample for the stock equation drops the largest 1~percent of the estimation sample and leaves 198,000 certificates.
-The same point estimate is also computed with standard errors clustered by the eight-digit CNPJ root.
-The root is not printed.
 The linear recovery equation remains only as a comparison with the payment logit.
+For the origin logit, the within-firm comparison and the paid-to-balance model, the clustered interval is the main interval and the HC3 interval is the robustness column.
+Table~\ref{tab:recovery-pct} reports the percentage difference.
+
+\input{tables/tab_recovery_pct}

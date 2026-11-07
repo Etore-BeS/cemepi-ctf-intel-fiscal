@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns='http://www.w3.org/2000/svg' width='700' height='320'>
+<rect width='700' height='320' fill='white'/>
+<text x='40' y='40' font-family='Arial' font-size='14' fill='#154C56'>Estimate is written by the supplementary material.</text>
+<text x='40' y='70' font-family='Arial' font-size='12' fill='#154C56'>AME (pp)</text>
+</svg>
