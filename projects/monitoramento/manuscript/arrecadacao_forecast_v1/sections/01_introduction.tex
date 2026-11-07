@@ -1,56 +1,42 @@
 \section{Introduction}
 \label{sec:intro}
 
-Enrolled debt (dívida inscrita) is tax debt that has been formally registered for collection.
-The stock of that debt is large and changes slowly.
-The cash actually collected is seasonal.
+VAT (ICMS) is a state value-added tax.
+This paper forecasts VAT collection, not the mix of every enrolled tax.
+The legal-entity book has more than one VAT type.
+Declared is self-reported VAT and assessed is VAT from a tax assessment, so a model that fits the total can hide a miss on one of them.
+Assessed is most of the stock and declared is most of the cash collected (Section~\ref{sec:data}).
+
+The cash series is seasonal.
 At a daily step it is also full of zeros.
-A zero means a weekend, a holiday, or a day with no payment slip.
-Those zeros are part of the series.
+A zero is a weekend, a holiday, or a day with no payment slip.
+Those zeros are part of grain A.
 They are not missing values to drop before scoring.
 
-A grain is the time step we forecast.
-This paper uses four grains from one extract: month, calendar day, business day, and week.
-GARE is the payment-slip aggregate that supplies the daily and weekly totals.
-Grain A is the calendar-daily GARE series, zeros included.
-Grain B is the Monday--Friday slice of the same slips.
-Grain B is a different target.
-It is not a filter applied after scoring grain A.
-
-sMAPE is the symmetric mean absolute percentage error.
-We define it in Section~\ref{sec:metrics}.
-Lower sMAPE is better.
-The official rank on every grain is test sMAPE.
-The skill score compares a model with the seasonal naive forecast of that same grain.
-We define it in Section~\ref{sec:ss}.
-A positive skill score means lower sMAPE than that naive forecast.
-
-TEM is the Time-Energy Model~\citep{brusokas2025tem}.
-It scores candidate forecasts with an energy.
-Abstention means refusing the energy choice and returning the seasonal naive instead.
-We use abstention only for selective TEM, labeled E1.
-E2 is a separate rule.
-E2 switches between gradient boosting and the seasonal naive when those two forecasts disagree.
-E2 does not estimate an energy.
+The four grains are the month, the calendar day, Monday to Friday, and the week.
+The rank is test sMAPE.
+A skill score, a corrected Diebold-Mariano test, a Wilcoxon signed-rank test, and a model confidence set sit beside that rank and do not replace it~\citep{diebold1995comparing,harvey1997testing,wilcoxon1945individual,hansen2011mcs}.
+The pairwise signed-rank counts are in Table~\ref{tab:wilcoxon-pairs}.
 
 \paragraph{Questions.}
-Which model has the lowest test sMAPE on each grain?
-On the monthly panel, does selective TEM (E1) have lower test sMAPE than the seasonal naive, and does the disagreement proxy (E2)?
+Which model has the lowest test sMAPE on each series and each grain?
+Does that model change between the total, Declared, and Assessed?
+Does the test block separate that model from the seasonal naive, and, pair by pair, from the other candidates?
 
 \paragraph{What we report.}
 \begin{itemize}
-  \item One protocol for all four grains.
+  \item One protocol for three series and four grains.
         Models are chosen by validation sMAPE and ranked by test sMAPE.
-        The skill score is a second column, not the rank.
-  \item Separate labels for E1 and E2.
-        E1 abstains by an energy threshold.
-        E2 abstains by absolute disagreement.
-  \item On the March 2026 extract, the lowest test sMAPE belongs to different models on different grains.
-        Keeping calendar zeros (A) or dropping weekends (B) changes both the sMAPE level and the order of models.
+        The skill score, the corrected Diebold-Mariano test, the Wilcoxon signed-rank test, and the model confidence set are further columns.
+        They are not the rank.
+  \item The lowest test sMAPE belongs to different models on different series and on different grains.
+        Keeping calendar zeros or dropping weekends changes both the sMAPE level and the order of models.
+  \item Selective TEM (E1) and the disagreement switch (E2) are defined in Section~\ref{sec:energy}.
+        E1 has no score in this run.
 \end{itemize}
 
 Section~\ref{sec:related} places the models in the forecasting literature.
 Section~\ref{sec:data} defines each series.
 Section~\ref{sec:method} states the steps, the metrics, and each model.
-Section~\ref{sec:results} gives the test sMAPE.
+Section~\ref{sec:results} gives the test sMAPE and reads each test.
 Sections~\ref{sec:discussion} and~\ref{sec:limitations} say what those ranks do and do not support.
