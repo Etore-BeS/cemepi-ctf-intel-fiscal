@@ -1,6 +1,18 @@
-\section{Data and Methodology}\label{sec:data}
+\section{Research Design}\label{sec:design}\label{sec:data}
 
-\subsection{Sources and population}\label{sec:sources}
+The descriptive question is how size, concentration, payment and recovery differ between declared and assessed debts.
+The second question is which partial associations of payment and of the balance this cross-section supports.
+Two hypotheses connect those questions to the data and to the tests.
+After the observable characteristics in the model are taken into account, assessed debts and declared debts have different probabilities of a recorded payment.
+The second hypothesis is a question that the current data can address only in part.
+Does the relation between financial capacity and payment differ by the origin of the debt?
+Section~\ref{sec:sources} describes the data.
+Section~\ref{sec:measures} defines the measures.
+Section~\ref{sec:inference} states the comparisons and the models.
+Section~\ref{sec:heterogeneity} states the heterogeneity analyses.
+Section~\ref{sec:robustness} states the robustness tests.
+
+\subsection{Data Sources and Sample Selection}\label{sec:sources}
 
 The data are a frozen extract of two PGE-SP tables.
 \texttt{DEBITO} holds monthly snapshots of enrolled certificates.
@@ -54,7 +66,7 @@ Status, activity, size and age describe the firm as the register stands.
 They are not traits measured before the outcome, and a firm may be closed or unfit because of the debt.
 We report them as descriptors and we do not give them a causal reading.
 
-\subsection{Measures}\label{sec:measures}
+\subsection{Variable Definitions and Measurement}\label{sec:measures}
 
 Table~\ref{tab:vars} lists the variables, how each is computed, and where it comes from.
 
@@ -107,17 +119,11 @@ The top 1~percent is the largest $\lceil 0.01 \times N \rceil$ positive-value ce
 We use that round cut because the largest 1~percent of certificates hold 75.8~percent of the stock (Figure~\ref{fig:lorenz} and Table~\ref{tab:top1}), so that group is the one to examine more closely.
 The pooled Lorenz curve is flat over most of the distribution and rises in the extreme tail, so 1~percent is a visible break and not an interior point on a smooth curve.
 The resulting list is a set of certificates the attorney office can review as a specialised book, and it is the set in which the stock sits.
-The same percentage is not equally informative inside each segment.
-We therefore report the cut for the pooled book and again inside declared debt and inside assessed debt.
 Nothing in the cutoff is a claim that working those certificates would recover the stock.
 
 A firm has repeated enrolments when it holds two or more certificates in the segment.
-We also record firms that hold at least one certificate in each segment.
-The two counts answer different questions.
-The first is about the book inside one door.
-The second is about overlap.
 
-\subsection{Comparisons}\label{sec:comparisons}
+\subsection{Empirical Models}\label{sec:inference}
 
 For a continuous outcome we use the Mann--Whitney test and the rank-biserial correlation \citep{mann1947,kerby2014}.
 The correlation is $2U/(n_1 n_2) - 1$, where $U$ is the Mann--Whitney statistic for the assessed sample.
@@ -141,9 +147,7 @@ Levels that would leave a cell below five firms are pooled before the test.
 $V$ near 0.1 is a small association and $V$ near 0.3 is a moderate one.
 We use those conventional markers only as a reading aid.
 
-\subsection{Inference after the linearity diagnostic}\label{sec:inference}
-
-The comparisons in Section~\ref{sec:comparisons} do not choose a regression.
+The comparisons above do not choose a regression.
 The candidate specifications are fit on one stratified sample, and the cuts below record which specification that sample supports.
 The selected specification is then fit, and no other specification is chosen.
 The population is the December 2025 cross-section above.
@@ -155,7 +159,6 @@ The fits use a stratified sample of 200,000 certificates.
 Strata are segment, firm size and any payment.
 Of that sample, 194,874 certificates are declared and 5,126 are assessed.
 The share with state code SP is 0.850.
-A sensitivity sample for the stock equation drops the largest 1~percent of the estimation sample and leaves 198,000 certificates.
 
 The stock screen is ordinary least squares of
 \begin{equation}
@@ -204,13 +207,10 @@ In assessed debt the log-stock term stays linear,
 $P_i=1$ when the certificate has any GARE payment dated before 1~January 2026.
 $z_i$ holds CNAE section and firm size, with the same references as the screen.
 The reported interval on the fixed-effects logit is the HC3 95~percent interval.
-The same point estimate is also computed with standard errors clustered by the eight-digit CNPJ root.
-The root is not printed.
 Declared debt has a complement on a cluster sample: whole municipalities, at most 30 certificates from each, stopping at 8,000 certificates, with a municipal random intercept.
 The interval on that complement is an approximate posterior interval.
 It is not a confidence interval.
 The stock equation is a quantile regression at $\tau = 0.25$, $0.50$, $0.75$ and $0.90$, fit separately in each segment, with no ordinary least squares column.
-The linear recovery equation remains only as a comparison with the payment logit.
 
 The payment logit uses at most 40,000 certificates in a segment, stratified by any payment.
 Quantile regression uses at most 20,000 certificates in a segment.
@@ -218,3 +218,21 @@ A segment under the cap is kept whole.
 A section or size level with fewer than 10 certificates, fewer than 5 firms, or 1 to 4 payers is pooled.
 A level that separates the logit is dropped.
 Counts of 1 to 4 payers are not printed.
+
+\subsection{Heterogeneity Analyses}\label{sec:heterogeneity}
+
+The same percentage is not equally informative inside each segment.
+We therefore report the cut for the pooled book and again inside declared debt and inside assessed debt.
+We also record firms that hold at least one certificate in each segment.
+The repeated-enrolment count and that overlap count answer different questions.
+The first is about the book inside one door.
+The second is about overlap.
+
+\textbf{[DISCUTIR E ESCREVER: mecanismos condicionados a dados de protesto, ajuizamento e situacao processual]}
+
+\subsection{Robustness Tests}\label{sec:robustness}
+
+A sensitivity sample for the stock equation drops the largest 1~percent of the estimation sample and leaves 198,000 certificates.
+The same point estimate is also computed with standard errors clustered by the eight-digit CNPJ root.
+The root is not printed.
+The linear recovery equation remains only as a comparison with the payment logit.
