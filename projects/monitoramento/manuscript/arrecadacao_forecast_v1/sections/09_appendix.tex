@@ -272,7 +272,7 @@ Table~\ref{tab:wilcoxon-pairs} counts those pairs.
 Of the 1,350 unordered pairs, 437 have a Benjamini--Hochberg \(p\)-value below 0.05.
 Table~\ref{tab:wilcoxon-pairs} splits that total by series and grain.
 Agreement with the Diebold-Mariano test remains a call against the seasonal naive.
-\discutir{whether the text should say that Table~\ref{tab:wilcoxon-pairs} marks Leader beats all as no in every cell.}
+\discutir{DECISAO: State that the sMAPE leader does not beat every pair under the Wilcoxon signed-rank test with the Benjamini-Hochberg adjustment in any of the 12 cells. | SUGESTAO: In all 12 cells of Table~\ref{tab:wilcoxon-pairs}, Leader beats all is no, so the sMAPE leader does not beat every pair under the Wilcoxon signed-rank test with the Benjamini--Hochberg adjustment.}
 
 \begin{table}[ht]
   \caption{Pairwise Wilcoxon signed-rank tests inside each cell.
@@ -543,4 +543,37 @@ The point forecast is the mean of the chains, after undoing the scaling.
 Monthly fits use lag 12, 30 steps, and 6 chains.
 Daily and weekly fits use 20 steps and 4 chains, with the same lags as E3.
 The network is small and is trained only on this series.
+
+\clearpage
+Table~\ref{tab:hyperparams} records the setting retained on each series and each grain.
+
+\begingroup
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.18\linewidth}>{\raggedright\arraybackslash}p{0.255\linewidth}>{\raggedright\arraybackslash}p{0.255\linewidth}>{\raggedright\arraybackslash}p{0.255\linewidth}@{}}
+  \caption{Settings retained for the test block.
+  Where the saved validation rows have an sMAPE, the cell is a setting at the lowest validation sMAPE.
+  (tie) means that more than one setting shares that score, and the cell shows the setting on the test row.
+  M0 is not chosen.
+  M2 is chosen by train AIC, because those rows have no validation sMAPE.
+  M9 does not update weights.
+  E1 has no score.
+  E2 shows the stored threshold, and the saved rows do not record its quantile.
+  M1 is the ridge penalty.
+  Least squares has no penalty.}
+  \label{tab:hyperparams}\\
+  \toprule
+  Model & Total & Declared & Assessed \\
+  \midrule
+  \endfirsthead
+  \caption[]{Settings retained for the test block, continued.}\\
+  \toprule
+  Model & Total & Declared & Assessed \\
+  \midrule
+  \endhead
+  \bottomrule
+  \endfoot%
+\input{tables/tab_hyperparams}
+\end{longtable}
+\endgroup
 

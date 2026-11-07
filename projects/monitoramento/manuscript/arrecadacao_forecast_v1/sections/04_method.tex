@@ -14,7 +14,8 @@ The same steps apply to every grain.
         One window keeps the comparison the same across models, series, and grains.
         A rolling origin would measure stability, which is a different question (Section~\ref{sec:limitations}).
   \item Fit each candidate on the train block.
-        Choose hyperparameters and thresholds by sMAPE on the validation block.
+        Choose hyperparameters and thresholds by sMAPE on the validation block
+        (Table~\ref{tab:hyperparams}).
   \item When the model can be refit, refit the chosen setting on train and validation together.
   \item Forecast the test block.
         Rank models by test sMAPE.
