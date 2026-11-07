@@ -108,10 +108,6 @@ def _check_ranked(results: list[dict], ranked: dict[str, str]) -> None:
             continue
         name = str(row["modelo"])
         seen.add(name)
-        if family_of(name) == "E1":
-            if name in ranked or finite_smape(row) is not None:
-                raise ValueError(f"E1 unexpectedly scored: {name}")
-            continue
         if name not in ranked:
             raise ValueError(f"test row missing from metrics_test_ranked.csv: {name}")
         if ranked[name] != row.get("notes"):
@@ -441,15 +437,76 @@ def select_m9(rows: list[dict]) -> str:
     return "not updated"
 
 
+_E1_NOTE = re.compile(
+    r"TimesNet\+Exp_Main_Energy; "
+    r"cands=(?P<cands>\[[^\]]+\]); "
+    r"thr_val=(?P<thr>[-+0-9.eE]+); "
+    r"val_sMAPE=(?P<val>[0-9.]+); "
+    r"REAL TEM; "
+    r"seq=(?P<seq>\d+); "
+    r"epochs_bb=(?P<bb>\d+); "
+    r"epochs_ebm=(?P<ebm>\d+)$"
+)
+
+
+def _e1_config(notes: str) -> dict[str, float | int | str]:
+    match = _E1_NOTE.fullmatch(notes.strip())
+    if not match:
+        raise ValueError(f"E1 note is not a TimesNet configuration: {notes}")
+    candidates = ast.literal_eval(match.group("cands"))
+    if not isinstance(candidates, list) or any(
+        not isinstance(item, str) for item in candidates
+    ):
+        raise ValueError(f"E1 candidates not parsed: {notes}")
+    seasonal = [item for item in candidates if item.startswith("seas")]
+    if len(candidates) != 3 or len(seasonal) != 1:
+        raise ValueError(f"E1 candidate set is not three names: {candidates}")
+    if "hgb" not in candidates or "timesnet" not in candidates:
+        raise ValueError(
+            f"E1 candidates are missing boosting or TimesNet: {candidates}"
+        )
+    return {
+        "thr": float(match.group("thr")),
+        "val_note": match.group("val"),
+        "seq": int(match.group("seq")),
+        "bb": int(match.group("bb")),
+        "ebm": int(match.group("ebm")),
+    }
+
+
 def select_e1(rows: list[dict], status: dict) -> str:
     test = one_test(rows, "E1")
-    notes = str(test.get("notes"))
+    validation = val_rows(rows)
+    if len(validation) != 1:
+        raise ValueError(f"E1 validation rows: {len(validation)}")
+    test_score = finite_smape(test)
+    val_score = finite_smape(validation[0])
+    if test_score is None or val_score is None:
+        raise ValueError("E1 is missing a validation or test sMAPE")
+    if str(test.get("notes")) != str(validation[0].get("notes")):
+        raise ValueError("E1 validation and test notes differ")
     info = status.get("E1") or {}
-    if finite_smape(test) is not None or info.get("ok"):
-        raise ValueError("E1 has a score; refusing to mark it absent")
-    if "soft-fail" not in notes.lower() or "tem" not in notes.lower():
-        raise ValueError("E1 note does not record an absent TEM vendor")
-    return "no score; TEM vendor absent"
+    if info.get("ok") not in (1, True) or info.get("backend") != (
+        "TimesNet+Exp_Main_Energy"
+    ):
+        raise ValueError("E1 backend is not TimesNet+Exp_Main_Energy")
+    config = _e1_config(str(test.get("notes")))
+    timesnet = info.get("timesnet") or {}
+    if (
+        timesnet.get("ok") not in (1, True)
+        or int(timesnet.get("seq_len")) != config["seq"]
+        or int(timesnet.get("train_epochs")) != config["bb"]
+        or int(timesnet.get("ebm_epochs")) != config["ebm"]
+    ):
+        raise ValueError("E1 TimesNet status does not match the saved note")
+    if f"{val_score:.2f}" != config["val_note"]:
+        raise ValueError("E1 note val_sMAPE does not match the validation row")
+    return (
+        f"TimesNet, seq ${config['seq']}$, "
+        f"forecast ${config['bb']}$, energy ${config['ebm']}$, "
+        f"$\\tau={fmt_num(float(config['thr']))}$, "
+        f"val ${val_score:.2f}$, test ${test_score:.2f}$"
+    )
 
 
 def _tau(notes: str) -> str:

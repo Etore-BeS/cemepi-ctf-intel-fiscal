@@ -261,9 +261,8 @@ E1 is selective TEM.
 It scores a candidate forecast with an energy and can return the seasonal naive instead~\citep{brusokas2025tem}.
 E2 is not TEM.
 It returns boosting, or the seasonal naive, when those two forecasts disagree.
-This run has no E1 score.
-The vendor tree is not in this worktree.
-The energies and the thresholds are in Appendix~\ref{app:models}.
+E1 uses TimesNet on every series and grain.
+The retained settings and the E1 scores are in Appendix~\ref{app:models}.
 
 \subsection{Tests after the rank}
 \label{sec:tests}
@@ -302,7 +301,7 @@ A model leaves the set when the equivalence test rejects.
 This paper states the series, the splits, the scores, and the decision rules.
 The model bodies and the segment run are in the supplementary material.
 E1 calls the published TEM code.
-That vendor tree is not in this worktree, so E1 has no score.
+The retained E1 settings and the E1 scores are in Table~\ref{tab:hyperparams}.
 M9 uses the public weights \texttt{google/timesfm-3.0-pytorch}.
 Table~\ref{tab:best} reports the signed-rank test of each leader against the seasonal naive.
 Table~\ref{tab:wilcoxon-pairs} reports the pairwise signed-rank counts.

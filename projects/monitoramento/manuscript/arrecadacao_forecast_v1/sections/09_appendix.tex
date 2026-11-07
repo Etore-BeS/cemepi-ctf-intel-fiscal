@@ -269,7 +269,7 @@ The family is the cell.
 Adjusted \(p\)-values use Benjamini--Hochberg.
 Table~\ref{tab:wilcoxon-pairs} counts those pairs.
 
-Of the 1,350 unordered pairs, 437 have a Benjamini--Hochberg \(p\)-value below 0.05.
+Of the 1,536 unordered pairs, 462 have a Benjamini--Hochberg \(p\)-value below 0.05.
 Table~\ref{tab:wilcoxon-pairs} splits that total by series and grain.
 Agreement with the Diebold-Mariano test remains a call against the seasonal naive.
 \discutir{DECISAO: State that the sMAPE leader does not beat every pair under the Wilcoxon signed-rank test with the Benjamini-Hochberg adjustment in any of the 12 cells. | SUGESTAO: In all 12 cells of Table~\ref{tab:wilcoxon-pairs}, Leader beats all is no, so the sMAPE leader does not beat every pair under the Wilcoxon signed-rank test with the Benjamini--Hochberg adjustment.}
@@ -447,7 +447,7 @@ We do not substitute another model.
 Stage~2 comes after Stage~1.
 E2 reuses the Stage~1 boosting forecast and the seasonal naive.
 Only E1 is TEM.
-This run has no E1 score.
+E1 has a validation sMAPE and a test sMAPE on every series and grain.
 
 \paragraph{E1: selective TEM.}
 E1 assigns an energy $E_{\theta}(x, y)$ to a context $x$ and a candidate value $y$~\citep{brusokas2025tem}.
@@ -557,7 +557,7 @@ Table~\ref{tab:hyperparams} records the setting retained on each series and each
   M0 is not chosen.
   M2 is chosen by train AIC, because those rows have no validation sMAPE.
   M9 does not update weights.
-  E1 has no score.
+  E1 shows TimesNet, the sequence length, the forecast epochs, the energy epochs, the validation threshold, the validation sMAPE, and the test sMAPE.
   E2 shows the stored threshold, and the saved rows do not record its quantile.
   M1 is the ridge penalty.
   Least squares has no penalty.}

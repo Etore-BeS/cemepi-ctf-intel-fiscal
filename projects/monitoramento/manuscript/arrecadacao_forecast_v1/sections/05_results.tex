@@ -21,7 +21,7 @@ Least squares leads weekly Assessed.
 TimesFM leads all three Monday to Friday series, and it also leads calendar-day Assessed.
 The forest leads calendar-day total and calendar-day Declared.
 E2, the disagreement proxy, does not lead any cell.
-E1 has no row.
+E1 does not lead any cell.
 
 \begin{table}[ht]
   \caption{Lowest test sMAPE on each series and grain.
@@ -55,8 +55,10 @@ Family-level bars for every model are in Appendix~\ref{app:bars}.
 
 \begin{table}[ht]
   \caption{Three lowest test sMAPE values on each series and grain.
-  E2 is the disagreement proxy.
-  E2 is not TEM, and E2 is not in this top three except on weekly Declared, where it is third.}
+  E1 is selective TEM.
+  E2 is the disagreement proxy and is not TEM.
+  E1 is second on the monthly total and third on weekly Declared.
+  E2 is not in this top three.}
   \label{tab:top3}
   \centering
   \scriptsize
@@ -68,7 +70,8 @@ Family-level bars for every model are in Appendix~\ref{app:bars}.
 
 On the monthly total, boosting has test sMAPE 12.94 and skill 0.513.
 The seasonal naive, lag 12, has sMAPE 26.55.
-Lag 1 is second, at 15.37, and kernel ridge is third, at 15.95.
+E1 is second.
+Lag 1 is third, at 15.37, and kernel ridge is fourth, at 15.95.
 The HLN p-value against the seasonal naive is 0.022.
 That rejects equal accuracy with the lag-12 naive at the 5 percent level.
 It does not test boosting against lag 1.
@@ -88,10 +91,11 @@ The point rank favors boosting.
 The test does not reject equal accuracy with the seasonal naive at the 5 percent level.
 
 E2 does not lead the month on any series.
-On the total its sMAPE is about 21.6, behind boosting, lag 1, and kernel ridge.
+On the total its sMAPE is about 21.6, behind boosting, E1, lag 1, and kernel ridge.
 On Declared it is about 16.4, close to the seasonal naive at 17.07 and behind SARIMAX.
 A gain for E2 would not be a gain for E1.
-E1 is not in the table.
+E1 is second on the monthly total and sixth on monthly Assessed (Table~\ref{tab:monthly}).
+It is outside the eight models shown for Declared.
 
 TimesFM does not lead the month.
 On the total its sMAPE is about 22.4, which still beats the seasonal naive and loses to boosting.
@@ -301,7 +305,7 @@ Monday to Friday is the grain where the set drops the seasonal naive on all thre
 TimesFM stays in the set, and it is not alone.
 The total keeps nine models.
 Declared keeps seven.
-Assessed keeps thirteen and drops the lag-5 naive, the lag-252 naive, and the score sampler.
+Assessed keeps fourteen and drops the lag-5 naive, the lag-252 naive, and the score sampler.
 The HLN rejections and the sets agree that the lag-5 naive is worse than the surviving models.
 They do not agree on a single name.
 
@@ -313,8 +317,8 @@ The two procedures use different levels and different statistics.
 The set, at level 0.10, drops the naive.
 The paired test, at level 0.05, does not.
 We do not treat that cell as a settled win.
-On calendar-day total the set keeps the forest and two seasonal naives (lag 7 and lag 365), and it drops TimesFM.
-On calendar-day Assessed the set keeps TimesFM, the forest, and the same two seasonal naives.
+On calendar-day total the set keeps the forest, E1, and the lag-7 and lag-365 naives, and it drops TimesFM.
+On calendar-day Assessed the set keeps TimesFM, the forest, E1, the lag-1 naive, and the lag-7 and lag-365 naives.
 
 Use the columns in this order.
 The sMAPE rank names a lowest value.

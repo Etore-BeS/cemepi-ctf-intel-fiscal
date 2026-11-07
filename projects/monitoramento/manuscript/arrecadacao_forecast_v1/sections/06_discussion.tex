@@ -53,8 +53,8 @@ Assessed is most of the enrolled balance and a smaller, more irregular part of t
 The seasonal naive is the reference forecast on every grain.
 Its skill score is zero by construction.
 
-E1 would return the lowest-energy candidate, or the seasonal naive when the energy is high.
-This run has no E1 score.
+E1 returns the lowest-energy candidate, or the seasonal naive when the energy is high.
+E1 has a test sMAPE on every cell, and it is not the lowest sMAPE in Table~\ref{tab:best}.
 E2 returns boosting, or the seasonal naive when the two forecasts disagree.
 E2 is not the lowest test sMAPE on any cell in Table~\ref{tab:best}.
 A sentence about E2 is not a sentence about E1.

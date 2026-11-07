@@ -10,7 +10,7 @@ M6 forest & trees $5$, subsample $0.5$ & trees $15$, subsample $0.6$ & trees $15
 M7 GP & RBF, noise $0.01$ (tie) & RBF, noise $0.01$ (tie) & RBF, noise $0.01$ (tie) \\
 M8 kernel ridge & RBF, penalty $0.1$, width $0.01$ & Laplacian, penalty $0.1$, width $0.01$ & Laplacian, penalty $0.1$, width $0.01$ \\
 M9 TimesFM & not updated & not updated & not updated \\
-E1 TEM & no score; TEM vendor absent & no score; TEM vendor absent & no score; TEM vendor absent \\
+E1 TEM & TimesNet, seq $12$, forecast $15$, energy $10$, $\tau=0.6766$, val $29.65$, test $14.12$ & TimesNet, seq $12$, forecast $15$, energy $10$, $\tau=-0.003794$, val $22.82$, test $14.68$ & TimesNet, seq $12$, forecast $15$, energy $10$, $\tau=6.609$, val $56.02$, test $39.06$ \\
 E2 proxy & $\tau=7.463\times 10^{7}$ & $\tau=3.574\times 10^{7}$ & $\tau=7.292\times 10^{7}$ \\[4pt]
 \emph{Week} & & & \\
 M0 naive & fixed $k=1,52$ & fixed $k=1,52$ & fixed $k=1,52$ \\
@@ -23,7 +23,7 @@ M6 forest & trees $10$, subsample $1$ & trees $5$, subsample $0.5$ & trees $10$,
 M7 GP & RBF, cap $200$ & RBF, cap $200$ & RBF, cap $200$ \\
 M8 kernel ridge & Laplacian, penalty $1$, width $0.001$ & RBF, penalty $1$, width $0.01$ & RBF, penalty $1$, width $0.01$ \\
 M9 TimesFM & not updated & not updated & not updated \\
-E1 TEM & no score; TEM vendor absent & no score; TEM vendor absent & no score; TEM vendor absent \\
+E1 TEM & TimesNet, seq $12$, forecast $5$, energy $2$, $\tau=-0.1052$, val $61.76$, test $44.68$ & TimesNet, seq $12$, forecast $5$, energy $2$, $\tau=-0.102$, val $47.18$, test $31.47$ & TimesNet, seq $12$, forecast $5$, energy $2$, $\tau=-0.03617$, val $93.20$, test $80.07$ \\
 E2 proxy & $\tau=2.963\times 10^{7}$ & $\tau=2\times 10^{7}$ & $\tau=1.67\times 10^{7}$ \\[4pt]
 \emph{Mon to Fri} & & & \\
 M0 naive & fixed $k=1,5,252$ & fixed $k=1,5,252$ & fixed $k=1,5,252$ \\
@@ -36,7 +36,7 @@ M6 forest & trees $10$, subsample $1$ & trees $5$, subsample $0.5$ & trees $5$, 
 M7 GP & RBF, cap $200$ & RBF, cap $200$ & RBF, cap $200$ \\
 M8 kernel ridge & Laplacian, penalty $1$, width $0.01$ & Laplacian, penalty $1$, width $0.01$ & Laplacian, penalty $1$, width $0.01$ \\
 M9 TimesFM & not updated & not updated & not updated \\
-E1 TEM & no score; TEM vendor absent & no score; TEM vendor absent & no score; TEM vendor absent \\
+E1 TEM & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=1.441$, val $92.77$, test $94.87$ & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=-0.06665$, val $94.32$, test $93.33$ & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=-0.4105$, val $110.03$, test $109.56$ \\
 E2 proxy & $\tau=5.689\times 10^{7}$ & $\tau=3.628\times 10^{7}$ & $\tau=2.009\times 10^{7}$ \\[4pt]
 \emph{Calendar day} & & & \\
 M0 naive & fixed $k=1,7,365$ & fixed $k=1,7,365$ & fixed $k=1,7,365$ \\
@@ -49,5 +49,5 @@ M6 forest & trees $10$, subsample $1$ & trees $10$, subsample $1$ & trees $10$, 
 M7 GP & RBF, cap $200$ & RBF, cap $200$ & RBF, cap $200$ \\
 M8 kernel ridge & Laplacian, penalty $1$, width $0.01$ & Laplacian, penalty $1$, width $0.01$ & RBF, penalty $100$, width $0.01$ \\
 M9 TimesFM & not updated & not updated & not updated \\
-E1 TEM & no score; TEM vendor absent & no score; TEM vendor absent & no score; TEM vendor absent \\
+E1 TEM & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=-0.08076$, val $103.91$, test $105.75$ & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=0.01616$, val $108.35$, test $114.26$ & TimesNet, seq $28$, forecast $3$, energy $1$, $\tau=-13.82$, val $115.13$, test $132.55$ \\
 E2 proxy & $\tau=2.244\times 10^{7}$ & $\tau=1.697\times 10^{7}$ & $\tau=9.301\times 10^{6}$ \\
