@@ -53,8 +53,8 @@ Assessed is most of the enrolled balance and a smaller, more irregular part of t
 The seasonal naive is the reference forecast on every grain.
 Its skill score is zero by construction.
 
-E1 would return the lowest-energy candidate, or the seasonal naive when the energy is high.
-This run has no E1 score.
+E1 returns the lowest-energy candidate, or the seasonal naive when the energy is high.
+E1 has a test sMAPE on every cell, and it is not the lowest sMAPE in Table~\ref{tab:best}.
 E2 returns boosting, or the seasonal naive when the two forecasts disagree.
 E2 is not the lowest test sMAPE on any cell in Table~\ref{tab:best}.
 A sentence about E2 is not a sentence about E1.
@@ -175,4 +175,4 @@ They pull all-day sMAPE up, and they are part of grain A.
 The ranks, the tests, and the figures above are the benchmark.
 They do not choose an operational rule.
 
-\discutir{what the office should do with a grain-specific model, and whether Declared and Assessed should be forecast separately in production}
+\discutir{DECISAO: In production, forecast Declared and Assessed separately, each with the leader of its grain. | SUGESTAO: Forecast Declared and Assessed separately, and on each grain use the leader of that series. On the month those leaders are SARIMAX for Declared and boosting for Assessed, and on Monday to Friday the leader is TimesFM on both series.}

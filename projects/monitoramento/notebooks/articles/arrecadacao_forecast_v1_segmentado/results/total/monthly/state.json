@@ -878,17 +878,6 @@
       "notes": "minimal DDPM residual; T=20,samp=8,lag=12"
     },
     {
-      "modelo": "E1_TEM_selective",
-      "stage": "test",
-      "MAPE": null,
-      "SMAPE": null,
-      "SMAPE_POS": null,
-      "RMSE": null,
-      "MAE": null,
-      "WAPE": null,
-      "notes": "soft-fail: ImportError: TEM vendor missing at /Users/etorebraga/Code/cemepi-ben-v1/.local/vendor/time-energy-model"
-    },
-    {
       "modelo": "M9_TimesFM3",
       "stage": "test",
       "MAPE": 19.40662592969886,
@@ -898,6 +887,28 @@
       "MAE": 73904905.95500004,
       "WAPE": 21.00713949746179,
       "notes": "zero-shot HF google/timesfm-3.0-pytorch; ctx=train+val"
+    },
+    {
+      "modelo": "E1_TEM_selective",
+      "stage": "test",
+      "MAPE": 14.996513053325792,
+      "SMAPE": 14.121495038216073,
+      "SMAPE_POS": 14.121495038216073,
+      "RMSE": 57836969.260593675,
+      "MAE": 50861171.96383232,
+      "WAPE": 14.457061011608422,
+      "notes": "TimesNet+Exp_Main_Energy; cands=['seas12', 'hgb', 'timesnet']; thr_val=0.6766; val_sMAPE=29.65; REAL TEM; seq=12; epochs_bb=15; epochs_ebm=10"
+    },
+    {
+      "modelo": "E1_TEM_selective",
+      "stage": "val",
+      "MAPE": 23.839461612571075,
+      "SMAPE": 29.649440376232047,
+      "SMAPE_POS": 29.649440376232047,
+      "RMSE": 209845150.79204446,
+      "MAE": 126366406.95647466,
+      "WAPE": 32.67448945732264,
+      "notes": "TimesNet+Exp_Main_Energy; cands=['seas12', 'hgb', 'timesnet']; thr_val=0.6766; val_sMAPE=29.65; REAL TEM; seq=12; epochs_bb=15; epochs_ebm=10"
     }
   ],
   "preds": {
@@ -1110,6 +1121,20 @@
       267750944.0,
       266385040.0,
       264237792.0
+    ],
+    "E1_TEM_selective": [
+      376092041.210691,
+      368331372.41666925,
+      364569246.4387135,
+      370284556.03985906,
+      364115616.08758473,
+      392435366.84000015,
+      342788120.00726247,
+      412888431.5900001,
+      345028457.81000006,
+      386604390.0300002,
+      362893702.02300954,
+      357672580.7783886
     ]
   },
   "status": {
@@ -1164,14 +1189,22 @@
       "reason": null,
       "backend": "minimal_ddpm"
     },
-    "E1": {
-      "ok": 0,
-      "reason": "ImportError: TEM vendor missing at /Users/etorebraga/Code/cemepi-ben-v1/.local/vendor/time-energy-model",
-      "backend": null
-    },
     "M9": {
       "ok": 1,
       "reason": null
+    },
+    "E1": {
+      "ok": 1,
+      "reason": null,
+      "backend": "TimesNet+Exp_Main_Energy",
+      "coverage_test": 1.0,
+      "timesnet": {
+        "ok": 1,
+        "reason": null,
+        "seq_len": 12,
+        "train_epochs": 15,
+        "ebm_epochs": 10
+      }
     }
   },
   "meta": {
