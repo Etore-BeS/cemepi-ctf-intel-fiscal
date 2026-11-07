@@ -3,23 +3,34 @@
 The certificate is the unit. The firm key is the eight-digit root and is used
 only to cluster or to demean. It is never written. NOME_DEVEDOR and
 CPF_DEVEDOR are never read. Counts from 1 to 4 are left blank.
+
+Before each fit the script logs the design rank and any sparse or
+non-varying dummy, by column name and count. An exactly collinear column
+is dropped. If debt age is perfectly collinear with the enrolment year, the
+year is kept and debt age is dropped. A CNAE section with fewer than five
+firms is collapsed into other. The extracted frame is cached under
+.local/cache/. The three models fail independently.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import logging
 import os
 import tempfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import patsy
 import plotly.graph_objects as go
 import statsmodels.api as sm
-import statsmodels.formula.api as smf
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
-CACHE_VERSION = "avd-origin-1"
+logger = logging.getLogger("avd_origin_models")
+
+CACHE_VERSION = "avd-origin-2"
 PAY_START = "2016-01-01"
 PAY_END = "2026-01-01"
 AS_OF = "2025-12-31"
@@ -27,8 +38,16 @@ ENROL_MIN = "1960-01-01"
 OPEN_MIN = "1900-01-01"
 Z_95 = 1.959963984540054
 MIN_FIRMS = 5
+# A CNAE section with fewer than this many distinct firm keys is collapsed into CNAE_OTHER.
+CNAE_MIN_FIRMS = 5
+CNAE_OTHER = "other"
+# Logged before the fit. This threshold does not by itself drop a column.
+MIN_DUMMY_OBS = 5
+# Relative QR tolerance for an exact linear dependence. It is not a significance cutoff.
+COLLINEAR_TOL = 1e-8
 SECTION_REFERENCE = "G"
 SIZE_REFERENCE = "01"
+FRAME_CACHE_NAME = "avd_origin_frame.parquet"
 FORBIDDEN_COLUMNS = ("NOME_DEVEDOR", "CPF_DEVEDOR")
 FRAME_COLUMNS = (
     "origin",
@@ -55,6 +74,8 @@ BANNED_OUTPUT = {
 CONTROLS_NOTE = (
     "Controls: log stock, debt age, firm age, a missing-opening indicator, "
     "enrolment year, CNAE section and firm size. "
+    "A CNAE section with fewer than five firms is collapsed into other. "
+    "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "Declared origin is the reference. "
     "The main interval is clustered by the eight-digit firm key. "
     "HC3 is the robustness column. "
@@ -65,6 +86,8 @@ RECOVERY_NOTE = (
     "from a log-link model with the stock as the exposure. "
     "Controls: debt age, firm age, a missing-opening indicator, "
     "enrolment year, CNAE section and firm size. "
+    "A CNAE section with fewer than five firms is collapsed into other. "
+    "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "Declared origin is the reference. "
     "The main interval is clustered by the eight-digit firm key. "
     "HC3 is the robustness column. "
@@ -75,12 +98,24 @@ WITHIN_NOTE = (
     "The sample is firms with at least one declared certificate and "
     "at least one assessed certificate. "
     "Certificate-level regressors that vary inside the firm stay in the model. "
+    "A CNAE section with fewer than five firms is collapsed into other. "
+    "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "The main interval is clustered by the firm. "
     "HC3 is the robustness column of the within regression. "
     "A count from 1 to 4 is left blank. The firm key is not printed."
 )
 
 _FRAME: pd.DataFrame | None = None
+
+
+def _configure_logging() -> None:
+    logger.setLevel(logging.INFO)
+    if logger.handlers or logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
 
 def find_repo(start: Path | None = None) -> Path:
@@ -408,9 +443,14 @@ def usable_connection(candidate):
     return candidate
 
 
-def load_analysis_frame(connection=None) -> pd.DataFrame:
+def load_analysis_frame(connection=None, *, from_cache: bool = False) -> pd.DataFrame:
     """Load the comparison population. The frame stays in memory."""
     global _FRAME
+    _configure_logging()
+    if from_cache:
+        _FRAME = _read_frame_cache()
+        logger.info("Loaded the analysis frame from the local cache.")
+        return _FRAME
     if _FRAME is not None:
         return _FRAME
     owns = connection is None
@@ -430,6 +470,7 @@ def load_analysis_frame(connection=None) -> pd.DataFrame:
     extra = [column for column in frame.columns if column not in FRAME_COLUMNS]
     if extra:
         raise RuntimeError(f"The analysis frame has unexpected columns {extra}.")
+    save_analysis_frame(frame)
     _FRAME = frame
     return _FRAME
 
@@ -439,15 +480,72 @@ def clear_frame() -> None:
     _FRAME = None
 
 
+def frame_cache_path(repo: Path | None = None) -> Path:
+    """Local parquet of the extracted frame. The directory is gitignored."""
+    root = repo or find_repo()
+    return root / ".local" / "cache" / FRAME_CACHE_NAME
+
+
+def save_analysis_frame(frame: pd.DataFrame, repo: Path | None = None) -> Path:
+    """Write the extracted model frame. The file stays on this machine."""
+    _configure_logging()
+    missing = [column for column in FRAME_COLUMNS if column not in frame.columns]
+    if missing:
+        raise RuntimeError(f"The analysis frame is missing {missing}.")
+    extra = [column for column in frame.columns if column not in FRAME_COLUMNS]
+    if extra:
+        raise RuntimeError(f"The analysis frame has unexpected columns {extra}.")
+    path = frame_cache_path(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.loc[:, list(FRAME_COLUMNS)].to_parquet(path, index=False)
+    path.with_suffix(".version").write_text(CACHE_VERSION + "\n", encoding="utf-8")
+    logger.info("Cached the analysis frame.")
+    return path
+
+
+def _read_frame_cache() -> pd.DataFrame:
+    path = frame_cache_path()
+    version_path = path.with_suffix(".version")
+    if not path.exists() or not version_path.exists():
+        raise RuntimeError(
+            "No cached analysis frame. Run the script once without --from-cache."
+        )
+    version = version_path.read_text(encoding="utf-8").strip()
+    if version != CACHE_VERSION:
+        raise RuntimeError(
+            "The cached analysis frame is from another model version. "
+            "Run the script once without --from-cache."
+        )
+    frame = pd.read_parquet(path)
+    missing = [column for column in FRAME_COLUMNS if column not in frame.columns]
+    if missing:
+        raise RuntimeError(f"The cached analysis frame is missing {missing}.")
+    extra = [column for column in frame.columns if column not in FRAME_COLUMNS]
+    if extra:
+        raise RuntimeError(f"The cached analysis frame has unexpected columns {extra}.")
+    return frame.loc[:, list(FRAME_COLUMNS)]
+
+
 def _pool_rare(
-    levels: pd.Series, firms: pd.Series, min_firms: int = MIN_FIRMS
+    levels: pd.Series,
+    firms: pd.Series,
+    min_firms: int = MIN_FIRMS,
+    replacement: str = "pooled",
+    log_label: str | None = None,
 ) -> pd.Series:
     table = pd.DataFrame({"level": levels.astype(str), "firm": firms})
     counts = table.groupby("level")["firm"].nunique()
     rare = set(counts[counts < min_firms].index)
+    if log_label and rare:
+        logger.info(
+            "%s levels collapsed into %s: levels=%s",
+            log_label,
+            replacement,
+            len(rare),
+        )
     if not rare:
         return levels.astype(str)
-    return levels.astype(str).where(~levels.astype(str).isin(rare), other="pooled")
+    return levels.astype(str).where(~levels.astype(str).isin(rare), other=replacement)
 
 
 def _reference(levels: pd.Series, preferred: str) -> str:
@@ -457,11 +555,18 @@ def _reference(levels: pd.Series, preferred: str) -> str:
     mode = levels.astype(str).mode(dropna=True)
     if mode.empty:
         raise RuntimeError("A categorical control has no level.")
-    return str(mode.iloc[0])
+    chosen = str(mode.iloc[0])
+    logger.info(
+        "Reference %s is absent. The modal level %s is used.",
+        preferred,
+        chosen,
+    )
+    return chosen
 
 
 def prepare_population(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
     """Drop rows that cannot enter the clustered logit, and pool sparse categories."""
+    _configure_logging()
     work = frame.loc[:, list(FRAME_COLUMNS)].copy()
     account = {
         "n_input": len(work),
@@ -474,7 +579,13 @@ def prepare_population(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int
     work["log_stock"] = np.log1p(work["stock"].astype(float))
     work["paid"] = work["paid"].astype(float)
     work["paid_flag"] = work["paid_flag"].astype(int)
-    work["section"] = _pool_rare(work["section"], work["root"])
+    work["section"] = _pool_rare(
+        work["section"],
+        work["root"],
+        min_firms=CNAE_MIN_FIRMS,
+        replacement=CNAE_OTHER,
+        log_label="CNAE",
+    )
     work["porte"] = _pool_rare(work["porte"], work["root"])
     work["cohort"] = _pool_rare(work["cohort"], work["root"])
     work["section_ref"] = _reference(work["section"], SECTION_REFERENCE)
@@ -533,37 +644,189 @@ def recovery_formula(frame: pd.DataFrame) -> str:
     return "paid_scaled ~ " + " + ".join(terms)
 
 
-def _fit_logit(frame: pd.DataFrame):
-    groups = frame["root"].to_numpy()
+def _keep_priority(name: str) -> tuple[int, str]:
+    """Columns earlier in this order are kept when two columns are collinear."""
+    lowered = name.lower()
+    if name == "Intercept":
+        return (0, name)
+    if lowered == "assessed":
+        return (1, name)
+    if "cohort" in lowered:
+        return (2, name)
+    if lowered == "log_stock":
+        return (3, name)
+    if "section" in lowered:
+        return (4, name)
+    if "porte" in lowered:
+        return (5, name)
+    if lowered in {"firm_age", "firm_age_missing"}:
+        return (6, name)
+    if lowered == "debt_age":
+        return (8, name)
+    return (7, name)
+
+
+def _dummy_ones(column: np.ndarray) -> int | None:
+    finite = column[np.isfinite(column)]
+    if finite.size == 0:
+        return 0
+    rounded = np.round(finite, 10)
+    if not np.isin(rounded, (0.0, 1.0)).all():
+        return None
+    return int(np.sum(rounded == 1.0))
+
+
+def preflight_design(
+    outcome: pd.Series,
+    design: pd.DataFrame,
+    label: str,
+    rank: int | None = None,
+) -> None:
+    """Log rank and sparse or non-varying dummies. Names and counts only."""
+    _configure_logging()
+    if rank is None:
+        matrix = design.to_numpy(dtype=float)
+        rank = int(np.linalg.matrix_rank(matrix)) if matrix.size else 0
+    logger.info("%s: rank %s of %s columns", label, rank, design.shape[1])
+    y = outcome.to_numpy(dtype=float)
+    for name in design.columns:
+        if str(name) == "Intercept":
+            continue
+        values = design[name].to_numpy(dtype=float)
+        finite = values[np.isfinite(values)]
+        if finite.size == 0 or np.unique(np.round(finite, 10)).size <= 1:
+            logger.info(
+                "column %s: observations=%s",
+                name,
+                int(np.isfinite(values).sum()),
+            )
+            continue
+        ones = _dummy_ones(values)
+        if ones is None:
+            continue
+        mask = np.round(values, 10) == 1.0
+        distinct = int(np.unique(y[mask]).size) if int(mask.sum()) else 0
+        if ones < MIN_DUMMY_OBS or distinct <= 1:
+            logger.info(
+                "dummy %s: observations=%s outcome_distinct=%s",
+                name,
+                ones,
+                distinct,
+            )
+
+
+def reduce_design(design: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Drop columns that are exact linear combinations of higher-priority columns."""
+    order = sorted((str(column) for column in design.columns), key=_keep_priority)
+    matrix = np.asfortranarray(design.loc[:, order].to_numpy(dtype=float))
+    if matrix.size == 0 or matrix.shape[1] == 0:
+        return design.iloc[:, 0:0], []
+    _q, r_matrix = np.linalg.qr(matrix, mode="reduced")
+    diagonal = np.zeros(matrix.shape[1], dtype=float)
+    diag_r = np.abs(np.diag(r_matrix))
+    diagonal[: diag_r.shape[0]] = diag_r
+    norms = np.linalg.norm(matrix, axis=0)
+    keep: list[str] = []
+    dropped: list[str] = []
+    for index, name in enumerate(order):
+        scale = float(norms[index])
+        independent = scale > 0.0 and float(diagonal[index]) > COLLINEAR_TOL * scale
+        if independent:
+            keep.append(name)
+        else:
+            dropped.append(name)
+    if not keep:
+        raise RuntimeError("Every design column was collinear.")
+    return design.loc[:, keep], dropped
+
+
+def _log_collinear(dropped: list[str], kept: list[str]) -> None:
+    if not dropped:
+        return
+    logger.info("Dropped exactly collinear columns: %s", ", ".join(dropped))
+    kept_cohort = any("cohort" in name.lower() for name in kept)
+    if "debt_age" in dropped and kept_cohort:
+        logger.info(
+            "debt_age is perfectly collinear with the enrolment-year indicators. "
+            "The enrolment year is kept and debt_age is dropped."
+        )
+
+
+def _fitted_formula(outcome: str, columns: pd.Index | list[str]) -> str:
+    terms = [str(column) for column in columns if str(column) != "Intercept"]
+    if not terms:
+        raise RuntimeError(
+            f"The {outcome} model has no regressor after the collinearity check."
+        )
+    return outcome + " ~ " + " + ".join(terms)
+
+
+def _design_from_formula(
+    formula: str, frame: pd.DataFrame
+) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
+    work = frame.reset_index(drop=True)
+    outcome, design = patsy.dmatrices(formula, work, return_type="dataframe")
+    if len(design) != len(work):
+        raise RuntimeError("The design dropped rows. Refusing to fit.")
+    design.columns = [str(column) for column in design.columns]
+    return outcome.iloc[:, 0], design, work
+
+
+def _logit_exog(
+    frame: pd.DataFrame,
+) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame, str]:
     formula = origin_logit_formula(frame)
+    outcome, design, work = _design_from_formula(formula, frame)
+    reduced, dropped = reduce_design(design)
+    preflight_design(outcome, design, "origin logit", rank=reduced.shape[1])
+    _log_collinear(dropped, list(reduced.columns))
+    fitted = formula if not dropped else _fitted_formula("paid_flag", reduced.columns)
+    return outcome, reduced, work, fitted
+
+
+def _estimate_logit(outcome: pd.Series, design: pd.DataFrame, groups: np.ndarray):
+    model = sm.Logit(outcome, design)
+    clustered = model.fit(
+        disp=False,
+        maxiter=200,
+        cov_type="cluster",
+        cov_kwds={"groups": groups},
+    )
+    robust = model.fit(
+        disp=False,
+        maxiter=200,
+        cov_type="HC3",
+        start_params=np.asarray(clustered.params),
+    )
+    return clustered, robust
+
+
+def _pool_smallest_cohort(frame: pd.DataFrame) -> bool:
+    counts = frame.groupby("cohort")["root"].nunique().sort_values()
+    if len(counts) <= 1:
+        return False
+    smallest = counts.index[0]
+    frame["cohort"] = frame["cohort"].where(frame["cohort"] != smallest, other="pooled")
+    frame["cohort_ref"] = _reference(frame["cohort"], str(frame["cohort_ref"].iloc[0]))
+    return True
+
+
+def _fit_logit(frame: pd.DataFrame):
+    frame = frame.copy()
     for _attempt in range(4):
-        formula = origin_logit_formula(frame)
-        model = smf.logit(formula, data=frame)
+        outcome, reduced, work, fitted = _logit_exog(frame)
         try:
-            clustered = model.fit(
-                disp=False,
-                maxiter=200,
-                cov_type="cluster",
-                cov_kwds={"groups": groups},
+            clustered, robust = _estimate_logit(
+                outcome, reduced, work["root"].to_numpy()
             )
-            robust = model.fit(
-                disp=False,
-                maxiter=200,
-                cov_type="HC3",
-                start_params=np.asarray(clustered.params),
+            return clustered, robust, fitted
+        except (PerfectSeparationError, np.linalg.LinAlgError) as exc:
+            logger.info(
+                "The origin logit fit failed (%s). Pooling the smallest cohort.",
+                type(exc).__name__,
             )
-            return clustered, robust, formula
-        except PerfectSeparationError:
-            counts = frame.groupby("cohort")["root"].nunique().sort_values()
-            if len(counts) <= 1:
+            if not _pool_smallest_cohort(frame):
                 break
-            smallest = counts.index[0]
-            frame["cohort"] = frame["cohort"].where(
-                frame["cohort"] != smallest, other="pooled"
-            )
-            frame["cohort_ref"] = _reference(
-                frame["cohort"], str(frame["cohort_ref"].iloc[0])
-            )
     raise RuntimeError(
         "The origin logit stayed separated after pooling sparse cohorts."
     )
@@ -647,7 +910,8 @@ def fit_origin_logit(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     key = _signature(prepared, "logit", formula)
     cached = _read_cached(key)
     if cached is not None:
-        return cached, formula
+        _outcome, _reduced, _work, fitted = _logit_exog(prepared)
+        return cached, fitted
     clustered, robust, formula = _fit_logit(prepared)
     point, low, high = _assessed_margin(clustered)
     _, hc_low, hc_high = _assessed_margin(robust)
@@ -723,7 +987,15 @@ def fit_within_firm(frame: pd.DataFrame) -> pd.DataFrame:
         return cached
     design, outcome = _design_matrix(sample)
     firms = sample["root"].reset_index(drop=True)
+    preview, _preview_dropped = reduce_design(design)
+    preflight_design(outcome, design, "within-firm", rank=preview.shape[1])
     demeaned = _within_columns(design, firms)
+    demeaned, dropped = reduce_design(demeaned)
+    _log_collinear(dropped, list(demeaned.columns))
+    if "assessed" not in demeaned.columns:
+        raise RuntimeError(
+            "Assessed origin has no within-firm variation in this sample."
+        )
     y = outcome - outcome.groupby(firms.to_numpy()).transform("mean")
     codes, _uniques = pd.factorize(firms, sort=False)
     clustered = sm.OLS(y.to_numpy(), demeaned.to_numpy()).fit(
@@ -757,11 +1029,23 @@ def fit_recovery_percent(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     cached = _read_cached(key)
     if cached is not None:
         return cached, formula
-    groups = prepared["root"].to_numpy()
     prepared = prepared.copy()
     prepared["paid_scaled"] = prepared["paid"].to_numpy(dtype=float) / 1000.0
-    offset = np.log(prepared["stock"].to_numpy(dtype=float) / 1000.0)
-    model = smf.glm(formula, data=prepared, family=sm.families.Poisson(), offset=offset)
+    outcome, design, work = _design_from_formula(formula, prepared)
+    reduced, dropped = reduce_design(design)
+    preflight_design(outcome, design, "recovery", rank=reduced.shape[1])
+    _log_collinear(dropped, list(reduced.columns))
+    formula = (
+        formula if not dropped else _fitted_formula("paid_scaled", reduced.columns)
+    )
+    groups = work["root"].to_numpy()
+    offset = np.log(work["stock"].to_numpy(dtype=float) / 1000.0)
+    model = sm.GLM(
+        outcome,
+        reduced,
+        family=sm.families.Poisson(),
+        offset=offset,
+    )
     clustered = model.fit(
         maxiter=100,
         disp=False,
@@ -955,34 +1239,73 @@ def export_recovery(table: pd.DataFrame) -> Path:
     return path
 
 
-def run_origin_logit(connection=None) -> pd.DataFrame:
-    frame = load_analysis_frame(connection)
+def run_origin_logit(
+    connection=None, frame: pd.DataFrame | None = None
+) -> pd.DataFrame:
+    if frame is None:
+        frame = load_analysis_frame(connection)
     table, _formula = fit_origin_logit(frame)
     export_origin_logit(table)
     return table
 
 
-def run_within_firm(connection=None) -> pd.DataFrame:
-    frame = load_analysis_frame(connection)
+def run_within_firm(connection=None, frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    if frame is None:
+        frame = load_analysis_frame(connection)
     table = fit_within_firm(frame)
     export_within(table)
     return table
 
 
-def run_recovery(connection=None) -> pd.DataFrame:
-    frame = load_analysis_frame(connection)
+def run_recovery(connection=None, frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    if frame is None:
+        frame = load_analysis_frame(connection)
     table, _formula = fit_recovery_percent(frame)
     export_recovery(table)
     return table
 
 
-def run_all(connection=None) -> dict[str, pd.DataFrame]:
-    return {
-        "logit": run_origin_logit(connection),
-        "within": run_within_firm(connection),
-        "recovery": run_recovery(connection),
-    }
+def run_all(
+    connection=None,
+    *,
+    from_cache: bool = False,
+    frame: pd.DataFrame | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Fit the three models. One failure does not skip the other outputs."""
+    _configure_logging()
+    if frame is None:
+        frame = load_analysis_frame(connection, from_cache=from_cache)
+    results: dict[str, pd.DataFrame] = {}
+    failed: list[str] = []
+    runners = (
+        ("logit", run_origin_logit),
+        ("within", run_within_firm),
+        ("recovery", run_recovery),
+    )
+    for name, runner in runners:
+        try:
+            results[name] = runner(frame=frame)
+        except Exception:
+            logger.exception("The %s model failed.", name)
+            failed.append(name)
+    if failed:
+        written = ", ".join(results) if results else "none"
+        raise RuntimeError(
+            "Failed models: " + ", ".join(failed) + f". Written models: {written}."
+        )
+    return results
+
+
+def main(argv: list[str] | None = None) -> dict[str, pd.DataFrame]:
+    parser = argparse.ArgumentParser(description="Fit the origin models.")
+    parser.add_argument(
+        "--from-cache",
+        action="store_true",
+        help="Read the analysis frame from .local/cache and skip extraction.",
+    )
+    args = parser.parse_args(argv)
+    return run_all(from_cache=args.from_cache)
 
 
 if __name__ == "__main__":
-    run_all()
+    main()
