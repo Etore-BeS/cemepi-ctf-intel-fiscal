@@ -260,24 +260,25 @@ def test_cnae_below_five_firms_collapses_to_other(models):
     assert "other" in set(prepared["section"])
     assert "G" in set(prepared["section"])
     kept = []
-    for firm in range(5):
+    for firm in range(6):
         root = f"7{firm:07d}"
-        for origin in ("declared", "assessed"):
-            kept.append(
-                {
-                    "origin": origin,
-                    "stock": 1_500.0,
-                    "paid": 10.0,
-                    "paid_flag": 1,
-                    "debt_age": 3.0,
-                    "cohort": "2019",
-                    "section": "Q",
-                    "porte": "01",
-                    "firm_age": 4.0,
-                    "firm_age_missing": 0,
-                    "root": root,
-                }
-            )
+        for origin, paid_flag in (("declared", 0), ("assessed", 1)):
+            for _copy in range(2):
+                kept.append(
+                    {
+                        "origin": origin,
+                        "stock": 1_500.0,
+                        "paid": 10.0 * paid_flag,
+                        "paid_flag": paid_flag,
+                        "debt_age": 3.0,
+                        "cohort": "2019",
+                        "section": "Q",
+                        "porte": "01",
+                        "firm_age": 4.0,
+                        "firm_age_missing": 0,
+                        "root": root,
+                    }
+                )
     prepared, _account = models.prepare_population(
         pd.concat([base, pd.DataFrame(kept)])
     )
@@ -352,18 +353,138 @@ def test_local_cache_directory_is_gitignored():
     raise AssertionError("repository gitignore was not found")
 
 
+def _row(root: str, origin: str, **overrides) -> dict:
+    paid_flag = int(overrides.pop("paid_flag", 0))
+    row = {
+        "origin": origin,
+        "stock": 1_500.0,
+        "paid": 10.0 * paid_flag,
+        "paid_flag": paid_flag,
+        "debt_age": 4.0,
+        "cohort": "2018",
+        "section": "G",
+        "porte": "01",
+        "firm_age": 6.0,
+        "firm_age_missing": 0,
+        "root": root,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_separating_cohorts_merge_into_an_early_bin(models, caplog):
+    frame = population()
+    extra = []
+    for firm in range(6):
+        root = f"61{firm:06d}"
+        year = "1974" if firm < 3 else "1975"
+        for origin in ("declared", "assessed"):
+            for _copy in range(2):
+                extra.append(_row(root, origin, cohort=year, paid_flag=0, section="G"))
+    for firm in range(4):
+        root = f"62{firm:06d}"
+        for origin, paid_flag in (("declared", 0), ("assessed", 1)):
+            for _copy in range(3):
+                extra.append(
+                    _row(root, origin, cohort="1976", paid_flag=paid_flag, section="G")
+                )
+    for firm in range(3):
+        root = f"63{firm:06d}"
+        for origin, paid_flag in (("declared", 0), ("assessed", 1)):
+            extra.append(_row(root, origin, section="Z", paid_flag=paid_flag))
+    for firm in range(6):
+        root = f"64{firm:06d}"
+        for origin in ("declared", "assessed"):
+            for _copy in range(2):
+                extra.append(_row(root, origin, section="O", paid_flag=0))
+    combined = pd.concat([frame, pd.DataFrame(extra)], ignore_index=True)
+    with caplog.at_level("INFO", logger="avd_origin_models"):
+        prepared, _account = models.prepare_population(combined)
+        table, _formula = models.fit_origin_logit(combined)
+    cohorts = set(prepared["cohort"])
+    sections = set(prepared["section"])
+    assert "1974" not in cohorts
+    assert "1975" not in cohorts
+    assert "<=1976" in cohorts
+    assert "2015" in cohorts
+    assert "O" not in sections
+    assert "Z" not in sections
+    assert "other" in sections
+    text = caplog.text
+    assert "1974" in text
+    assert "<=1976" in text
+    assert "O" in text
+    assert "other" in text
+    assert "610000" not in text
+    ame = float(str(table.loc[0, "AME (pp)"]).replace(",", ""))
+    assert ame > 0
+    assert table.loc[0, "Cluster 95% low"] != ""
+    assert table.loc[0, "HC3 95% low"] != ""
+
+
+def test_small_varying_cohorts_stay_a_bin(models):
+    frame = population()
+    extra = []
+    for firm, year, paid_flag in ((0, "1968", 0), (1, "1969", 1)):
+        root = f"65{firm:06d}"
+        for _copy in range(3):
+            extra.append(
+                _row(root, "declared", cohort=year, paid_flag=paid_flag, section="G")
+            )
+    prepared, _account = models.prepare_population(
+        pd.concat([frame, pd.DataFrame(extra)], ignore_index=True)
+    )
+    assert "<=1969" in set(prepared["cohort"])
+    assert "1968" not in set(prepared["cohort"])
+    assert "2015" in set(prepared["cohort"])
+
+
+def test_nonconvergence_is_a_failure(models):
+    fake = type("Fake", (), {})()
+    fake.mle_retvals = {"converged": False}
+    with pytest.raises(RuntimeError, match="did not converge"):
+        models._require_converged(fake, "origin logit")
+
+
+def test_only_runs_the_named_model(models, monkeypatch):
+    called = []
+
+    def mark(name):
+        def runner(connection=None, frame=None):
+            called.append(name)
+            return pd.DataFrame()
+
+        return runner
+
+    monkeypatch.setattr(models, "run_origin_logit", mark("logit"))
+    monkeypatch.setattr(models, "run_within_firm", mark("within"))
+    monkeypatch.setattr(models, "run_recovery", mark("recovery"))
+    models.run_all(frame=population(), only="within")
+    assert called == ["within"]
+
+
+def test_memory_log_names_the_model(models, caplog):
+    with caplog.at_level("INFO", logger="avd_origin_models"):
+        models._log_memory("logit")
+    assert "logit RSS current" in caplog.text
+    assert "peak" in caplog.text
+
+
 def test_from_cache_flag(models, monkeypatch):
     seen = {}
 
-    def fake_run_all(connection=None, *, from_cache=False, frame=None):
+    def fake_run_all(connection=None, *, from_cache=False, frame=None, only=None):
         seen["from_cache"] = from_cache
+        seen["only"] = only
         return {}
 
     monkeypatch.setattr(models, "run_all", fake_run_all)
-    models.main(["--from-cache"])
+    models.main(["--from-cache", "--only", "logit"])
     assert seen["from_cache"] is True
+    assert seen["only"] == "logit"
     models.main([])
     assert seen["from_cache"] is False
+    assert seen["only"] is None
 
 
 def test_notebook_records_the_design_rules():
@@ -376,6 +497,8 @@ def test_notebook_records_the_design_rules():
     )
     assert "enrolment year is kept and debt age is removed" in notebook
     assert "--from-cache" in notebook
+    assert "--only" in notebook
+    assert "fewer than 20 certificates" in notebook
     assert ".local/cache/avd_origin_frame.parquet" in notebook
 
 

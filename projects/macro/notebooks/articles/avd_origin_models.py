@@ -8,17 +8,25 @@ Before each fit the script logs the design rank and any sparse or
 non-varying dummy, by column name and count. An exactly collinear column
 is dropped. If debt age is perfectly collinear with the enrolment year, the
 year is kept and debt age is dropped. A CNAE section with fewer than five
-firms is collapsed into other. The extracted frame is cached under
-.local/cache/. The three models fail independently.
+firms is collapsed into other. A cohort year or a CNAE section with fewer
+than 20 certificates, or with a constant payment indicator, is merged
+before the fit. The likelihood is fit once. Cluster and HC3 covariances
+are computed from those parameters, with HC3 leverage one row at a time.
+The extracted frame is cached under .local/cache/. The three models fail
+independently.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import logging
 import os
+import resource
+import sys
 import tempfile
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -26,11 +34,13 @@ import pandas as pd
 import patsy
 import plotly.graph_objects as go
 import statsmodels.api as sm
-from statsmodels.tools.sm_exceptions import PerfectSeparationError
+from statsmodels.tools.sm_exceptions import ConvergenceWarning, PerfectSeparationError
 
 logger = logging.getLogger("avd_origin_models")
 
-CACHE_VERSION = "avd-origin-2"
+# Result tables change when the fit changes. The extracted frame does not.
+RESULT_CACHE_VERSION = "avd-origin-3"
+FRAME_CACHE_VERSION = "avd-origin-2"
 PAY_START = "2016-01-01"
 PAY_END = "2026-01-01"
 AS_OF = "2025-12-31"
@@ -41,8 +51,13 @@ MIN_FIRMS = 5
 # A CNAE section with fewer than this many distinct firm keys is collapsed into CNAE_OTHER.
 CNAE_MIN_FIRMS = 5
 CNAE_OTHER = "other"
-# Logged before the fit. This threshold does not by itself drop a column.
+# Logged before the fit. Merging uses MIN_LEVEL_OBS, not this logging threshold.
 MIN_DUMMY_OBS = 5
+# A cohort year or a CNAE section with fewer than this many certificates, or
+# with a constant payment indicator, is merged before the fit.
+MIN_LEVEL_OBS = 20
+LOGIT_MAXITER = 500
+COV_CHUNK = 16384
 # Relative QR tolerance for an exact linear dependence. It is not a significance cutoff.
 COLLINEAR_TOL = 1e-8
 SECTION_REFERENCE = "G"
@@ -75,6 +90,8 @@ CONTROLS_NOTE = (
     "Controls: log stock, debt age, firm age, a missing-opening indicator, "
     "enrolment year, CNAE section and firm size. "
     "A CNAE section with fewer than five firms is collapsed into other. "
+    "A cohort year or a CNAE section with fewer than 20 certificates, "
+    "or with a constant payment indicator, is merged before the fit. "
     "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "Declared origin is the reference. "
     "The main interval is clustered by the eight-digit firm key. "
@@ -87,6 +104,8 @@ RECOVERY_NOTE = (
     "Controls: debt age, firm age, a missing-opening indicator, "
     "enrolment year, CNAE section and firm size. "
     "A CNAE section with fewer than five firms is collapsed into other. "
+    "A cohort year or a CNAE section with fewer than 20 certificates, "
+    "or with a constant payment indicator, is merged before the fit. "
     "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "Declared origin is the reference. "
     "The main interval is clustered by the eight-digit firm key. "
@@ -99,6 +118,8 @@ WITHIN_NOTE = (
     "at least one assessed certificate. "
     "Certificate-level regressors that vary inside the firm stay in the model. "
     "A CNAE section with fewer than five firms is collapsed into other. "
+    "A cohort year or a CNAE section with fewer than 20 certificates, "
+    "or with a constant payment indicator, is merged before the fit. "
     "Debt age is omitted when it is perfectly collinear with the enrolment year. "
     "The main interval is clustered by the firm. "
     "HC3 is the robustness column of the within regression. "
@@ -163,7 +184,7 @@ def cache_dir() -> Path:
 
 def _signature(frame: pd.DataFrame, label: str, formula: str) -> str:
     digest = hashlib.sha256()
-    digest.update(CACHE_VERSION.encode())
+    digest.update(RESULT_CACHE_VERSION.encode())
     digest.update(label.encode())
     digest.update(formula.encode())
     digest.update(str(len(frame)).encode())
@@ -498,7 +519,9 @@ def save_analysis_frame(frame: pd.DataFrame, repo: Path | None = None) -> Path:
     path = frame_cache_path(repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.loc[:, list(FRAME_COLUMNS)].to_parquet(path, index=False)
-    path.with_suffix(".version").write_text(CACHE_VERSION + "\n", encoding="utf-8")
+    path.with_suffix(".version").write_text(
+        FRAME_CACHE_VERSION + "\n", encoding="utf-8"
+    )
     logger.info("Cached the analysis frame.")
     return path
 
@@ -511,7 +534,7 @@ def _read_frame_cache() -> pd.DataFrame:
             "No cached analysis frame. Run the script once without --from-cache."
         )
     version = version_path.read_text(encoding="utf-8").strip()
-    if version != CACHE_VERSION:
+    if version != FRAME_CACHE_VERSION:
         raise RuntimeError(
             "The cached analysis frame is from another model version. "
             "Run the script once without --from-cache."
@@ -564,6 +587,138 @@ def _reference(levels: pd.Series, preferred: str) -> str:
     return chosen
 
 
+def _level_status(levels: pd.Series, outcome: pd.Series) -> pd.DataFrame:
+    table = pd.DataFrame(
+        {"level": levels.astype(str).to_numpy(), "y": np.asarray(outcome)}
+    )
+    return table.groupby("level", sort=False)["y"].agg(
+        observations="size", outcome_distinct="nunique"
+    )
+
+
+def _unstable_levels(status: pd.DataFrame) -> list[str]:
+    unstable = (status["observations"] < MIN_LEVEL_OBS) | (
+        status["outcome_distinct"] <= 1
+    )
+    return [str(level) for level in status.index[unstable]]
+
+
+def _format_level(level: str, status: pd.DataFrame) -> str:
+    if level not in status.index:
+        return level
+    count = int(status.loc[level, "observations"])
+    if 1 <= count <= 4:
+        return f"{level} (n suppressed)"
+    return f"{level} (n={count})"
+
+
+def _observed_years(levels: pd.Series) -> list[int]:
+    found = {int(value) for value in levels.unique() if str(value).isdigit()}
+    return sorted(found)
+
+
+def _year_runs(years: list[int]) -> list[tuple[int, int]]:
+    if not years:
+        return []
+    runs = []
+    start = previous = years[0]
+    for year in years[1:]:
+        if year == previous + 1:
+            previous = year
+            continue
+        runs.append((start, previous))
+        start = previous = year
+    runs.append((start, previous))
+    return runs
+
+
+def _values_vary(levels: np.ndarray, outcome: np.ndarray, members: set[str]) -> bool:
+    chosen = np.isin(levels, list(members))
+    if not chosen.any():
+        return False
+    return int(np.unique(outcome[chosen]).size) > 1
+
+
+def _merge_cohorts(levels: pd.Series, outcome: pd.Series) -> pd.Series:
+    """Merge thin or separating cohort years into a contiguous bin."""
+    original_index = levels.index
+    labels = levels.astype(str).to_numpy()
+    payments = np.asarray(outcome)
+    status = _level_status(levels, outcome)
+    unstable_years = sorted(
+        int(level) for level in _unstable_levels(status) if str(level).isdigit()
+    )
+    mapping: dict[str, str] = {}
+    for level in _unstable_levels(status):
+        if not str(level).isdigit():
+            mapping[str(level)] = "pooled"
+    observed = _observed_years(pd.Series(labels))
+    for start, end in _year_runs(unstable_years):
+        members = list(range(start, end + 1))
+        while not _values_vary(labels, payments, {str(year) for year in members}):
+            later = [year for year in observed if year > members[-1]]
+            if not later:
+                break
+            members.append(later[0])
+        member_labels = {str(year) for year in members}
+        if _values_vary(labels, payments, member_labels):
+            if observed and members[0] == observed[0]:
+                label = f"<={members[-1]}"
+            elif len(members) == 1:
+                label = "pooled"
+            else:
+                label = f"{members[0]}-{members[-1]}"
+        else:
+            outside = labels[~np.isin(labels, list(member_labels))]
+            if outside.size == 0:
+                continue
+            label = str(pd.Series(outside).mode().iloc[0])
+        for year in members:
+            mapping[str(year)] = label
+        logger.info(
+            "Merged cohort levels %s into %s.",
+            ", ".join(_format_level(str(year), status) for year in members),
+            label,
+        )
+    merged = pd.Series(labels, index=original_index)
+    if not mapping:
+        return merged
+    return merged.replace(mapping)
+
+
+def _merge_sections(levels: pd.Series, outcome: pd.Series, reference: str) -> pd.Series:
+    """Merge thin or separating CNAE sections into other."""
+    original_index = levels.index
+    labels = levels.astype(str)
+    status = _level_status(labels, outcome)
+    unstable = [
+        level
+        for level in _unstable_levels(status)
+        if level not in {reference, CNAE_OTHER}
+    ]
+    mapped = labels.where(~labels.isin(unstable), CNAE_OTHER)
+    if unstable:
+        logger.info(
+            "Merged CNAE levels %s into %s.",
+            ", ".join(_format_level(level, status) for level in sorted(unstable)),
+            CNAE_OTHER,
+        )
+    other = mapped == CNAE_OTHER
+    payments = np.asarray(outcome)
+    if (
+        bool(other.to_numpy().any())
+        and int(np.unique(payments[other.to_numpy()]).size) <= 1
+    ):
+        logger.info(
+            "CNAE bin %s has a constant payment indicator. It takes the reference %s.",
+            CNAE_OTHER,
+            reference,
+        )
+        mapped = mapped.where(~other, reference)
+    mapped.index = original_index
+    return mapped
+
+
 def prepare_population(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int]]:
     """Drop rows that cannot enter the clustered logit, and pool sparse categories."""
     _configure_logging()
@@ -587,7 +742,10 @@ def prepare_population(frame: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, int
         log_label="CNAE",
     )
     work["porte"] = _pool_rare(work["porte"], work["root"])
-    work["cohort"] = _pool_rare(work["cohort"], work["root"])
+    work["section"] = _merge_sections(
+        work["section"], work["paid_flag"], SECTION_REFERENCE
+    )
+    work["cohort"] = _merge_cohorts(work["cohort"], work["paid_flag"])
     work["section_ref"] = _reference(work["section"], SECTION_REFERENCE)
     work["porte_ref"] = _reference(work["porte"], SIZE_REFERENCE)
     work["cohort_ref"] = _reference(work["cohort"], str(work["cohort"].mode().iloc[0]))
@@ -761,86 +919,269 @@ def _fitted_formula(outcome: str, columns: pd.Index | list[str]) -> str:
     return outcome + " ~ " + " + ".join(terms)
 
 
-def _design_from_formula(
+def _memory_mb() -> tuple[float, float]:
+    """Current and peak resident set, in mebibytes."""
+    current = None
+    try:
+        with open("/proc/self/status", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    current = int(line.split()[1]) / 1024.0
+                    break
+    except OSError:
+        current = None
+    peak_raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform == "darwin":
+        peak = peak_raw / (1024.0 * 1024.0)
+    else:
+        peak = peak_raw / 1024.0
+    if current is None:
+        current = peak
+    return current, peak
+
+
+def _log_memory(label: str) -> None:
+    _configure_logging()
+    current, peak = _memory_mb()
+    logger.info("%s RSS current %.0f MB, peak %.0f MB", label, current, peak)
+
+
+def _iter_blocks(n_rows: int):
+    for start in range(0, n_rows, COV_CHUNK):
+        yield start, min(start + COV_CHUNK, n_rows)
+
+
+def _weighted_gram(exog: np.ndarray, weight: np.ndarray) -> np.ndarray:
+    width = exog.shape[1]
+    gram = np.zeros((width, width), dtype=np.float64)
+    for start, stop in _iter_blocks(exog.shape[0]):
+        block = exog[start:stop]
+        weighted = weight[start:stop, None] * block
+        gram += weighted.T @ block
+    return gram
+
+
+def _row_quadratic(exog: np.ndarray, bread: np.ndarray) -> np.ndarray:
+    """Diagonal of exog @ bread @ exog.T, one chunk at a time."""
+    diagonal = np.empty(exog.shape[0], dtype=np.float64)
+    for start, stop in _iter_blocks(exog.shape[0]):
+        block = exog[start:stop]
+        diagonal[start:stop] = np.einsum("ij,ij->i", block @ bread, block)
+    return diagonal
+
+
+def _meat(exog: np.ndarray, scale: np.ndarray) -> np.ndarray:
+    width = exog.shape[1]
+    meat = np.zeros((width, width), dtype=np.float64)
+    for start, stop in _iter_blocks(exog.shape[0]):
+        block = exog[start:stop]
+        meat += (scale[start:stop, None] * block).T @ block
+    return meat
+
+
+def _cluster_cov(
+    exog: np.ndarray, score: np.ndarray, codes: np.ndarray, bread: np.ndarray
+) -> np.ndarray:
+    n_groups = int(codes.max()) + 1 if codes.size else 0
+    width = exog.shape[1]
+    sums = np.zeros((n_groups, width), dtype=np.float64)
+    for start, stop in _iter_blocks(exog.shape[0]):
+        block = exog[start:stop]
+        np.add.at(sums, codes[start:stop], score[start:stop, None] * block)
+    meat = sums.T @ sums
+    del sums
+    cov = bread @ meat @ bread
+    n_obs = exog.shape[0]
+    if n_groups > 1 and n_obs > width:
+        cov *= n_groups / (n_groups - 1.0) * ((n_obs - 1.0) / (n_obs - width))
+    return cov
+
+
+def _hc3_cov(
+    exog: np.ndarray,
+    residual: np.ndarray,
+    bread: np.ndarray,
+    weight: np.ndarray | None = None,
+) -> np.ndarray:
+    """MacKinnon-White HC3. Leverage is a length-n vector, never an n by n matrix."""
+    leverage = _row_quadratic(exog, bread)
+    if weight is not None:
+        leverage = weight * leverage
+    leverage = np.minimum(leverage, 1.0 - 1e-8)
+    scale = (residual / (1.0 - leverage)) ** 2
+    return bread @ _meat(exog, scale) @ bread
+
+
+def _group_codes(roots: np.ndarray) -> np.ndarray:
+    codes, uniques = pd.factorize(roots, sort=False)
+    del uniques
+    return codes.astype(np.int32, copy=False)
+
+
+def _converged(result) -> bool:
+    retvals = getattr(result, "mle_retvals", None) or {}
+    if "converged" in retvals:
+        return bool(retvals["converged"])
+    return bool(getattr(result, "converged", False))
+
+
+def _require_converged(result, label: str) -> None:
+    if _converged(result):
+        return
+    logger.info("The %s fit did not converge.", label)
+    raise RuntimeError(f"The {label} fit did not converge.")
+
+
+def _fit_with_fallback(model, label: str):
+    """One Newton fit, then BFGS from those parameters if Newton does not converge."""
+    result = None
+    start = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            result = model.fit(disp=False, method="newton", maxiter=LOGIT_MAXITER)
+    except (np.linalg.LinAlgError, PerfectSeparationError) as exc:
+        logger.info(
+            "%s Newton failed (%s). Retrying with BFGS.",
+            label,
+            type(exc).__name__,
+        )
+    if result is not None and _converged(result):
+        return result
+    if result is not None:
+        logger.info("%s Newton did not converge. Retrying with BFGS.", label)
+        start = np.asarray(result.params, dtype=np.float64)
+        del result
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            result = model.fit(
+                disp=False,
+                method="bfgs",
+                maxiter=LOGIT_MAXITER,
+                start_params=start,
+            )
+    except (np.linalg.LinAlgError, PerfectSeparationError) as exc:
+        logger.info("%s BFGS failed (%s).", label, type(exc).__name__)
+        raise RuntimeError(f"The {label} fit did not converge.") from exc
+    _require_converged(result, label)
+    return result
+
+
+def _expit(linear: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(linear, -50.0, 50.0)))
+
+
+def _assessed_ame(
+    exog: np.ndarray, names: list[str], beta: np.ndarray, cov: np.ndarray
+) -> tuple[float, float, float]:
+    """Finite-difference average marginal effect of assessed origin, with delta-method interval."""
+    if "assessed" not in names:
+        raise RuntimeError("The assessed margin is absent from the design.")
+    position = names.index("assessed")
+    total = 0.0
+    gradient = np.zeros(exog.shape[1], dtype=np.float64)
+    n_rows = 0
+    for start, stop in _iter_blocks(exog.shape[0]):
+        block = exog[start:stop]
+        linear = block @ beta
+        base = linear - block[:, position] * beta[position]
+        probability_one = _expit(base + beta[position])
+        probability_zero = _expit(base)
+        total += float(np.sum(probability_one - probability_zero))
+        weight_one = probability_one * (1.0 - probability_one)
+        weight_gap = weight_one - probability_zero * (1.0 - probability_zero)
+        cleared = block.copy()
+        cleared[:, position] = 0.0
+        gradient += weight_gap @ cleared
+        gradient[position] += float(np.sum(weight_one))
+        n_rows += stop - start
+    point = total / n_rows
+    gradient /= n_rows
+    variance = float(gradient @ cov @ gradient)
+    standard_error = float(np.sqrt(max(variance, 0.0)))
+    return point, point - Z_95 * standard_error, point + Z_95 * standard_error
+
+
+def _log_sparse_matrix(
+    outcome: np.ndarray, matrix: np.ndarray, names: list[str], label: str
+) -> None:
+    _configure_logging()
+    y = np.asarray(outcome, dtype=np.float64)
+    for index, name in enumerate(names):
+        if name == "Intercept":
+            continue
+        values = matrix[:, index]
+        finite = values[np.isfinite(values)]
+        if finite.size == 0 or np.unique(np.round(finite, 10)).size <= 1:
+            logger.info(
+                "column %s: observations=%s",
+                name,
+                int(np.isfinite(values).sum()),
+            )
+            continue
+        ones = _dummy_ones(values)
+        if ones is None:
+            continue
+        mask = np.round(values, 10) == 1.0
+        distinct = int(np.unique(y[mask]).size) if int(mask.sum()) else 0
+        if ones < MIN_DUMMY_OBS or distinct <= 1:
+            logger.info(
+                "dummy %s: observations=%s outcome_distinct=%s",
+                name,
+                ones,
+                distinct,
+            )
+
+
+def _order_exog(
+    matrix: np.ndarray, names: list[str]
+) -> tuple[np.ndarray, list[str], list[int], list[str]]:
+    """QR the design in priority order. The caller drops the original matrix next."""
+    order = sorted(range(len(names)), key=lambda index: _keep_priority(names[index]))
+    ordered = np.asfortranarray(matrix[:, order])
+    _q, r_matrix = np.linalg.qr(ordered, mode="reduced")
+    del _q
+    diagonal = np.zeros(ordered.shape[1], dtype=np.float64)
+    diag_r = np.abs(np.diag(r_matrix))
+    diagonal[: diag_r.shape[0]] = diag_r
+    norms = np.linalg.norm(ordered, axis=0)
+    keep_positions: list[int] = []
+    dropped: list[str] = []
+    ordered_names = [names[index] for index in order]
+    for index, name in enumerate(ordered_names):
+        scale = float(norms[index])
+        independent = scale > 0.0 and float(diagonal[index]) > COLLINEAR_TOL * scale
+        if independent:
+            keep_positions.append(index)
+        else:
+            dropped.append(name)
+    if not keep_positions:
+        raise RuntimeError("Every design column was collinear.")
+    return ordered, ordered_names, keep_positions, dropped
+
+
+def _compact_exog(
+    ordered: np.ndarray, ordered_names: list[str], keep_positions: list[int]
+) -> tuple[np.ndarray, list[str]]:
+    kept_names = [ordered_names[index] for index in keep_positions]
+    kept = np.ascontiguousarray(ordered[:, keep_positions])
+    return kept, kept_names
+
+
+def _design_arrays(
     formula: str, frame: pd.DataFrame
-) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame]:
+) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray]:
     work = frame.reset_index(drop=True)
     outcome, design = patsy.dmatrices(formula, work, return_type="dataframe")
     if len(design) != len(work):
         raise RuntimeError("The design dropped rows. Refusing to fit.")
-    design.columns = [str(column) for column in design.columns]
-    return outcome.iloc[:, 0], design, work
-
-
-def _logit_exog(
-    frame: pd.DataFrame,
-) -> tuple[pd.Series, pd.DataFrame, pd.DataFrame, str]:
-    formula = origin_logit_formula(frame)
-    outcome, design, work = _design_from_formula(formula, frame)
-    reduced, dropped = reduce_design(design)
-    preflight_design(outcome, design, "origin logit", rank=reduced.shape[1])
-    _log_collinear(dropped, list(reduced.columns))
-    fitted = formula if not dropped else _fitted_formula("paid_flag", reduced.columns)
-    return outcome, reduced, work, fitted
-
-
-def _estimate_logit(outcome: pd.Series, design: pd.DataFrame, groups: np.ndarray):
-    model = sm.Logit(outcome, design)
-    clustered = model.fit(
-        disp=False,
-        maxiter=200,
-        cov_type="cluster",
-        cov_kwds={"groups": groups},
-    )
-    robust = model.fit(
-        disp=False,
-        maxiter=200,
-        cov_type="HC3",
-        start_params=np.asarray(clustered.params),
-    )
-    return clustered, robust
-
-
-def _pool_smallest_cohort(frame: pd.DataFrame) -> bool:
-    counts = frame.groupby("cohort")["root"].nunique().sort_values()
-    if len(counts) <= 1:
-        return False
-    smallest = counts.index[0]
-    frame["cohort"] = frame["cohort"].where(frame["cohort"] != smallest, other="pooled")
-    frame["cohort_ref"] = _reference(frame["cohort"], str(frame["cohort_ref"].iloc[0]))
-    return True
-
-
-def _fit_logit(frame: pd.DataFrame):
-    frame = frame.copy()
-    for _attempt in range(4):
-        outcome, reduced, work, fitted = _logit_exog(frame)
-        try:
-            clustered, robust = _estimate_logit(
-                outcome, reduced, work["root"].to_numpy()
-            )
-            return clustered, robust, fitted
-        except (PerfectSeparationError, np.linalg.LinAlgError) as exc:
-            logger.info(
-                "The origin logit fit failed (%s). Pooling the smallest cohort.",
-                type(exc).__name__,
-            )
-            if not _pool_smallest_cohort(frame):
-                break
-    raise RuntimeError(
-        "The origin logit stayed separated after pooling sparse cohorts."
-    )
-
-
-def _assessed_margin(result) -> tuple[float, float, float]:
-    margins = result.get_margeff(at="overall", dummy=True)
-    names = list(margins.summary_frame().index)
-    if "assessed" not in names:
-        raise RuntimeError(f"The assessed margin is absent from {names}.")
-    position = names.index("assessed")
-    point = float(margins.margeff[position])
-    low, high = margins.conf_int()[position]
-    return point, float(low), float(high)
+    names = [str(column) for column in design.columns]
+    y = np.ascontiguousarray(outcome.iloc[:, 0].to_numpy(dtype=np.float64))
+    matrix = np.ascontiguousarray(design.to_numpy(dtype=np.float64))
+    codes = _group_codes(work["root"].to_numpy())
+    del outcome, design, work
+    return y, matrix, names, codes
 
 
 def _result_row(
@@ -910,11 +1251,32 @@ def fit_origin_logit(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     key = _signature(prepared, "logit", formula)
     cached = _read_cached(key)
     if cached is not None:
-        _outcome, _reduced, _work, fitted = _logit_exog(prepared)
-        return cached, fitted
-    clustered, robust, formula = _fit_logit(prepared)
-    point, low, high = _assessed_margin(clustered)
-    _, hc_low, hc_high = _assessed_margin(robust)
+        return cached, formula
+    outcome, matrix, names, codes = _design_arrays(formula, prepared)
+    _log_sparse_matrix(outcome, matrix, names, "origin logit")
+    ordered, ordered_names, keep_positions, dropped = _order_exog(matrix, names)
+    del matrix
+    gc.collect()
+    reduced, reduced_names = _compact_exog(ordered, ordered_names, keep_positions)
+    del ordered
+    gc.collect()
+    logger.info("origin logit: rank %s of %s columns", len(reduced_names), len(names))
+    _log_collinear(dropped, reduced_names)
+    fitted = formula if not dropped else _fitted_formula("paid_flag", reduced_names)
+    model = sm.Logit(outcome, reduced)
+    result = _fit_with_fallback(model, "origin logit")
+    beta = np.asarray(result.params, dtype=np.float64)
+    probability = np.asarray(result.predict(), dtype=np.float64)
+    del result, model
+    weight = probability * (1.0 - probability)
+    bread = np.linalg.inv(_weighted_gram(reduced, weight))
+    score = outcome - probability
+    cluster_cov = _cluster_cov(reduced, score, codes, bread)
+    hc3_cov = _hc3_cov(reduced, score, bread, weight)
+    point, low, high = _assessed_ame(reduced, reduced_names, beta, cluster_cov)
+    _point, hc_low, hc_high = _assessed_ame(reduced, reduced_names, beta, hc3_cov)
+    del outcome, reduced, probability, weight, score, codes, beta, cluster_cov, hc3_cov
+    gc.collect()
     table = _result_row(
         "Assessed (declared reference)",
         point,
@@ -927,7 +1289,7 @@ def fit_origin_logit(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
         "AME (pp)",
     )
     _write_cached(key, table)
-    return table, formula
+    return table, fitted
 
 
 def _design_matrix(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -987,8 +1349,6 @@ def fit_within_firm(frame: pd.DataFrame) -> pd.DataFrame:
         return cached
     design, outcome = _design_matrix(sample)
     firms = sample["root"].reset_index(drop=True)
-    preview, _preview_dropped = reduce_design(design)
-    preflight_design(outcome, design, "within-firm", rank=preview.shape[1])
     demeaned = _within_columns(design, firms)
     demeaned, dropped = reduce_design(demeaned)
     _log_collinear(dropped, list(demeaned.columns))
@@ -996,17 +1356,25 @@ def fit_within_firm(frame: pd.DataFrame) -> pd.DataFrame:
         raise RuntimeError(
             "Assessed origin has no within-firm variation in this sample."
         )
-    y = outcome - outcome.groupby(firms.to_numpy()).transform("mean")
-    codes, _uniques = pd.factorize(firms, sort=False)
-    clustered = sm.OLS(y.to_numpy(), demeaned.to_numpy()).fit(
-        cov_type="cluster",
-        cov_kwds={"groups": codes},
+    preflight_design(outcome, design, "within-firm", rank=demeaned.shape[1])
+    y = (outcome - outcome.groupby(firms.to_numpy()).transform("mean")).to_numpy(
+        dtype=np.float64
     )
-    robust = sm.OLS(y.to_numpy(), demeaned.to_numpy()).fit(cov_type="HC3")
-    position = list(demeaned.columns).index("assessed")
-    point = float(clustered.params[position])
-    se = float(clustered.bse[position])
-    hc_se = float(robust.bse[position])
+    exog = np.ascontiguousarray(demeaned.to_numpy(dtype=np.float64))
+    names = list(demeaned.columns)
+    del design, demeaned, outcome
+    beta, *_ = np.linalg.lstsq(exog, y, rcond=None)
+    residual = y - exog @ beta
+    bread = np.linalg.inv(exog.T @ exog)
+    codes = _group_codes(firms.to_numpy())
+    cluster_cov = _cluster_cov(exog, residual, codes, bread)
+    hc3_cov = _hc3_cov(exog, residual, bread)
+    position = names.index("assessed")
+    point = float(beta[position])
+    se = float(np.sqrt(cluster_cov[position, position]))
+    hc_se = float(np.sqrt(hc3_cov[position, position]))
+    del exog, y, residual, codes, beta, cluster_cov, hc3_cov
+    gc.collect()
     table = _result_row(
         "Assessed (declared reference)",
         point,
@@ -1030,37 +1398,57 @@ def fit_recovery_percent(frame: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     if cached is not None:
         return cached, formula
     prepared = prepared.copy()
-    prepared["paid_scaled"] = prepared["paid"].to_numpy(dtype=float) / 1000.0
-    outcome, design, work = _design_from_formula(formula, prepared)
-    reduced, dropped = reduce_design(design)
-    preflight_design(outcome, design, "recovery", rank=reduced.shape[1])
-    _log_collinear(dropped, list(reduced.columns))
-    formula = (
-        formula if not dropped else _fitted_formula("paid_scaled", reduced.columns)
-    )
-    groups = work["root"].to_numpy()
-    offset = np.log(work["stock"].to_numpy(dtype=float) / 1000.0)
+    prepared["paid_scaled"] = prepared["paid"].to_numpy(dtype=np.float64) / 1000.0
+    outcome, matrix, names, codes = _design_arrays(formula, prepared)
+    _log_sparse_matrix(outcome, matrix, names, "recovery")
+    ordered, ordered_names, keep_positions, dropped = _order_exog(matrix, names)
+    del matrix
+    gc.collect()
+    reduced, reduced_names = _compact_exog(ordered, ordered_names, keep_positions)
+    del ordered
+    gc.collect()
+    logger.info("recovery: rank %s of %s columns", len(reduced_names), len(names))
+    _log_collinear(dropped, reduced_names)
+    formula = formula if not dropped else _fitted_formula("paid_scaled", reduced_names)
+    offset = np.log(prepared["stock"].to_numpy(dtype=np.float64) / 1000.0)
     model = sm.GLM(
         outcome,
         reduced,
         family=sm.families.Poisson(),
         offset=offset,
     )
-    clustered = model.fit(
-        maxiter=100,
-        disp=False,
-        cov_type="cluster",
-        cov_kwds={"groups": groups},
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        result = model.fit(maxiter=LOGIT_MAXITER, disp=False)
+    if not _converged(result):
+        logger.info(
+            "The recovery model did not converge. Retrying from the last parameters."
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            result = model.fit(
+                maxiter=LOGIT_MAXITER,
+                disp=False,
+                start_params=np.asarray(result.params, dtype=np.float64),
+            )
+    _require_converged(result, "recovery")
+    beta_vector = np.asarray(result.params, dtype=np.float64)
+    mean = np.asarray(result.predict(), dtype=np.float64)
+    del result, model
+    score = outcome - mean
+    bread = np.linalg.inv(_weighted_gram(reduced, mean))
+    cluster_cov = _cluster_cov(reduced, score, codes, bread)
+    hc3_cov = _hc3_cov(reduced, score, bread, mean)
+    position = reduced_names.index("assessed")
+    beta = float(beta_vector[position])
+    point, low, high = percent_difference(
+        beta, float(np.sqrt(cluster_cov[position, position]))
     )
-    robust = model.fit(
-        maxiter=100,
-        disp=False,
-        cov_type="HC3",
-        start_params=np.asarray(clustered.params),
+    _hc_point, hc_low, hc_high = percent_difference(
+        beta, float(np.sqrt(hc3_cov[position, position]))
     )
-    beta = float(clustered.params["assessed"])
-    point, low, high = percent_difference(beta, float(clustered.bse["assessed"]))
-    _hc_point, hc_low, hc_high = percent_difference(beta, float(robust.bse["assessed"]))
+    del outcome, reduced, mean, score, codes, offset, beta_vector, cluster_cov, hc3_cov
+    gc.collect()
     table = _result_row(
         "Assessed (declared reference)",
         point,
@@ -1270,6 +1658,7 @@ def run_all(
     *,
     from_cache: bool = False,
     frame: pd.DataFrame | None = None,
+    only: str | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Fit the three models. One failure does not skip the other outputs."""
     _configure_logging()
@@ -1282,12 +1671,20 @@ def run_all(
         ("within", run_within_firm),
         ("recovery", run_recovery),
     )
+    if only is not None:
+        runners = tuple(item for item in runners if item[0] == only)
+        if not runners:
+            raise RuntimeError("Unknown model. Choose logit, within or recovery.")
     for name, runner in runners:
+        gc.collect()
+        _log_memory(f"{name} start")
         try:
             results[name] = runner(frame=frame)
         except Exception:
             logger.exception("The %s model failed.", name)
             failed.append(name)
+        gc.collect()
+        _log_memory(f"{name} end")
     if failed:
         written = ", ".join(results) if results else "none"
         raise RuntimeError(
@@ -1303,8 +1700,13 @@ def main(argv: list[str] | None = None) -> dict[str, pd.DataFrame]:
         action="store_true",
         help="Read the analysis frame from .local/cache and skip extraction.",
     )
+    parser.add_argument(
+        "--only",
+        choices=("logit", "within", "recovery"),
+        help="Fit one model and skip the others.",
+    )
     args = parser.parse_args(argv)
-    return run_all(from_cache=args.from_cache)
+    return run_all(from_cache=args.from_cache, only=args.only)
 
 
 if __name__ == "__main__":
