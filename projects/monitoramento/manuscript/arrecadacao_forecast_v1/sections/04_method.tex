@@ -34,15 +34,16 @@ The threshold $\tau$ in those rules is chosen in step~3.
   \resizebox{\linewidth}{!}{%
   \begin{tikzpicture}[
       font=\normalsize,
-      node distance=5.5mm and 3mm,
+      node distance=3.5mm and 3mm,
       wide/.style={draw, rounded corners=2pt, align=center,
-                   inner sep=5pt, minimum width=124mm, fill=inkteal!12,
+                   inner sep=5pt, minimum width=131.55mm, fill=inkteal!12,
                    line width=0.5pt},
       grain/.style={draw, rounded corners=2pt, align=center,
                     inner sep=3.5pt, text width=28mm, minimum height=16mm,
                     fill=inkteal!22, line width=0.5pt},
       stage/.style={draw, rounded corners=2pt, align=center,
-                    inner sep=5pt, fill=inkteal!30, line width=0.5pt},
+                    inner sep=5pt, minimum width=131.55mm, fill=inkteal!30,
+                    line width=0.5pt},
       rule/.style={draw, rounded corners=2pt, align=center,
                    inner sep=4pt, text width=56mm, fill=white,
                    line width=0.4pt, font=\normalsize},
@@ -52,17 +53,21 @@ The threshold $\tau$ in those rules is chosen in step~3.
     \node[wide] (ex) {Series end on 31 December 2025};
     \node[wide, below=of ex] (build) {Build one series per grain};
 
-    \node[grain, below=8mm of build, anchor=north, xshift=-48mm] (gm)
+    \coordinate (grainTop) at ($(build.south)+(0,-5.5mm)$);
+    \node[grain, anchor=north east] (ga) at ($(grainTop)+(-1.5mm,0)$)
+      {A\\calendar day\\zeros kept};
+    \node[grain, anchor=north west] (gb) at ($(grainTop)+(1.5mm,0)$)
+      {B\\Mon-Fri\\holidays kept};
+    \node[grain, left=3mm of ga] (gm)
       {Monthly\\stock and collection};
-    \node[grain, right=of gm] (ga) {A\\calendar day\\zeros kept};
-    \node[grain, right=of ga] (gb) {B\\Mon-Fri\\holidays kept};
-    \node[grain, right=of gb] (gw) {Weekly\\Sunday close};
+    \node[grain, right=3mm of gb] (gw)
+      {Weekly\\Sunday close};
 
-    \node[wide, below=8mm of ga] (split)
+    \node[wide, anchor=north] (split) at ($(build.center |- ga.south)+(0,-5.5mm)$)
       {Train $\;\vert\;$ Validation $\;\vert\;$ Test\\[1pt]
        {\itshape one contiguous cut}};
 
-    \node[stage, below=8mm of split] (s1)
+    \node[stage, below=5.5mm of split] (s1)
       {\parbox{118mm}{\centering
         \textbf{Stage 1: point forecasts (M0--M9)}\\[3pt]
         {\small
@@ -78,7 +83,7 @@ The threshold $\tau$ in those rules is chosen in step~3.
         M9 TimesFM (frozen)}
         \par}};
 
-    \node[stage, below=7mm of s1] (s2)
+    \node[stage, below=5mm of s1] (s2)
       {\parbox{118mm}{\centering
         \textbf{Stage 2: after Stage 1}\\[3pt]
         {\small
@@ -88,29 +93,29 @@ The threshold $\tau$ in those rules is chosen in step~3.
         E4 score}
         \par}};
 
-    \node[wide, below=8mm of s2] (sel) {Select by validation sMAPE};
+    \node[wide, below=5.5mm of s2] (sel) {Select by validation sMAPE};
     \node[wide, below=of sel] (refit) {Refit on train $+$ validation};
     \node[wide, below=of refit] (fc) {Forecast the test block};
     \node[wide, fill=inkteal!45, below=of fc] (rank) {Rank: test sMAPE $\downarrow$};
     \node[wide, below=of rank] (skill)
       {Secondary: skill score vs seasonal naive};
 
-    \node[font=\normalsize\itshape, below=7mm of skill] (rtitle)
+    \node[font=\normalsize\itshape, below=5mm of skill] (rtitle)
       {Forecast-time rules};
-    \node[rule, below=3mm of rtitle, anchor=north, xshift=-31mm] (c1)
+    \node[rule, anchor=north east] (c1) at ($(rtitle.south)+(-2mm,-2mm)$)
       {\textbf{E1.} Energy $\lt \tau$: that candidate.\\
        Else: seasonal naive.};
-    \node[rule, anchor=north west, at={($(c1.north east)+(4mm,0)$)}] (c2)
+    \node[rule, anchor=north west] (c2) at ($(rtitle.south)+(2mm,-2mm)$)
       {\textbf{E2, not TEM.}\\
        $|\mathrm{boost}-\mathrm{seas}| \gt \tau$: seasonal. Else: boost.};
 
     \draw[arr] (ex) -- (build);
-    \draw[arr] (build.south) -- ++(0,-4mm) coordinate (forkG);
+    \draw[arr] (build.south) -- ++(0,-2.75mm) coordinate (forkG);
     \draw[bus] (gm.north |- forkG) -- (gw.north |- forkG);
     \foreach \n in {gm,ga,gb,gw}
       \draw[arr] (\n.north |- forkG) -- (\n.north);
 
-    \coordinate (forkS) at ($($(gm.south)!0.5!(gw.south)$)+(0,-4mm)$);
+    \coordinate (forkS) at ($($(gm.south)!0.5!(gw.south)$)+(0,-2.75mm)$);
     \draw[bus] (gm.south |- forkS) -- (gw.south |- forkS);
     \foreach \n in {gm,ga,gb,gw}
       \draw[bus] (\n.south) -- (\n.south |- forkS);
