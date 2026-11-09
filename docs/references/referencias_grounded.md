@@ -119,6 +119,16 @@ O teste de Harvey–Collier entra como na seção 4.2 do laboratório, sem cita�
 
 A seção 4.7 ajusta a especificação impressa na seção 4.5. As citações são as da seção E acima: spline cúbica restrita (Durrleman e Simon 1989), ICC latente (Goldstein, Browne e Rasbash 2002), regressão quantílica (Koenker e Bassett 1978) e erros HC3 (MacKinnon e White 1985). Não há citação nova. Os ICC 0,061 (declarado) e 0,034 (autuado) são a triagem de momentos da seção 4.5, não uma estimativa nova.
 
+## G — Regressão simbólica (IEEE CEC 2027)
+
+Sugestões do Prof. Bertini em 05/11/2026 para o paper de regressão simbólica (IEEE CEC 2027). Os DOI das quatro primeiras entradas foram conferidos no Crossref em 09/11/2026. NGGP é o preprint arXiv:2111.00053; a API do arXiv não lista DOI.
+
+- Burlacu, B., Kronberger, G., & Kommenda, M. (2020). Operon C++: An Efficient Genetic Programming Framework for Symbolic Regression. *Proceedings of the 2020 Genetic and Evolutionary Computation Conference Companion* (GECCO '20), 1562–1570. ACM. https://doi.org/10.1145/3377929.3398099
+- Virgolin, M., Alderliesten, T., Witteveen, C., & Bosman, P. A. N. (2021). Improving Model-Based Genetic Programming for Symbolic Regression of Small Expressions. *Evolutionary Computation*, 29(2), 211–237. https://doi.org/10.1162/evco_a_00278
+- Naqvi, S. S., & Browne, W. N. (2016). Adapting Learning Classifier Systems to Symbolic Regression. *2016 IEEE Congress on Evolutionary Computation (CEC)*, 2209–2216. IEEE. https://doi.org/10.1109/CEC.2016.7744061
+- Liu, W.-L., Yang, J., Zhong, J., & Wang, S. (2021). Genetic Programming with Separability Detection for Symbolic Regression. *Complex & Intelligent Systems*, 7(3), 1185–1194. https://doi.org/10.1007/s40747-020-00240-6
+- Mundhenk, T. Nathan, Landajuela, Mikel, Glatt, Ruben, Santiago, Claudio P., Faissol, Daniel M., & Petersen, Brenden K. (2021). Symbolic Regression via Neural-Guided Genetic Programming Population Seeding. arXiv:2111.00053 [cs.NE]. https://arxiv.org/abs/2111.00053v2
+
 ## Síntese para os 4 projetos
 
 | Frente | Seguro agora | Evitar reivindicar |
