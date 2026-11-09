@@ -59,38 +59,40 @@ def _draw_panel(axis: plt.Axes, title: str, unit: str, data: dict[str, float]) -
     x0, x1 = _xlim(data)
     zero_in_view = x0 < 0 < x1
 
-    # Cluster CI: thick bar, slight upward offset.
-    y_cl = 0.10
+    # Both CIs sit below the marker so the value label stays clear above.
+    # Cluster (main): thick. HC3 (robustness): thin, lower.
+    y_pt = 0.08
+    y_cl = -0.02
+    y_hc = -0.14
+
     axis.plot(
         [data["cl_lo"], data["cl_hi"]],
         [y_cl, y_cl],
         color=COLOR,
-        lw=3.6,
+        lw=3.8,
         solid_capstyle="butt",
         zorder=2,
     )
     axis.plot(
         [data["cl_lo"], data["cl_lo"]],
-        [y_cl - 0.055, y_cl + 0.055],
+        [y_cl - 0.05, y_cl + 0.05],
         color=COLOR,
-        lw=2.1,
+        lw=2.2,
         zorder=2,
     )
     axis.plot(
         [data["cl_hi"], data["cl_hi"]],
-        [y_cl - 0.055, y_cl + 0.055],
+        [y_cl - 0.05, y_cl + 0.05],
         color=COLOR,
-        lw=2.1,
+        lw=2.2,
         zorder=2,
     )
 
-    # HC3 CI: thin bar, slight downward offset so both remain visible.
-    y_hc = -0.10
     axis.plot(
         [data["hc_lo"], data["hc_hi"]],
         [y_hc, y_hc],
         color=COLOR,
-        lw=1.4,
+        lw=1.5,
         solid_capstyle="butt",
         zorder=3,
     )
@@ -98,24 +100,23 @@ def _draw_panel(axis: plt.Axes, title: str, unit: str, data: dict[str, float]) -
         [data["hc_lo"], data["hc_lo"]],
         [y_hc - 0.04, y_hc + 0.04],
         color=COLOR,
-        lw=1.15,
+        lw=1.2,
         zorder=3,
     )
     axis.plot(
         [data["hc_hi"], data["hc_hi"]],
         [y_hc - 0.04, y_hc + 0.04],
         color=COLOR,
-        lw=1.15,
+        lw=1.2,
         zorder=3,
     )
 
-    axis.plot(data["estimate"], 0.0, "o", color=COLOR, ms=7.5, zorder=4)
+    axis.plot(data["estimate"], y_pt, "o", color=COLOR, ms=7.5, zorder=4)
 
-    # Point label above the marker; keep clear of both CI bars.
     axis.annotate(
         f"{data['estimate']:.2f}",
-        xy=(data["estimate"], 0.0),
-        xytext=(0, 10),
+        xy=(data["estimate"], y_pt),
+        xytext=(0, 7),
         textcoords="offset points",
         ha="center",
         va="bottom",
@@ -131,7 +132,7 @@ def _draw_panel(axis: plt.Axes, title: str, unit: str, data: dict[str, float]) -
         xlabel = f"{unit}  (reference = 0)"
 
     axis.set_xlim(x0, x1)
-    axis.set_ylim(-0.32, 0.42)
+    axis.set_ylim(-0.28, 0.36)
     axis.set_yticks([])
     axis.set_title(title, fontsize=9, color=COLOR, pad=4)
     axis.set_xlabel(xlabel, fontsize=8)
