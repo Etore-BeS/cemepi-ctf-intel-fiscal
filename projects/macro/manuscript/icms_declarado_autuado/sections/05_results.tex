@@ -431,7 +431,8 @@ The assessed $R^2$ is 0.019 and the declared $R^2$ is 0.0014.
 \end{table}
 
 \clearpage
-Table~\ref{tab:secsize-payment}, Table~\ref{tab:secsize-mixed}, Table~\ref{tab:secsize-quantile} and Table~\ref{tab:secsize-recovery} report the section and size coefficients.
+Table~\ref{tab:secsize-payment}, Table~\ref{tab:secsize-mixed}, Table~\ref{tab:secsize-quantile} and Table~\ref{tab:secsize-recovery} report the section and size coefficients discussed below.
+Tables~\ref{tab:app-secsize-payment}, \ref{tab:app-secsize-mixed}, \ref{tab:app-secsize-quantile} and \ref{tab:app-secsize-recovery} in the Online Appendix report the full coefficient lists.
 
 \input{tables/tab_secsize_payment}
 \input{tables/tab_secsize_mixed}
@@ -479,26 +480,21 @@ In the declared municipal complement both size point estimates are negative (Tab
 \subsection{Origin, payment occurrence and the paid-to-balance ratio}\label{sec:origin-models}
 
 Table~\ref{tab:logit-ame} reports the average marginal effect of assessed origin on the probability of any payment.
+Table~\ref{tab:app-logit-ame} in the Online Appendix reports the same effect with certificate and firm counts.
 The unit is percentage points.
 Declared origin is the reference.
 The main interval uses standard errors clustered by the eight-digit firm key.
 The HC3 interval is the robustness column.
 The controls are log stock, debt age, enrolment-year indicators, CNAE section, firm size and firm age.
 The point estimate is positive.
-Figure~\ref{fig:logit-ame} plots the same effect under both variance estimators.
+Figure~\ref{fig:origin-contrasts} panel~(a) plots the same effect under both variance estimators.
 The horizontal axis is the effect in percentage points.
-The vertical axis distinguishes the cluster interval from the HC3 interval.
-The marker is the point estimate and the bar is the 95 percent interval.
+The marker is the point estimate.
+The thick bar is the cluster 95~percent interval and the thin bar is the HC3 95~percent interval.
 
-\textbf{[DISCUTIR E ESCREVER: Redigir a leitura do efeito marginal médio da origem autuada sobre qualquer pagamento. | Contexto: a subseção já fixa a unidade em pontos percentuais, a referência declarada, os controles e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada se associa a mais ocorrência de pagamento depois desses controles. | Dados necessários: Table~\ref{tab:logit-ame}, linha Assessed (declared reference), colunas AME (pp), Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:logit-ame}.]}
+\textbf{[DISCUTIR E ESCREVER: Redigir a leitura do efeito marginal médio da origem autuada sobre qualquer pagamento. | Contexto: a subseção já fixa a unidade em pontos percentuais, a referência declarada, os controles e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada se associa a mais ocorrência de pagamento depois desses controles. | Dados necessários: Table~\ref{tab:logit-ame}, linha Assessed (declared reference), colunas AME (pp), Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:origin-contrasts}, panel~(a); Table~\ref{tab:app-logit-ame}.]}
 
 \input{tables/tab_logit_origin_ame}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.72\textwidth]{figures/fig_logit_origin_ame.png}
-\caption{Average marginal effect of assessed origin on any payment, in percentage points. Declared origin is the reference. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator.}\label{fig:logit-ame}
-\end{figure}
 
 Table~\ref{tab:within-firm} reports the within-firm difference in the probability of any payment.
 The sample is firms that hold at least one declared certificate and at least one assessed certificate.
@@ -507,17 +503,11 @@ The estimate is a linear probability model with a firm fixed effect, in percenta
 The main interval is clustered by the firm.
 The HC3 interval is the robustness column.
 The point estimate is positive.
-Figure~\ref{fig:within-firm} uses the same axes as Figure~\ref{fig:logit-ame}, with the within-firm difference on the horizontal axis.
+Figure~\ref{fig:origin-contrasts} panel~(b) uses the same interval design as panel~(a), with the within-firm difference on the horizontal axis.
 
-\textbf{[DISCUTIR E ESCREVER: Redigir a leitura da diferença dentro da firma na probabilidade de qualquer pagamento. | Contexto: a subseção já define a amostra de firmas com as duas origens, o modelo linear com efeito fixo e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada ainda se associa a mais pagamento quando a comparação é dentro da mesma firma. | Dados necessários: Table~\ref{tab:within-firm}, linha Assessed (declared reference), colunas Difference (pp), Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:within-firm}.]}
+\textbf{[DISCUTIR E ESCREVER: Redigir a leitura da diferença dentro da firma na probabilidade de qualquer pagamento. | Contexto: a subseção já define a amostra de firmas com as duas origens, o modelo linear com efeito fixo e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada ainda se associa a mais pagamento quando a comparação é dentro da mesma firma. | Dados necessários: Table~\ref{tab:within-firm}, linha Assessed (declared reference), colunas Difference (pp), Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:origin-contrasts}, panel~(b).]}
 
 \input{tables/tab_within_firm_logit}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.72\textwidth]{figures/fig_within_firm.png}
-\caption{Within-firm difference in the probability of any payment, in percentage points. The sample is firms with both origins. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator.}\label{fig:within-firm}
-\end{figure}
 
 Table~\ref{tab:recovery-pct} reports the estimated percentage difference in expected payments per real of stock.
 Assessed origin is compared with declared origin.
@@ -525,15 +515,25 @@ The main interval is clustered by the eight-digit firm key.
 The HC3 interval is the robustness column.
 The point estimate is negative.
 The quantile regression of log stock in Table~\ref{tab:quantile} remains the stock equation.
-Figure~\ref{fig:recovery-pct} plots the percentage difference.
-Its horizontal axis is the percentage difference and its vertical axis distinguishes the two variance estimators.
+Figure~\ref{fig:origin-contrasts} panel~(c) plots the percentage difference.
+Its horizontal axis is the percentage difference.
+The thick bar is the cluster interval and the thin bar is the HC3 interval.
 
-\textbf{[DISCUTIR E ESCREVER: Redigir a leitura da diferença percentual no pagamento esperado por real de saldo. | Contexto: a subseção já separa essa equação da regressão quantílica de log saldo, fixa a referência declarada e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada se associa a menos reais por real de saldo, sem substituir a equação de estoque. | Dados necessários: Table~\ref{tab:recovery-pct}, linha Assessed (declared reference), colunas Percent difference, Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:recovery-pct}; Table~\ref{tab:quantile}, linhas de idade da dívida, como equação de estoque que não é substituída.]}
+\textbf{[DISCUTIR E ESCREVER: Redigir a leitura da diferença percentual no pagamento esperado por real de saldo. | Contexto: a subseção já separa essa equação da regressão quantílica de log saldo, fixa a referência declarada e os dois estimadores de variância, e só registra o sinal da estimativa pontual; falta dizer se a origem autuada se associa a menos reais por real de saldo, sem substituir a equação de estoque. | Dados necessários: Table~\ref{tab:recovery-pct}, linha Assessed (declared reference), colunas Percent difference, Cluster low, Cluster high, HC3 low, HC3 high, Certificates e Firms; Figure~\ref{fig:origin-contrasts}, panel~(c); Table~\ref{tab:quantile}, linhas de idade da dívida, como equação de estoque que não é substituída.]}
 
 \input{tables/tab_recovery_pct}
 
-\begin{figure}[t]
+\clearpage
+\begin{figure}[H]
 \centering
-\includegraphics[width=0.72\textwidth]{figures/fig_recovery_pct.png}
-\caption{Percentage difference in expected payments per real of stock, assessed origin relative to declared origin. The marker is the point estimate. The bar is the 95 percent interval. Cluster is the main variance estimator and HC3 is the robustness estimator. The quantile regression of log stock is a separate equation.}\label{fig:recovery-pct}
+\includegraphics[width=\textwidth]{figures/fig_origin_contrasts.png}
+\caption{Assessed origin relative to declared origin under cluster and HC3 95~percent intervals.
+Panel~(a) is the average marginal effect on any payment, in percentage points.
+Panel~(b) is the within-firm difference in the probability of any payment, in percentage points.
+Panel~(c) is the percentage difference in expected payments per real of stock.
+Declared origin is the reference.
+The marker is the point estimate, with the value labelled.
+The thick bar is the cluster interval and the thin bar is the HC3 interval.
+The quantile regression of log stock is a separate equation.}\label{fig:origin-contrasts}
 \end{figure}
+\clearpage
