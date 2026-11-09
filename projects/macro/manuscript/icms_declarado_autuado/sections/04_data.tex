@@ -235,11 +235,10 @@ Section, size and firm age are the firm characteristics recorded on the register
 The register is observed after the debts and after the payments, so these controls have the timing caveat stated above.
 Trade (section G) is the reference activity and micro (size code 01) is the reference size when those levels are in the sample.
 A level with fewer than five firms is pooled.
+Cohort and CNAE levels with fewer than 20 certificates, or with a constant outcome, were merged before the fit (cohorts 1973 to 1978 into \texttt{<=1978}; CNAE sections O and T into other), and the collinear unknown-size dummy and the missing-firm-age indicator were dropped.
 Counts of 1 to 4 are not printed.
 Table~\ref{tab:logit-ame} reports the average marginal effect.
 Figure~\ref{fig:logit-ame} plots the same effect.
-
-\input{tables/tab_logit_origin_ame}
 
 The paid-to-balance outcome uses the payment amount with the stock as the exposure.
 \begin{equation}
@@ -280,9 +279,10 @@ The HC3 interval on the within regression is the robustness column.
 Table~\ref{tab:within-firm} reports the estimate.
 Figure~\ref{fig:within-firm} plots it.
 
-\input{tables/tab_within_firm_logit}
-
-\textbf{[DISCUTIR E ESCREVER: mecanismos condicionados a dados de protesto, ajuizamento e situacao processual]}
+\paragraph{Limitations.}
+Protest status in these data is the current status only, not the history of protest.
+The \texttt{AJUIZAMENTO} table covers about 69.7 percent of the debts recorded as filed in court.
+We have no firm-level credit or liquidity data, so the mechanisms behind the gap are not identified.
 
 \subsection{Robustness Tests}\label{sec:robustness}
 
@@ -290,5 +290,3 @@ A sensitivity sample for the stock equation drops the largest 1~percent of the e
 The linear recovery equation remains only as a comparison with the payment logit.
 For the origin logit, the within-firm comparison and the paid-to-balance model, the clustered interval is the main interval and the HC3 interval is the robustness column.
 Table~\ref{tab:recovery-pct} reports the percentage difference.
-
-\input{tables/tab_recovery_pct}

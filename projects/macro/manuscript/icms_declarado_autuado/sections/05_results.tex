@@ -1,26 +1,20 @@
 \section{Results}\label{sec:results}
 
-\textbf{[DISCUTIR E ESCREVER: cada tabela com uma infer\^encia; tirar do texto os n\'umeros que j\'a est\~ao nas tabelas.]}
-
 \subsection{Size, payment and recovery}\label{sec:size}
 
 Assessed debt is the value. Declared debt is the count.
 Table~\ref{tab:profile} puts the two segments on the same December 2025 definitions.
 Assessed certificates are few and large.
 Declared certificates are many and small.
-The median assessed certificate is \brl{}578,084 and the median declared certificate is \brl{}7,334.
-At the firm, the medians are \brl{}770,756 and \brl{}7,916.
-The rank-biserial correlation is 0.89 at the certificate and 0.74 at the firm (Table~\ref{tab:mw}).
+The medians, at the certificate and at the firm, are in Table~\ref{tab:profile}.
+The rank-biserial correlations for stock are in Table~\ref{tab:mw}.
 Both are large.
 The first expectation, that assessments would pick out larger balances, is met in the cross-section.
 The second is met as well.
-Declared debt is 97.4~percent of the two-segment certificates and 27.2~percent of the two-segment stock.
+The shares of certificates and of stock are in Table~\ref{tab:profile}.
 
 Payment and recovery do not agree.
-A payment occurs on 17.4~percent of assessed certificates and on 9.1~percent of declared certificates.
-Recovery, payments divided by the December stock, is 0.48~percent for assessed debt and 4.73~percent for declared debt.
-In reais, payments before 2026 are \brl{}5.50 billion on declared debt and \brl{}1.49 billion on assessed debt.
-Declared debt is 27.2~percent of the two-segment stock and 78.7~percent of the two-segment payments.
+Table~\ref{tab:profile} reports the share of certificates with any payment, the recovery rate, and payments before 2026.
 The third expectation was that these two rates need not rank the segments together.
 They do not.
 Some payment is more common on the assessed side.
@@ -28,12 +22,11 @@ Reais collected per real of stock are higher on the declared side, where the bal
 Figure~\ref{fig:annual} plots year-end stock and payments in the year divided by that stock, for declared debt and for assessed debt, from 2016 to 2025.
 Panel (a) is the year-end stock.
 Panel (b) is payments in the year divided by that stock.
-\textbf{[DISCUTIR E ESCREVER: redigir a ressalva sobre falhas conhecidas dos snapshots de \texttt{DEBITO} nesta figura, inclusive dezembro de 2024 parcial e linhas duplicadas em junho e julho de 2025.]}
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{figures/fig_annual_series_origin.png}
-\caption{Declared and assessed debt, 2016 to 2025. Panel (a) is year-end stock. Panel (b) is payments in the year divided by that stock.}\label{fig:annual}
+\caption{Declared and assessed debt, 2016 to 2025. Panel (a) is stock in the last complete monthly snapshot of the year, and panel (b) is payments in the year divided by that stock. Each snapshot is reduced to one row per debt identifier before aggregation. A month is complete when it is present and its certificate count is at least 80 percent of the centred seven-month median, so 2024 uses the last complete month rather than the partial December snapshot.}\label{fig:annual}
 \end{figure}
 
 \begin{table}[t]
@@ -44,7 +37,7 @@ Panel (b) is payments in the year divided by that stock.
 & Declared & Assessed \\
 \midrule
 Certificates & 2,257,189 & 59,542 \\
-Firms (CNPJ root) & 177,682 & 30,005 \\
+Firms (eight-digit root) & 177,682 & 30,005 \\
 Stock (\brl{} billion) & 116.42 & 311.40 \\
 Median certificate (\brl{}) & 7,334 & 578,084 \\
 Median firm stock (\brl{}) & 7,916 & 770,756 \\
@@ -99,28 +92,23 @@ Every $p$-value is zero at floating-point precision and is omitted.
 
 The pooled book is highly concentrated, and the concentration is an assessed tail.
 Figure~\ref{fig:lorenz} plots the Lorenz curves.
-Table~\ref{tab:top1} reports the upper tail at several cuts.
-On positive values, the pooled Gini coefficient is 0.946.
-The largest 10~percent of certificates hold 91.9~percent of the stock, the largest 5~percent hold 87.5~percent, the largest 1~percent hold 75.8~percent, and the largest 0.1~percent hold 48.5~percent.
-The largest half of certificates hold 99.4~percent.
-The curve therefore stays near zero and then rises at the right edge.
+Table~\ref{tab:top1} reports the upper tail at several cuts, including the Gini coefficient in the table note.
+The curve stays near zero and then rises at the right edge.
 
 The largest 1~percent of certificates is a natural cut in this portfolio for two reasons that point the same way, and for a third fact that limits what the cut means.
-First, on the pooled book the Lorenz curve stays close to zero over most of the distribution and rises sharply only in the extreme tail, so the largest 1~percent (23,137 certificates) already hold three quarters of the stock.
+First, on the pooled book the Lorenz curve stays close to zero over most of the distribution and rises sharply only in the extreme tail (Table~\ref{tab:top1}).
 Second, a review list of that order of magnitude is an administrative object.
-The attorney office can assign specialised collection to a set of about 23,000 certificates, and that set contains three quarters of the stock.
+The attorney office can assign specialised collection to the set in Table~\ref{tab:top1}, and that set holds the stock share reported there.
 Third, the same cut does not mean that each segment is equally concentrated.
-Inside declared debt the largest 1~percent hold 39.5~percent of declared stock, and inside assessed debt they hold 39.9~percent.
-The pooled 75.8~percent appears because assessed debt is 72.8~percent of the two-segment stock and only 2.6~percent of the certificates.
-Of the 23,137 certificates in the pooled top 1~percent, 18,230 are assessed and account for 68.8~percent of the pooled stock.
-The other 4,907 are declared and account for 7.1~percent.
+Table~\ref{tab:top1} reports the 1~percent cut inside declared debt and inside assessed debt, and the note reports how that pooled tail splits between the two segments.
+Table~\ref{tab:profile} reports the segment shares of the two-segment stock.
 The cut is therefore a description of where the money sits.
 It is not evidence that collecting those certificates would recover the stock, and it is not a within-segment law.
 
 Inside trade and inside manufacturing, the largest 1~percent of certificates still hold between 35 and 42~percent of that section's own stock.
 The within-section Gini coefficients are about 0.82 to 0.87.
-Moving down the activity classification does not reproduce the pooled 75.8~percent.
-That figure is the mixture of the two segments.
+Moving down the activity classification does not reproduce the pooled tail in Table~\ref{tab:top1}.
+That tail is the mixture of the two segments.
 
 \begin{figure}[t]
 \centering
@@ -161,16 +149,12 @@ Of the 23,137 pooled top-1~percent certificates, 18,230 are assessed and hold 68
 \subsection{Age of the debt and age of the firm}\label{sec:age}
 
 Assessed debt is older, and the firms that hold it are older.
-The median declared certificate is 4.7 years from enrolment.
-The median assessed certificate is 9.3 years.
-The rank-biserial correlation is 0.39.
-At the firm, using the stock-weighted age, the medians are 2.1 and 8.9 years and the correlation is 0.55.
-The share of stock older than 10 years is closer: 39.5~percent declared and 43.7~percent assessed.
+Certificate and firm medians, the rank-biserial correlations, and the share of stock older than 10 years are in Table~\ref{tab:profile} and Table~\ref{tab:mw}.
 The age gap is in the centre of the distribution more than in the extreme tail.
 Figure~\ref{fig:age} shows the stock shares by band.
 
 Firm age lines up in the same direction.
-The median firm is 13.4 years old on the declared side and 24.1 years old on the assessed side (rank-biserial correlation 0.45).
+The firm-age medians and the rank-biserial correlation are in Table~\ref{tab:mw}.
 Firms aged 20 years or more hold 66.3~percent of declared stock and 76.0~percent of assessed stock.
 Young firms hold little of either stock.
 This is consistent with assessment falling on established operations, and with declared debt tracking a wider filing population.
@@ -185,42 +169,35 @@ It is not a finding about survival, because we see the register once.
 \subsection{Activity, status, size, place and repeated certificates}\label{sec:firms}
 
 The activity mix differs in the stock even though the association across firms is small.
-Cram\'er's $V$ for CNAE section, on one row per firm, is 0.10 (Table~\ref{tab:attr}).
+Cram\'er's $V$ for CNAE section is in Table~\ref{tab:attr}.
 Figure~\ref{fig:section} shows why the stock can still look different.
-Trade is 45.4~percent of assessed stock and 27.6~percent of declared stock.
-Manufacturing is 34.5~percent and 50.8~percent.
-Transport is 4.6~percent and 12.5~percent.
-Information is 6.0~percent and 0.8~percent.
-Table~\ref{tab:section} reports payment and recovery for these sections.
+Table~\ref{tab:section} reports the stock shares, and payment and recovery, for manufacturing, trade, transport, information and communication, and the other sections that meet the table's stock cut.
 In each of them, the payment rate is higher for assessed certificates and the recovery rate is higher for declared certificates.
 The ranking in Section~\ref{sec:size} is not an artefact of one sector.
 
 Divisions make the same contrast more specific (Table~\ref{tab:division}).
-Wholesale trade, except motor vehicles, is 32.0~percent of assessed stock and 14.4~percent of declared stock.
-Telecommunications is 5.5~percent and 0.5~percent.
-Coke and petroleum products are 9.8~percent of declared stock and 1.4~percent of assessed stock.
-Land transport is 11.7~percent and 3.3~percent.
-Retail is large on both sides, at about 12~percent of each stock, with the same payment-versus-recovery pattern.
+Wholesale trade except motor vehicles, telecommunications, coke and petroleum products, land transport and retail are the rows with the largest combined stock.
+Retail is large on both sides, with the same payment-versus-recovery pattern.
 
 Registry status is the stronger categorical difference.
-$V$ is 0.25.
+Table~\ref{tab:attr} reports Cram\'er's $V$.
 Active firms hold 74.4~percent of declared stock and 52.9~percent of assessed stock.
 Closed firms hold 9.7~percent and 24.1~percent.
 Unfit firms hold 15.2~percent and 21.7~percent (Figure~\ref{fig:status}).
-Size is milder ($V = 0.18$).
+Size is milder (Table~\ref{tab:attr}).
 Firms outside the micro and small categories hold 74.1~percent of declared stock and 81.6~percent of assessed stock.
 Small firms hold 15.3~percent and 7.6~percent.
 Legal form is similar in the stock.
-A limited company holds 77.8~percent of declared stock and 77.0~percent of assessed stock, and $V$ for legal nature is 0.12.
+$V$ for legal nature is in Table~\ref{tab:attr}.
 
-Geography is dominated by S\~ao Paulo, with a larger out-of-state share on the declared side ($V = 0.15$).
+Geography is dominated by S\~ao Paulo, with a larger out-of-state share on the declared side (Table~\ref{tab:attr}).
 S\~ao Paulo state is 95.7~percent of assessed stock and 88.0~percent of declared stock.
 Rio de Janeiro state is 1.5~percent and 8.2~percent.
 The city of S\~ao Paulo holds 27.2~percent of assessed stock and 22.5~percent of declared stock.
 The city of Rio de Janeiro holds 7.8~percent of declared stock.
 Paul\'inia, with 215 firms, holds 4.9~percent of assessed stock.
 
-Repeated enrolment is common, and it is not the same fact in the two segments ($V = 0.26$ on the firm-by-segment table).
+Repeated enrolment is common, and it is not the same fact in the two segments (Table~\ref{tab:attr}).
 On the declared side, 119,833 firms have two or more certificates.
 They are 67.4~percent of declared firms and hold 99.2~percent of declared stock.
 On the assessed side, 9,565 firms have two or more certificates.
@@ -252,7 +229,7 @@ Repeated enrolment & 207,687 & 0.26 \\
 \begin{minipage}{0.95\textwidth}
 \footnotesize
 Notes: Chi-square tests on firm counts.
-Except for repeated enrolment, each CNPJ root is placed in the segment that holds more of its stock.
+Except for repeated enrolment, each eight-digit firm key is placed in the segment that holds more of its stock.
 The repeated-enrolment row counts a firm once in each segment in which it has a certificate.
 Every $p$-value is zero at floating-point precision.
 \end{minipage}
@@ -361,11 +338,10 @@ That share does not select the mixed logit.
 
 Those equations are fit on this cross-section.
 Both payment logits converge, and both designs have full column rank.
-The declared logit uses 39,972 certificates.
-That count is a cap of 40,000, minus 7 certificates dropped with a small pool and 21 dropped with a separated level.
-McFadden's pseudo-$R^2$ is 0.061.
-The assessed logit uses 5,063 certificates, from 5,126 in the estimation sample, after 34 leave with a small pool and 29 leave with a separated level.
-McFadden's pseudo-$R^2$ is 0.038.
+The certificate counts are in the notes to Table~\ref{tab:secsize-payment}.
+The declared count is a cap of 40,000, minus 7 certificates dropped with a small pool and 21 dropped with a separated level.
+McFadden's pseudo-$R^2$ is 0.061 for declared debt and 0.038 for assessed debt.
+The assessed count starts from 5,126 certificates in the estimation sample, after 34 leave with a small pool and 29 leave with a separated level.
 The assessed log-stock coefficient is $-0.194$.
 The HC3 interval runs from $-0.235$ to $-0.154$, so it excludes zero.
 The spline basis coefficients are not slopes.
@@ -396,8 +372,7 @@ Table~\ref{tab:quantile} reports the debt-age coefficient in the quantile regres
 The coefficient is the change in that quantile of log stock associated with one further year of debt age, with CNAE section and firm size held fixed.
 The four values of $\tau$ are four rows.
 They are not a claim about the shape of the distribution.
-The assessed fit uses 5,092 certificates.
-The declared fit uses 19,995.
+The certificate counts are in Table~\ref{tab:quantile}.
 
 \begin{table}[t]
 \centering
@@ -426,11 +401,9 @@ There is no ordinary least squares column.
 \end{minipage}
 \end{table}
 
-Table~\ref{tab:recoveryfit} reports the linear recovery comparison.
+Table~\ref{tab:recoveryfit} reports the linear recovery comparison, including the $R^2$ values and the certificate counts in the table note.
 The outcome is the certificate ratio of payments to the December stock.
 It is not the segment recovery rate in Table~\ref{tab:profile}.
-On assessed debt the $R^2$ is 0.019 ($n = 5{,}092$).
-On declared debt the $R^2$ is 0.0014 ($n = 194{,}709$).
 
 \begin{table}[t]
 \centering
@@ -465,23 +438,61 @@ Table~\ref{tab:secsize-payment}, Table~\ref{tab:secsize-mixed}, Table~\ref{tab:s
 \input{tables/tab_secsize_quantile}
 \input{tables/tab_secsize_recovery}
 
-\textbf{[DISCUTIR E ESCREVER: quais coeficientes de se\c{c}\~ao CNAE e de porte entram no texto, e a leitura dos termos de idade e de saldo.]}
+Trade (section G) is the reference activity and micro (size code 01) is the reference size, so those levels have no coefficient.
+The paragraphs below group the high-stock sections and the size terms by the sign of the point estimate.
+The intervals stay in the tables.
+
+Manufacturing.
+In the payment logit the manufacturing point estimate is negative in both segments (Table~\ref{tab:secsize-payment}).
+In the declared municipal complement it is negative (Table~\ref{tab:secsize-mixed}).
+In the linear recovery comparison it is positive for declared debt and negative for assessed debt (Table~\ref{tab:secsize-recovery}).
+In the quantile regression of log stock the declared point estimates are positive at each reported quantile, and the assessed point estimates are positive (Table~\ref{tab:secsize-quantile}).
+
+\textbf{[DISCUTIR E ESCREVER: whether the negative manufacturing coefficients in the payment logit should be read with the positive declared manufacturing coefficient in the recovery comparison.]}
+
+Transportation and storage.
+In the payment logit the transport point estimate is positive in both segments (Table~\ref{tab:secsize-payment}).
+In the declared municipal complement it is positive (Table~\ref{tab:secsize-mixed}).
+In the linear recovery comparison it is positive for declared debt and negative for assessed debt (Table~\ref{tab:secsize-recovery}).
+In the quantile regression of log stock the declared point estimates are positive at each reported quantile, and the assessed point estimates are negative (Table~\ref{tab:secsize-quantile}).
+
+\textbf{[DISCUTIR E ESCREVER: which transport contrast to carry forward, the positive payment-logit coefficients or the negative assessed coefficients in the stock quantiles.]}
+
+Information and communication.
+In the payment logit the point estimate is positive in both segments (Table~\ref{tab:secsize-payment}).
+The section is not a row of the declared municipal complement (Table~\ref{tab:secsize-mixed}).
+In the linear recovery comparison the point estimate is positive in both segments (Table~\ref{tab:secsize-recovery}).
+In the quantile regression of log stock the point estimates are positive for declared debt and for assessed debt at each reported quantile (Table~\ref{tab:secsize-quantile}).
+
+\textbf{[DISCUTIR E ESCREVER: whether the positive information-and-communication coefficients in the quantile regression of log stock are the terms to discuss for that section.]}
+
+Firm size.
+Relative to micro firms, the small-firm and other-size point estimates are positive in the payment logit in both segments (Table~\ref{tab:secsize-payment}).
+They are positive in the linear recovery comparison in both segments (Table~\ref{tab:secsize-recovery}).
+They are positive in the quantile regression of log stock at each reported quantile (Table~\ref{tab:secsize-quantile}).
+In the declared municipal complement both size point estimates are negative (Table~\ref{tab:secsize-mixed}).
+
+\textbf{[DISCUTIR E ESCREVER: whether the positive size coefficients outside the municipal complement are the size result to carry into the discussion.]}
+
+\textbf{[DISCUTIR E ESCREVER: how to read the debt-age and log-stock terms in Table~\ref{tab:quantile} and Table~\ref{tab:recoveryfit}.]}
 
 \subsection{Origin, payment occurrence and the paid-to-balance ratio}\label{sec:origin-models}
 
 Table~\ref{tab:logit-ame} reports the average marginal effect of assessed origin on the probability of any payment.
 The unit is percentage points.
 Declared origin is the reference.
-The main interval uses standard errors clustered by the eight-digit CNPJ root.
+The main interval uses standard errors clustered by the eight-digit firm key.
 The HC3 interval is the robustness column.
 The controls are log stock, debt age, enrolment-year indicators, CNAE section, firm size and firm age.
+The point estimate is positive.
 Figure~\ref{fig:logit-ame} plots the same effect under both variance estimators.
 The horizontal axis is the effect in percentage points.
 The vertical axis distinguishes the cluster interval from the HC3 interval.
 The marker is the point estimate and the bar is the 95 percent interval.
-Read the figure as the partial association from the origin logit in this cross-section.
 
-\textbf{[DISCUTIR E ESCREVER: interpretar o efeito marginal medio da origem sobre a ocorrencia de pagamento]}
+\textbf{[DISCUTIR E ESCREVER: how to read the positive average marginal effect of assessed origin on any payment in Table~\ref{tab:logit-ame}.]}
+
+\input{tables/tab_logit_origin_ame}
 
 \begin{figure}[t]
 \centering
@@ -491,13 +502,16 @@ Read the figure as the partial association from the origin logit in this cross-s
 
 Table~\ref{tab:within-firm} reports the within-firm difference in the probability of any payment.
 The sample is firms that hold at least one declared certificate and at least one assessed certificate.
-The descriptive overlap is 11,928 firms.
+The firm count in the estimation sample is in Table~\ref{tab:within-firm}.
 The estimate is a linear probability model with a firm fixed effect, in percentage points.
 The main interval is clustered by the firm.
 The HC3 interval is the robustness column.
+The point estimate is positive.
 Figure~\ref{fig:within-firm} uses the same axes as Figure~\ref{fig:logit-ame}, with the within-firm difference on the horizontal axis.
 
-\textbf{[DISCUTIR E ESCREVER: interpretar a comparacao dentro da empresa]}
+\textbf{[DISCUTIR E ESCREVER: how to read the positive within-firm difference in Table~\ref{tab:within-firm}.]}
+
+\input{tables/tab_within_firm_logit}
 
 \begin{figure}[t]
 \centering
@@ -507,13 +521,16 @@ Figure~\ref{fig:within-firm} uses the same axes as Figure~\ref{fig:logit-ame}, w
 
 Table~\ref{tab:recovery-pct} reports the estimated percentage difference in expected payments per real of stock.
 Assessed origin is compared with declared origin.
-The main interval is clustered by the eight-digit root.
+The main interval is clustered by the eight-digit firm key.
 The HC3 interval is the robustness column.
+The point estimate is negative.
 The quantile regression of log stock in Table~\ref{tab:quantile} remains the stock equation.
 Figure~\ref{fig:recovery-pct} plots the percentage difference.
 Its horizontal axis is the percentage difference and its vertical axis distinguishes the two variance estimators.
 
-\textbf{[DISCUTIR E ESCREVER: interpretar as diferencas percentuais do pago sobre o saldo]}
+\textbf{[DISCUTIR E ESCREVER: how to read the negative percentage difference in expected payments per real of stock in Table~\ref{tab:recovery-pct}.]}
+
+\input{tables/tab_recovery_pct}
 
 \begin{figure}[t]
 \centering
