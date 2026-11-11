@@ -1,0 +1,20 @@
+name,definition,how_measured,source
+paid_flag,"1 if sum of GARE VALOR_RECEITA for the certificate is > 0 with DATA_ARRECADACAO_GARE in [2016-01-01, 2026-01-01); else 0",ARRECADACAO join in avd_origin_models._snapshot_sql,cemepi.duckdb ARRECADACAO; avd_origin_models.py
+origin,declared if TIPO_DEBITO = ICMS Declarado; assessed if TIPO_DEBITO like ICMS Autua%,December 2025 DEBITO snapshot,cemepi.duckdb DEBITO; avd_origin_models.py
+log_stock,log(1 + VALOR_SEM_HONORARIOS),prepare_population,avd_origin_models.py
+debt_age,years from DATA_INSCRICAO to 2025-12-31,date_diff day / 365.25,avd_origin_models.py
+cohort,enrolment year; thin or separating years merged (e.g. <=1978); reference chosen in prepare_population,year(DATA_INSCRICAO) then _merge_cohorts,avd_origin_models.py
+section,CNAE section at establishment match; rare sections and O/T merged into other when unstable,cnpj_enriquecido.cnae_secao,cnpj_enrich; avd_origin_models.py
+porte,RFB porte code 00/01/03/05 or unknown,cnpj_enriquecido.porte at establishment match,cnpj_enrich layouts.PORTE; avd_origin_models.py
+porte_pequena,"1 if porte in {01, 03}; else 0",porte_pequena_series,this module; alternative coding suggested in review
+firm_age,years from data_inicio_atividade to 2025-12-31,enrichment; missing opening sets firm_age_missing=1,cnpj_enrich; avd_origin_models.py
+firm_age_missing,1 if opening date missing or out of range,avd_origin_models._snapshot_sql,avd_origin_models.py
+n_cdas_firm,count of certificates of the same eight-digit root in the estimation frame,groupby root size after load; root not written,this module on the Mac run
+situacao_cadastral,"RFB situacao_cadastral; Q1 active=02, inactive=01/03/04/08",cnpj_enriquecido; PgeParams.active_code,cnpj_enrich; _impairment PgeParams; RFB 2026-03
+situacao_especial,RFB situacao_especial when present (e.g. recuperação judicial token); availability partial,enrichment column; not loaded in avd_origin_models today,cnpj_enrich data_dictionary; impairment variable_table
+municipality,"municipio from RFB enrichment (IBGE/name). Used in the lab 4.5/4.7 municipal complement, not in avd_origin_models logit",see code_facts_outcome_municipality.md,lab inferencia_avd SPEC; diagnose.REQUIRED
+has_request,certificate has a plausible instalment request date,impairment._with_semi_flag + _plausible(data_solicitacao),lab/eda/_impairment.py; SOLICITACAOPARCELAMENTO
+instalment_open,request on/before as-of and no plausible break on/before as-of,impairment.instalment_open_ids,lab/eda/_impairment.py
+instalment_broken,certificate has a plausible DATA_ROMPIMENTO,impairment._with_semi_flag + _plausible(data_rompimento),lab/eda/_impairment.py
+guaranteed,always False; no guarantee table in the extract,literal False (IMP-23),no guarantee table in the data; collectable share is understated
+root,eight-digit CNPJ root used only to cluster or demean; never written,"left(CNPJ_DEVEDOR digits, 8) inside DuckDB",avd_origin_models.py
