@@ -1,0 +1,955 @@
+"""AVD covariate inventory and construction for later partition models.
+
+Lab prep only. Does not edit the manuscript. Does not choose a stock partition
+method. Does not fit the final recoverability logits (Task 3).
+
+Reuses:
+- ``avd_origin_models`` for the December 2025 declared/assessed frame, filters,
+  and ``paid_flag`` definition.
+- ``lab/eda/_impairment.py`` (PR #9) for instalment SQL, open/broken flags,
+  ``guaranteed=False``, Q1–Q8 text, and the guarantee gap note.
+
+On the Mac that holds the extract:
+
+bash:
+  export CEMEPI_DUCKDB=/path/to/cemepi.duckdb
+  uv run python projects/macro/notebooks/articles/avd_partition_covariates/run.py
+
+fish:
+  set -x CEMEPI_DUCKDB /path/to/cemepi.duckdb
+  uv run python projects/macro/notebooks/articles/avd_partition_covariates/run.py
+
+Without the extract, ``--docs-only`` writes the inventory and methodology tables
+from the repository code and documentation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import logging
+import sys
+import tempfile
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import polars as pl
+
+HERE = Path(__file__).resolve().parent
+ARTICLES = HERE.parent
+REPO = HERE.parents[4]
+LAB_EDA = REPO / "lab" / "eda"
+
+logger = logging.getLogger("avd_partition_covariates")
+
+FORBIDDEN_COLUMNS = ("NOME_DEVEDOR", "CPF_DEVEDOR")
+BANNED_OUTPUT = {
+    "root",
+    "cnpj",
+    "cnpj_devedor",
+    "nome_devedor",
+    "cpf_devedor",
+    "id_debito",
+    "firm_key",
+}
+RFB_PORTE_CODES = {
+    "00": "NAO INFORMADO",
+    "01": "MICRO EMPRESA",
+    "03": "EMPRESA DE PEQUENO PORTE",
+    "05": "DEMAIS",
+}
+# Lívia's alternative: micro + EPP versus the rest. Not an RFB label named "individual".
+PORTE_PEQUENA_CODES = frozenset({"01", "03"})
+AS_OF = date(2025, 12, 31)
+SCHEMA_TABLES = (
+    "DEBITO",
+    "ARRECADACAO",
+    "AJUIZAMENTO",
+    "SOLICITACAOPARCELAMENTO",
+    "STATUS_PROTESTO",
+    "DEBITO_RECEITA",
+    "FATURAMENTO_MASCARADO",
+)
+
+
+def _configure_logging() -> None:
+    logger.setLevel(logging.INFO)
+    if logger.handlers or logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
+
+def _boot_paths() -> None:
+    for path in (LAB_EDA, ARTICLES):
+        text = str(path)
+        if text not in sys.path:
+            sys.path.insert(0, text)
+
+
+def load_impairment():
+    _boot_paths()
+    import _impairment as impairment
+
+    return impairment
+
+
+def load_origin_models():
+    _boot_paths()
+    path = ARTICLES / "avd_origin_models.py"
+    spec = importlib.util.spec_from_file_location("avd_origin_models", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def find_repo(start: Path | None = None) -> Path:
+    origin = start or Path.cwd()
+    for path in [origin, *origin.parents]:
+        if (path / "AGENTS.md").exists() and (path / "pyproject.toml").exists():
+            return path
+    return REPO
+
+
+def analysis_dirs(repo: Path | None = None) -> tuple[Path, Path]:
+    root = repo or find_repo()
+    base = (
+        root
+        / "projects"
+        / "macro"
+        / "notebooks"
+        / "articles"
+        / "avd_partition_covariates"
+    )
+    tables = base / "tables"
+    tables.mkdir(parents=True, exist_ok=True)
+    (base / "output").mkdir(parents=True, exist_ok=True)
+    return base, tables
+
+
+def assert_safe_sql(sql: str) -> None:
+    folded = " ".join(sql.upper().split())
+    for name in FORBIDDEN_COLUMNS:
+        if name in folded:
+            raise RuntimeError(f"The query selects {name}.")
+    if "SELECT *" in folded:
+        raise RuntimeError("The query must list columns.")
+
+
+def assert_public_frame(frame: pd.DataFrame) -> None:
+    found = BANNED_OUTPUT & {str(column).lower() for column in frame.columns}
+    if found:
+        raise RuntimeError(f"Refusing to write identifier columns: {sorted(found)}")
+
+
+def blank_count(value: float | None) -> str:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return ""
+    number = int(value)
+    if 1 <= number <= 4:
+        return ""
+    return f"{number:,}"
+
+
+def _tex_escape(value: object) -> str:
+    return (
+        str(value)
+        .replace("\\", r"\textbackslash{}")
+        .replace("_", r"\_")
+        .replace("%", r"\%")
+        .replace("&", r"\&")
+        .replace("$", r"\$")
+    )
+
+
+def write_table(
+    frame: pd.DataFrame,
+    path: Path,
+    caption: str,
+    label: str,
+    notes: str,
+) -> None:
+    assert_public_frame(frame)
+    align = "l" + "r" * max(frame.shape[1] - 1, 0)
+    if frame.shape[1] == 1:
+        align = "l"
+    header = " & ".join(_tex_escape(column) for column in frame.columns)
+    body_rows = []
+    for row in frame.itertuples(index=False):
+        body_rows.append(" & ".join(_tex_escape(value) for value in row) + r" \\")
+    body = "\n".join(body_rows)
+    tex = (
+        "% generated by avd_partition_covariates; do not edit by hand\n"
+        "\\begin{table}[t]\n\\centering\n"
+        f"\\caption{{{caption}}}\\label{{{label}}}\n"
+        f"\\begin{{tabular}}{{{align}}}\n"
+        "\\toprule\n"
+        f"{header} \\\\\n"
+        "\\midrule\n"
+        f"{body}\n"
+        "\\bottomrule\n"
+        "\\end{tabular}\n\n"
+        "\\vspace{0.4em}\n"
+        "\\begin{minipage}{0.95\\textwidth}\n"
+        "\\footnotesize\n"
+        f"{notes}\n"
+        "\\end{minipage}\n"
+        "\\end{table}\n"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(tex, encoding="utf-8")
+    frame.to_csv(path.with_suffix(".csv"), index=False)
+
+
+def porte_pequena_series(porte: pd.Series) -> pd.Series:
+    """1 if RFB porte is micro (01) or EPP (03); else 0."""
+    codes = porte.astype(str).str.zfill(2)
+    # Keep non-digit labels such as "unknown" unchanged before the membership test.
+    cleaned = porte.astype(str)
+    padded = np.where(cleaned.str.fullmatch(r"\d+"), codes, cleaned)
+    return pd.Series(padded, index=porte.index).isin(PORTE_PEQUENA_CODES).astype(int)
+
+
+def instalment_flags_by_cda(
+    cdas: pl.DataFrame,
+    instalments: pl.DataFrame,
+    *,
+    ref: date = AS_OF,
+) -> pl.DataFrame:
+    """Reuse IMP-23 definitions: request, open, broken; guaranteed always false."""
+    impairment = load_impairment()
+    impairment.reject_person_columns(cdas)
+    impairment.reject_person_columns(instalments)
+    with_request = impairment._with_semi_flag(
+        cdas,
+        instalments,
+        impairment._plausible("data_solicitacao"),
+        "has_request",
+    )
+    with_break = impairment._with_semi_flag(
+        cdas,
+        instalments,
+        impairment._plausible("data_rompimento"),
+        "instalment_broken",
+    )
+    open_ids = impairment.instalment_open_ids(instalments, ref)
+    out = (
+        with_request.join(
+            with_break.select("id_debito", "instalment_broken"),
+            on="id_debito",
+            how="left",
+        )
+        .join(open_ids, on="id_debito", how="left")
+        .with_columns(
+            pl.col("has_request").fill_null(False),
+            pl.col("instalment_broken").fill_null(False),
+            pl.col("instalment_open").fill_null(False),
+            pl.lit(False).alias("guaranteed"),
+        )
+        .sort("id_debito")
+    )
+    return out
+
+
+def inventory_rows() -> pd.DataFrame:
+    impairment = load_impairment()
+    parcel_cols = (
+        "ID_SOLICITACAOPARCELAMENTO",
+        "DATA_SOLICITACAO",
+        "STATUS_PARCELAMENTO",
+        "DATA_ROMPIMENTO",
+        "QTD_PARCELAS",
+        "TIPO_PARCELAMENTO",
+        "VIGENCIA_PARCELAMENTO",
+        "REGRA_PARCELAMENTO",
+        "ID_DEBITO",
+        "DT_INSCRICAO",
+        "DT_CONSULTA",
+    )
+    return pd.DataFrame(
+        [
+            {
+                "topic": "parcelamento",
+                "present": True,
+                "source": "SOLICITACAOPARCELAMENTO",
+                "columns": ", ".join(parcel_cols),
+                "construction": (
+                    "has_request = plausible DATA_SOLICITACAO; "
+                    "instalment_open = request on/before as-of with no plausible "
+                    "DATA_ROMPIMENTO on/before as-of (impairment.instalment_open_ids); "
+                    "instalment_broken = plausible DATA_ROMPIMENTO; "
+                    "STATUS_PARCELAMENTO is extraction-time, not dated"
+                ),
+                "note": (
+                    "lab/eda/2026-11-04_instalments_protest.qmd and "
+                    "lab/eda/_impairment.py (PR #9). Status is at extraction."
+                ),
+                "q_points": "Q4 instalment branch; Q1–Q8 printed by assumptions_text",
+            },
+            {
+                "topic": "garantia",
+                "present": False,
+                "source": "(none)",
+                "columns": "",
+                "construction": "guaranteed = False for every CDA",
+                "note": impairment.GUARANTEE_WARNING,
+                "q_points": (
+                    "Q4 guaranteed class is always emitted and empty; "
+                    "variable_table marks Guarantee missing"
+                ),
+            },
+            {
+                "topic": "protesto",
+                "present": True,
+                "source": "STATUS_PROTESTO",
+                "columns": (
+                    "ID_DEBITO, DT_INSCRICAO, STATUS_PROTESTO, "
+                    "DATA_PROTESTO, VALOR_PROTESTADO"
+                ),
+                "construction": "Loaded in IMP-23; not required for this prep step",
+                "note": "Same PR #9 helper. Protest status is not dated.",
+                "q_points": "availability table in 2026-11-04_impairment_variables.qmd",
+            },
+        ]
+    )
+
+
+def write_inventory(tables: Path) -> Path:
+    frame = inventory_rows()
+    path = tables / "tab_inventory_parcelamento_garantia.tex"
+    write_table(
+        frame,
+        path,
+        "Parcelamento and garantia availability in the extract.",
+        "tab:avd-inventory-parcel-garantia",
+        (
+            "Built from lab/eda/_impairment.py and the 2026-11-04 instalments and "
+            "impairment lab entries (PR #9). No personal columns. No CDA-level arrays."
+        ),
+    )
+    return path.with_suffix(".csv")
+
+
+def porte_code_rows() -> pd.DataFrame:
+    rows = [
+        {
+            "code": code,
+            "rfb_label": label,
+            "impairment_label": {
+                "00": "not informed",
+                "01": "micro",
+                "03": "small",
+                "05": "other sizes",
+            }[code],
+            "porte_pequena": int(code in PORTE_PEQUENA_CODES),
+        }
+        for code, label in RFB_PORTE_CODES.items()
+    ]
+    rows.append(
+        {
+            "code": "unknown/other",
+            "rfb_label": "not an RFB porte code (match failure or blank)",
+            "impairment_label": "other code",
+            "porte_pequena": 0,
+        }
+    )
+    return pd.DataFrame(rows)
+
+
+def write_porte_codes(tables: Path) -> Path:
+    frame = porte_code_rows()
+    path = tables / "tab_porte_codes.tex"
+    write_table(
+        frame,
+        path,
+        "RFB porte codes and the pequena indicator.",
+        "tab:avd-porte-codes",
+        (
+            "RFB layout codes from pipelines/cnpj_enrich (00/01/03/05). "
+            "porte_pequena = 1 for 01 (micro) and 03 (EPP). "
+            "There is no RFB porte level named individual; MEI or empresário "
+            "individual is a separate enrichment field, not used here."
+        ),
+    )
+    return path.with_suffix(".csv")
+
+
+def methodology_rows() -> pd.DataFrame:
+    """Document variables the current code already uses or constructs here."""
+    impairment = load_impairment()
+    return pd.DataFrame(
+        [
+            {
+                "name": "paid_flag",
+                "definition": (
+                    "1 if sum of GARE VALOR_RECEITA for the certificate is > 0 "
+                    "with DATA_ARRECADACAO_GARE in [2016-01-01, 2026-01-01); else 0"
+                ),
+                "how_measured": "ARRECADACAO join in avd_origin_models._snapshot_sql",
+                "source": "cemepi.duckdb ARRECADACAO; avd_origin_models.py",
+            },
+            {
+                "name": "origin",
+                "definition": (
+                    "declared if TIPO_DEBITO = ICMS Declarado; "
+                    "assessed if TIPO_DEBITO like ICMS Autua%"
+                ),
+                "how_measured": "December 2025 DEBITO snapshot",
+                "source": "cemepi.duckdb DEBITO; avd_origin_models.py",
+            },
+            {
+                "name": "log_stock",
+                "definition": "log(1 + VALOR_SEM_HONORARIOS)",
+                "how_measured": "prepare_population",
+                "source": "avd_origin_models.py",
+            },
+            {
+                "name": "debt_age",
+                "definition": "years from DATA_INSCRICAO to 2025-12-31",
+                "how_measured": "date_diff day / 365.25",
+                "source": "avd_origin_models.py",
+            },
+            {
+                "name": "cohort",
+                "definition": (
+                    "enrolment year; thin or separating years merged "
+                    "(e.g. <=1978); reference chosen in prepare_population"
+                ),
+                "how_measured": "year(DATA_INSCRICAO) then _merge_cohorts",
+                "source": "avd_origin_models.py",
+            },
+            {
+                "name": "section",
+                "definition": (
+                    "CNAE section at establishment match; rare sections and "
+                    "O/T merged into other when unstable"
+                ),
+                "how_measured": "cnpj_enriquecido.cnae_secao",
+                "source": "cnpj_enrich; avd_origin_models.py",
+            },
+            {
+                "name": "porte",
+                "definition": "RFB porte code 00/01/03/05 or unknown",
+                "how_measured": "cnpj_enriquecido.porte at establishment match",
+                "source": "cnpj_enrich layouts.PORTE; avd_origin_models.py",
+            },
+            {
+                "name": "porte_pequena",
+                "definition": "1 if porte in {01, 03}; else 0",
+                "how_measured": "porte_pequena_series",
+                "source": "this module; alternative coding suggested in review",
+            },
+            {
+                "name": "firm_age",
+                "definition": "years from data_inicio_atividade to 2025-12-31",
+                "how_measured": "enrichment; missing opening sets firm_age_missing=1",
+                "source": "cnpj_enrich; avd_origin_models.py",
+            },
+            {
+                "name": "firm_age_missing",
+                "definition": "1 if opening date missing or out of range",
+                "how_measured": "avd_origin_models._snapshot_sql",
+                "source": "avd_origin_models.py",
+            },
+            {
+                "name": "n_cdas_firm",
+                "definition": (
+                    "count of certificates of the same eight-digit root in the "
+                    "estimation frame"
+                ),
+                "how_measured": "groupby root size after load; root not written",
+                "source": "this module on the Mac run",
+            },
+            {
+                "name": "situacao_cadastral",
+                "definition": (
+                    "RFB situacao_cadastral; Q1 active=02, inactive=01/03/04/08"
+                ),
+                "how_measured": "cnpj_enriquecido; PgeParams.active_code",
+                "source": f"cnpj_enrich; _impairment PgeParams; RFB {impairment.REF_RFB}",
+            },
+            {
+                "name": "situacao_especial",
+                "definition": (
+                    "RFB situacao_especial when present "
+                    "(e.g. recuperação judicial token); availability partial"
+                ),
+                "how_measured": "enrichment column; not loaded in avd_origin_models today",
+                "source": "cnpj_enrich data_dictionary; impairment variable_table",
+            },
+            {
+                "name": "municipality",
+                "definition": (
+                    "municipio from RFB enrichment (IBGE/name). Used in the lab "
+                    "4.5/4.7 municipal complement, not in avd_origin_models logit"
+                ),
+                "how_measured": "see code_facts_outcome_municipality.md",
+                "source": "lab inferencia_avd SPEC; diagnose.REQUIRED",
+            },
+            {
+                "name": "has_request",
+                "definition": "certificate has a plausible instalment request date",
+                "how_measured": "impairment._with_semi_flag + _plausible(data_solicitacao)",
+                "source": "lab/eda/_impairment.py; SOLICITACAOPARCELAMENTO",
+            },
+            {
+                "name": "instalment_open",
+                "definition": (
+                    "request on/before as-of and no plausible break on/before as-of"
+                ),
+                "how_measured": "impairment.instalment_open_ids",
+                "source": "lab/eda/_impairment.py",
+            },
+            {
+                "name": "instalment_broken",
+                "definition": "certificate has a plausible DATA_ROMPIMENTO",
+                "how_measured": "impairment._with_semi_flag + _plausible(data_rompimento)",
+                "source": "lab/eda/_impairment.py",
+            },
+            {
+                "name": "guaranteed",
+                "definition": "always False; no guarantee table in the extract",
+                "how_measured": "literal False (IMP-23)",
+                "source": impairment.GUARANTEE_WARNING,
+            },
+            {
+                "name": "root",
+                "definition": (
+                    "eight-digit CNPJ root used only to cluster or demean; never written"
+                ),
+                "how_measured": "left(CNPJ_DEVEDOR digits, 8) inside DuckDB",
+                "source": "avd_origin_models.py",
+            },
+        ]
+    )
+
+
+def write_methodology_table(tables: Path) -> tuple[Path, Path]:
+    frame = methodology_rows()
+    path = tables / "tab_variables_methodology.tex"
+    write_table(
+        frame,
+        path,
+        "Variables available for the AVD logit specification prep.",
+        "tab:avd-variables-methodology",
+        (
+            "Definitions follow avd_origin_models.py and lab/eda/_impairment.py. "
+            "No estimated coefficients. Counts 1 to 4 are suppressed in Mac outputs."
+        ),
+    )
+    return path.with_suffix(".csv"), path
+
+
+def write_code_facts(base: Path) -> Path:
+    """Document how the current code treats the outcome and municipality."""
+    impairment = load_impairment()
+    text = f"""# Code facts: outcome and municipality (no new method choice)
+
+This note records how the repository code treats the dependent variable and
+municipality today. It does not propose a new specification.
+
+## Dependent variable in the origin logit (`avd_origin_models.py`)
+
+- Name in the frame: `paid_flag`.
+- Construction: for each certificate in the December 2025 legal-entity ICMS
+  snapshot, sum `ARRECADACAO.VALOR_RECEITA` with
+  `DATA_ARRECADACAO_GARE` in `[2016-01-01, 2026-01-01)`.
+- Coding: `1` if the sum is greater than zero, else `0`.
+- The manuscript text describes this as any GARE payment through 31/12/2025
+  for the payment window used by the script (`PAY_END = 2026-01-01`).
+- The firm key (`root`) is used only for clustered covariance. It is never written.
+
+## Municipality in the current stack
+
+- `avd_origin_models.py` (tables that feed the manuscript origin AME / within /
+  recovery contrasts): the design has **no** municipality term. Controls are
+  log stock, debt age, firm age, missing-opening, enrolment year, CNAE section
+  and porte.
+- Lab section 4.5 / 4.7 (`lab/eda/2026-11-04_diagnostico_linearidade` and
+  `lab/eda/2026-11-04_inferencia_avd`): `municipality` is a required column of
+  the estimation frame. For **declared** debt the selected complement is a
+  binomial mixed logit with a **random intercept by municipality** on a
+  cluster sample of municipalities. For **assessed** debt the printed SPEC
+  sets `random_intercept` to `None`. The moment ICC screen that selected that
+  complement is stored in `infer.SPEC` and is not re-estimated here.
+- Enrichment source for a municipality field when loaded: RFB
+  `cnpj_enriquecido` (`municipio_ibge` / name / UF), register `{impairment.REF_RFB}`.
+
+## Q1–Q8 (IMP-23)
+
+The open-point defaults live in `lab/eda/_impairment.PgeParams` and are printed
+by `assumptions_text`. Guaranteed class: always empty
+({impairment.GUARANTEE_WARNING}).
+
+## Task 3
+
+Final logits by the partition Étore chooses are not run in this module.
+See `task3/README.md`.
+"""
+    path = base / "code_facts_outcome_municipality.md"
+    path.write_text(text, encoding="utf-8")
+    q_path = base / "q1_q8_assumptions.txt"
+    q_path.write_text(
+        impairment.assumptions_text(impairment.PgeParams(), synthetic=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def schema_sql() -> str:
+    tables = ", ".join(f"'{name}'" for name in SCHEMA_TABLES)
+    sql = f"""
+        SELECT table_name, column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema = 'src'
+          AND table_name IN ({tables})
+        ORDER BY table_name, ordinal_position
+    """
+    assert_safe_sql(sql)
+    return sql
+
+
+def firm_enrichment_sql(enrichment_glob: str) -> str:
+    sql = f"""
+        CREATE OR REPLACE TEMP TABLE avd_firm_ext AS
+        SELECT
+            cnpj,
+            match_nivel,
+            cnae_secao,
+            porte,
+            data_inicio_atividade,
+            situacao_cadastral,
+            situacao_especial,
+            municipio_ibge,
+            municipio_nome,
+            uf
+        FROM read_parquet('{enrichment_glob}')
+    """
+    assert_safe_sql(sql)
+    return sql
+
+
+def extended_snapshot_sql() -> str:
+    """Same population as avd_origin_models, plus enrichment and instalment flags."""
+    origin = load_origin_models()
+    impairment = load_impairment()
+    sql = f"""
+        WITH raw AS (
+            SELECT
+                ID_DEBITO,
+                CASE
+                    WHEN TIPO_DEBITO = 'ICMS Declarado' THEN 'declared'
+                    WHEN TIPO_DEBITO LIKE 'ICMS Autua%' THEN 'assessed'
+                END AS origin,
+                VALOR_SEM_HONORARIOS AS stock,
+                CASE
+                    WHEN TRY_CAST(LEFT(DATA_INSCRICAO, 10) AS DATE)
+                         BETWEEN DATE '{origin.ENROL_MIN}' AND DATE '{origin.AS_OF}'
+                    THEN date_diff(
+                        'day',
+                        TRY_CAST(LEFT(DATA_INSCRICAO, 10) AS DATE),
+                        DATE '{origin.AS_OF}'
+                    ) / 365.25
+                END AS debt_age,
+                CASE
+                    WHEN TRY_CAST(LEFT(DATA_INSCRICAO, 10) AS DATE)
+                         BETWEEN DATE '{origin.ENROL_MIN}' AND DATE '{origin.AS_OF}'
+                    THEN CAST(year(TRY_CAST(LEFT(DATA_INSCRICAO, 10) AS DATE)) AS VARCHAR)
+                    ELSE 'unknown'
+                END AS cohort,
+                nullif(
+                    left(regexp_replace(coalesce(CNPJ_DEVEDOR, ''), '[^0-9]', '', 'g'), 8),
+                    ''
+                ) AS root,
+                CASE
+                    WHEN regexp_full_match(
+                        regexp_replace(upper(CAST(CNPJ_DEVEDOR AS VARCHAR)), '[^0-9A-Z]', '', 'g'),
+                        '[0-9]{{12,13}}'
+                    )
+                    THEN lpad(
+                        regexp_replace(upper(CAST(CNPJ_DEVEDOR AS VARCHAR)), '[^0-9A-Z]', '', 'g'),
+                        14, '0'
+                    )
+                    ELSE nullif(
+                        regexp_replace(
+                            upper(CAST(CNPJ_DEVEDOR AS VARCHAR)), '[^0-9A-Z]', '', 'g'
+                        ),
+                        ''
+                    )
+                END AS cnpj
+            FROM src.DEBITO
+            WHERE ANO_EXTRACAO = 2025
+              AND MES_EXTRACAO = 12
+              AND TIPO_DEBITO IN (
+                  'ICMS Declarado', 'ICMS Autuação', 'ICMS Autuação Simples Nacional'
+              )
+              AND VALOR_SEM_HONORARIOS > 0
+        ),
+        one AS (
+            SELECT origin, stock, debt_age, cohort, root, cnpj, ID_DEBITO
+            FROM raw
+            WHERE length(cnpj) = 14
+            QUALIFY row_number() OVER (
+                PARTITION BY ID_DEBITO ORDER BY stock DESC
+            ) = 1
+        ),
+        pay AS (
+            SELECT ID_DEBITO, sum(VALOR_RECEITA) AS paid
+            FROM src.ARRECADACAO
+            WHERE DATA_ARRECADACAO_GARE >= TIMESTAMP '{origin.PAY_START}'
+              AND DATA_ARRECADACAO_GARE < TIMESTAMP '{origin.PAY_END}'
+            GROUP BY ID_DEBITO
+        ),
+        inst AS (
+            SELECT
+                ID_DEBITO,
+                MAX(
+                    CASE
+                        WHEN DATA_SOLICITACAO IS NOT NULL
+                             AND CAST(DATA_SOLICITACAO AS DATE)
+                                 BETWEEN DATE '{impairment.FIRST_YEAR}-01-01'
+                                     AND DATE '{impairment.LAST_YEAR}-12-31'
+                        THEN 1 ELSE 0
+                    END
+                ) AS has_request,
+                MAX(
+                    CASE
+                        WHEN DATA_ROMPIMENTO IS NOT NULL
+                             AND CAST(DATA_ROMPIMENTO AS DATE)
+                                 BETWEEN DATE '{impairment.FIRST_YEAR}-01-01'
+                                     AND DATE '{impairment.LAST_YEAR}-12-31'
+                        THEN 1 ELSE 0
+                    END
+                ) AS instalment_broken,
+                MAX(
+                    CASE
+                        WHEN DATA_SOLICITACAO IS NOT NULL
+                             AND CAST(DATA_SOLICITACAO AS DATE)
+                                 BETWEEN DATE '{impairment.FIRST_YEAR}-01-01'
+                                     AND DATE '{impairment.LAST_YEAR}-12-31'
+                             AND CAST(DATA_SOLICITACAO AS DATE) <= DATE '{AS_OF.isoformat()}'
+                             AND (
+                                 DATA_ROMPIMENTO IS NULL
+                                 OR CAST(DATA_ROMPIMENTO AS DATE) < DATE '{impairment.FIRST_YEAR}-01-01'
+                                 OR CAST(DATA_ROMPIMENTO AS DATE) > DATE '{impairment.LAST_YEAR}-12-31'
+                                 OR CAST(DATA_ROMPIMENTO AS DATE) > DATE '{AS_OF.isoformat()}'
+                             )
+                        THEN 1 ELSE 0
+                    END
+                ) AS instalment_open
+            FROM src.SOLICITACAOPARCELAMENTO
+            GROUP BY ID_DEBITO
+        )
+        SELECT
+            one.origin,
+            one.stock,
+            coalesce(pay.paid, 0) AS paid,
+            CASE WHEN coalesce(pay.paid, 0) > 0 THEN 1 ELSE 0 END AS paid_flag,
+            one.debt_age,
+            one.cohort,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento' AND firm.cnae_secao IS NOT NULL
+                THEN firm.cnae_secao ELSE 'unknown'
+            END AS section,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                     AND firm.porte IS NOT NULL AND firm.porte <> ''
+                THEN firm.porte ELSE 'unknown'
+            END AS porte,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                     AND firm.data_inicio_atividade BETWEEN DATE '{origin.OPEN_MIN}'
+                         AND DATE '{origin.AS_OF}'
+                THEN date_diff('day', firm.data_inicio_atividade, DATE '{origin.AS_OF}') / 365.25
+                ELSE 0
+            END AS firm_age,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                     AND firm.data_inicio_atividade BETWEEN DATE '{origin.OPEN_MIN}'
+                         AND DATE '{origin.AS_OF}'
+                THEN 0 ELSE 1
+            END AS firm_age_missing,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                     AND firm.situacao_cadastral IS NOT NULL
+                THEN firm.situacao_cadastral ELSE 'unknown'
+            END AS situacao_cadastral,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                THEN coalesce(nullif(firm.situacao_especial, ''), 'none')
+                ELSE 'unknown'
+            END AS situacao_especial,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento'
+                     AND firm.municipio_ibge IS NOT NULL
+                THEN firm.municipio_ibge ELSE 'unknown'
+            END AS municipality,
+            CASE
+                WHEN firm.match_nivel = 'estabelecimento' AND firm.uf IS NOT NULL
+                THEN firm.uf ELSE 'NA'
+            END AS uf,
+            coalesce(inst.has_request, 0) AS has_request,
+            coalesce(inst.instalment_open, 0) AS instalment_open,
+            coalesce(inst.instalment_broken, 0) AS instalment_broken,
+            0 AS guaranteed,
+            one.root
+        FROM one
+        LEFT JOIN pay USING (ID_DEBITO)
+        LEFT JOIN inst USING (ID_DEBITO)
+        LEFT JOIN avd_firm_ext AS firm ON firm.cnpj = one.cnpj
+    """
+    assert_safe_sql(sql)
+    return sql
+
+
+def _connect_readonly():
+    import duckdb
+
+    origin = load_origin_models()
+    database = origin._database_path()
+    if not database.exists():
+        raise RuntimeError(f"Database file not found: {database.name}")
+    scratch = Path(tempfile.mkdtemp(prefix="avd_part_"))
+    # Prefer a direct read-only open; ATTACH stays read-only as in origin models.
+    connection = duckdb.connect(
+        str(database),
+        read_only=True,
+        config={
+            "memory_limit": "2500MB",
+            "threads": 4,
+            "temp_directory": str(scratch),
+            "preserve_insertion_order": False,
+        },
+    )
+    connection.execute(f"ATTACH '{database}' AS src (READ_ONLY)")
+    return connection
+
+
+def describe_schema(connection) -> pd.DataFrame:
+    frame = connection.execute(schema_sql()).df()
+    assert_public_frame(frame)
+    return frame
+
+
+def load_extended_frame(connection) -> pd.DataFrame:
+    origin = load_origin_models()
+    database = origin._database_path()
+    enrichment = origin._enrichment_dir(database)
+    glob = str(enrichment / "*.parquet").replace("'", "")
+    connection.execute(firm_enrichment_sql(glob))
+    frame = connection.execute(extended_snapshot_sql()).df()
+    frame["porte_pequena"] = porte_pequena_series(frame["porte"])
+    counts = frame.groupby("root")["root"].transform("size")
+    frame["n_cdas_firm"] = counts.astype(int)
+    # Drop identifiers before any write.
+    keep = [column for column in frame.columns if column.lower() not in BANNED_OUTPUT]
+    public = frame.loc[:, keep].copy()
+    assert_public_frame(public)
+    return public
+
+
+def aggregate_flag_counts(frame: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for origin_name, part in frame.groupby("origin", dropna=False):
+        row = {
+            "origin": origin_name,
+            "n_certificates": blank_count(len(part)),
+            "n_has_request": blank_count(int(part["has_request"].sum())),
+            "n_instalment_open": blank_count(int(part["instalment_open"].sum())),
+            "n_instalment_broken": blank_count(int(part["instalment_broken"].sum())),
+            "n_porte_pequena": blank_count(int(part["porte_pequena"].sum())),
+            "n_guaranteed": blank_count(int(part["guaranteed"].sum())),
+        }
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def run_docs_only(repo: Path | None = None) -> list[Path]:
+    _configure_logging()
+    base, tables = analysis_dirs(repo)
+    written = [
+        write_inventory(tables),
+        write_porte_codes(tables),
+        write_methodology_table(tables)[0],
+        write_code_facts(base),
+    ]
+    task3 = base / "task3" / "README.md"
+    if not task3.exists():
+        task3.write_text(
+            (
+                "# Task 3 placeholder\n\n"
+                "Final logits (paid-in-full and any-payment by the chosen "
+                "partition) wait for Étore's partition method and approval.\n"
+                "Do not run recoverability logits from this folder yet.\n"
+            ),
+            encoding="utf-8",
+        )
+        written.append(task3)
+    logger.info("Wrote documentation outputs under %s", base)
+    return written
+
+
+def run_task3_stub() -> None:
+    raise RuntimeError(
+        "Task 3 is not enabled. Wait for the partition method from Étore."
+    )
+
+
+def run_on_extract(repo: Path | None = None) -> list[Path]:
+    _configure_logging()
+    written = run_docs_only(repo)
+    base, tables = analysis_dirs(repo)
+    connection = _connect_readonly()
+    try:
+        schema = describe_schema(connection)
+        schema_path = tables / "tab_schema_describe.tex"
+        write_table(
+            schema,
+            schema_path,
+            "DuckDB schema names and types for the AVD prep tables.",
+            "tab:avd-schema-describe",
+            "Names and types only. No cell values. Connection opened read_only.",
+        )
+        written.append(schema_path.with_suffix(".csv"))
+        frame = load_extended_frame(connection)
+        cache = base / "output" / "extended_frame_public.parquet"
+        frame.to_parquet(cache, index=False)
+        written.append(cache)
+        counts = aggregate_flag_counts(frame)
+        count_path = tables / "tab_instalment_porte_counts.tex"
+        write_table(
+            counts,
+            count_path,
+            "Aggregate instalment and pequena counts by origin.",
+            "tab:avd-flag-counts",
+            "Counts from 1 to 4 are blank. No CNPJ and no CDA arrays.",
+        )
+        written.append(count_path.with_suffix(".csv"))
+    finally:
+        connection.close()
+    logger.info("Wrote extract outputs under %s", base)
+    return written
+
+
+def main(argv: list[str] | None = None) -> list[Path]:
+    parser = argparse.ArgumentParser(
+        description="AVD covariate inventory and construction (Task 2 only)."
+    )
+    parser.add_argument(
+        "--docs-only",
+        action="store_true",
+        help="Write inventory and methodology tables without opening DuckDB.",
+    )
+    args = parser.parse_args(argv)
+    if args.docs_only:
+        return run_docs_only()
+    return run_on_extract()
+
+
+if __name__ == "__main__":
+    main()
